@@ -58,6 +58,7 @@ import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fill
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
+import { createTownNet } from '../town/townNet.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
@@ -746,6 +747,7 @@ async function initCore(runtimeContext) {
   let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
   let devRoam = null; // Dev: Free Roam (Settings → Dev; created further down)
   let town = null; // Town mode (src/town/townMode.js; created further down)
+  let townNet = null; // Town's shared room (src/town/townNet.js; created with the town)
   // Multiplayer battle (Team Battle / Free For All): everyone starts with the sword and finds
   // the rest on the arena's pickups; the real inventory / stats are set aside meanwhile and
   // put back afterwards (matchCtx.startMatchLoadout / endMatchLoadout) — null outside one
@@ -1129,6 +1131,7 @@ async function initCore(runtimeContext) {
   // Game traffic only goes to the current duel opponent or the other battle players
   // (the lobby needs none)
   const _netRecipients = () => {
+    if (townNet?.isOn()) return townNet.peerIds();
     if (matchMode?.isInMatch()) return matchMode.getPeerIds();
     const opponentId = duelMode?.getOpponentId();
     return opponentId ? [opponentId] : [];
@@ -1561,7 +1564,8 @@ async function initCore(runtimeContext) {
         return;
       }
       // Only the duel opponent / battle players are shown (lobby peers stay off the map)
-      if (!duelMode?.acceptsPresenceFrom(remoteId) && !matchMode?.acceptsPresenceFrom(remoteId)) {
+      if (!duelMode?.acceptsPresenceFrom(remoteId) && !matchMode?.acceptsPresenceFrom(remoteId)
+        && !townNet?.acceptsPresenceFrom(remoteId)) {
         return;
       }
       const now = performance.now();
@@ -1587,14 +1591,15 @@ async function initCore(runtimeContext) {
       }
 
       if (!otherPlayers[remoteId]) {
-        _spawnRemotePlayer(remoteId, data.name, matchMode?.getCharacterUrl(remoteId));
+        _spawnRemotePlayer(remoteId, data.name, matchMode?.getCharacterUrl(remoteId) ?? townNet?.getCharacterUrl(remoteId));
       }
 
       const player = otherPlayers[remoteId];
       player.name = data.name;
       syncPresenceRemoteEquipment(remoteId, data);
       if (player.nameLabel) {
-        player.nameLabel.innerText = data.name;
+        // (Town: a wanted player's stars after the name)
+        player.nameLabel.innerText = data.name + (townNet?.nameSuffix(remoteId) ?? '');
       }
 
       let targetX = Number.isFinite(data.x) ? data.x : null;
@@ -1646,6 +1651,11 @@ async function initCore(runtimeContext) {
       return;
     }
 
+    if (data.type === 'town') {
+      townNet?.handleMessage(peerId, data);
+      return;
+    }
+
     if (data.type === 'match') {
       matchMode?.handleMessage(peerId, data);
       return;
@@ -1673,11 +1683,15 @@ async function initCore(runtimeContext) {
     }
   }
 
-  // Peer multiplayer only runs in Multiplayer mode (lobby + duels); Showdown and the
-  // tutorial are single player. startMultiplayer/stopMultiplayer are driven by duelMode.
-  const startMultiplayer = () => {
-    if (multiplayer) return multiplayer;
-    multiplayer = new Multiplayer(playerName, handleIncomingData, { roomId: LOBBY_ROOM_ID });
+  // Peer multiplayer only runs in Multiplayer mode (lobby + duels) and a shared Town (its room,
+  // `town-<roomId>` — townNet.js); Showdown and the tutorial are single player.
+  // startMultiplayer/stopMultiplayer are driven by duelMode and townNet.
+  const startMultiplayer = (roomId = LOBBY_ROOM_ID) => {
+    if (multiplayer) {
+      if (multiplayer.getRoomId() !== roomId) void multiplayer.joinRoom(roomId);
+      return multiplayer;
+    }
+    multiplayer = new Multiplayer(playerName, handleIncomingData, { roomId });
     window.multiplayer = multiplayer;
     if (playerControls) playerControls.multiplayer = multiplayer;
     multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
@@ -1991,7 +2005,11 @@ async function initCore(runtimeContext) {
   function _syncPhysicsGround() {
     _physicsGroundRb?.setTranslation({ x: 0, y: (_activeMap?.floor ?? 0) - 1, z: 0 }, true);
   }
-  await _setActiveMap(DEFAULT_MAP);
+  // The default map loads alongside the rest of the boot (weapons, physics, the settings panel)
+  // and is awaited once the ⚙️ button is up (see `settings-ready`), so the settings button
+  // doesn't wait on the mappack. Until then the spawn centre is set and the ground is the floor.
+  setSpawnCenter(MAPS[DEFAULT_MAP].spawn);
+  const _defaultMapReady = _setActiveMap(DEFAULT_MAP);
 
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -3655,6 +3673,7 @@ async function initCore(runtimeContext) {
   // battle's enemies (each { id, position, center, bladePoints, bladeDir, hasBlade, blocking,
   // blocksSwing?, ownBlood?, onHit(dmg, dir), onBlocked() })
   const _getPvpTargets = () => {
+    if (townNet?.isOn() && town?.isActive()) return townNet.getPvpTargets();
     if (matchMode?.isFighting()) return matchMode.getEnemyCombatants();
     const opp = duelMode?.getOpponentCombat();
     return opp ? [opp] : _noPvpTargets;
@@ -6949,6 +6968,17 @@ async function initCore(runtimeContext) {
   });
   // The gear stays hidden until the panel exists (the start screen shows it once the game loads)
   document.body.classList.add('settings-ready');
+  // Now the map (started early in initCore) — then put the player on its ground at the spawn
+  await _defaultMapReady;
+  {
+    const spawn = getSpawnPosition();
+    playerModel.position.set(spawn.x, spawn.y, spawn.z);
+    playerControls.playerX = spawn.x;
+    playerControls.playerY = spawn.y;
+    playerControls.playerZ = spawn.z;
+    playerControls.lastPosition?.set(spawn.x, spawn.y, spawn.z);
+    playerControls.body?.setTranslation({ x: spawn.x, y: spawn.y + 0.6, z: spawn.z }, true);
+  }
   const settingsOverlay = document.getElementById('settings-overlay');
   const merchantOverlay = document.getElementById('merchant-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
@@ -7581,8 +7611,9 @@ async function initCore(runtimeContext) {
     recordMultiplayerResult: _recordMultiplayerResult,
     openLeaderboard: () => openLeaderboard('mpWins'),
     getMultiplayer: () => multiplayer,
-    startMultiplayer,
-    stopMultiplayer,
+    startMultiplayer: () => startMultiplayer(),
+    // (not while a shared Town holds the connection — duelMode stops it a moment after leaving)
+    stopMultiplayer: () => { if (!townNet?.isOn()) stopMultiplayer(); },
     getPlayerName: () => playerName,
     // A sword for another fighter: the Wii sword (with ball hands) for Mii characters
     createSwordMesh: (characterUrl = null) => {
@@ -8155,7 +8186,32 @@ async function initCore(runtimeContext) {
     enemy.script = on ? { mode: 'passive' } : null;
     enemy.stationary = on;
   };
+  // Town's shared room: assignment, the connection, the other players (src/town/townNet.js)
+  townNet = createTownNet({
+    scene,
+    getMultiplayer: () => multiplayer,
+    startMultiplayer: (roomId) => startMultiplayer(roomId),
+    stopMultiplayer: () => stopMultiplayer(),
+    profileKey: () => profileNameKey,
+    getPlayerName: () => playerName || 'Player',
+    getRemoteModel: (id) => otherPlayers[id]?.model || null,
+    setRemoteCharacter: (id, url) => setPlayerCharacterUrl(otherPlayers[id]?.model, url),
+    createSwordMesh: duelCtx.createSwordMesh,
+    getLocalSwordState: duelCtx.getLocalSwordState,
+    getLocalCharacterUrl: () => playerModel.userData.qwopRig?.characterUrl ?? null,
+    getStars: () => town?.getStars() ?? 0,
+    applyPvpHit: (dmg, dir, fromId) => {
+      if (!town?.isActive() || playerDead) return;
+      town.onPvpHurt(fromId);
+      duelCtx.applyHit(dmg, dir);
+    },
+    onSwingBlocked: () => duelCtx.onSwingBlocked(),
+    onAttackPlayer: (info) => town?.onAttackPlayer(info),
+    onBounty: (name, coins) => town?.onBounty(name, coins),
+    onWorldMessage: (from, data) => town?.handleNet(from, data),
+  });
   town = createTownMode({
+    net: townNet,
     scene,
     camera,
     domElement: renderer.domElement,
@@ -9524,6 +9580,7 @@ async function initCore(runtimeContext) {
     duelMode?.update();
     devRoam?.update();
     matchMode?.update(frameDelta);
+    townNet?.update();
     if (multiplayer && _netRecipients().length && now - lastPresenceSend >= presenceSendIntervalMs) {
       const payload = {
         type: "presence",

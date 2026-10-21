@@ -13,7 +13,8 @@ const VALID_MESSAGE_TYPES = new Set([
   'presence',
   'projectile',
   'duel',
-  'match'
+  'match',
+  'town'
 ]);
 export const LOBBY_ROOM_ID = 'lobby';
 const MAX_PENDING_PAYLOADS = 75;

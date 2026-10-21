@@ -43,6 +43,18 @@
 // (pooled per model); the rest walk the same paths as data. Someone fighting the player is
 // swapped for an EnemyPlayer (ctx.spawnFighter — the stage fighting code) and back.
 //
+// Shared town (Multiplayer — ctx.net, townNet.js): everyone in a town room sees the same
+// townsfolk. The room's host runs them (the code below, as in a town of your own) and sends
+// their positions a few times a second; the others draw them (followNet). Whatever a player
+// does to someone — fights them, is followed by them, talks to them, sends them running, asks
+// the guards after themselves — that player's game claims them (take) and runs them itself
+// (the same code, against its own player) until they go back to normal life (decide → release).
+// A hit on someone another game runs goes to that game ('hit'); deaths go to the host, who
+// keeps the roster (newcomers), the clock and the market's one stock (trades are 'trade' ops).
+// Wanted stars, attitude, jobs, goods and gear are each player's own (saved per room); other
+// players' stars show over them, a hit on a player who isn't wanted is assault, and bringing
+// a wanted one down pays a bounty. With no room (offline) it's a town of your own.
+//
 // Game access goes through `ctx` (built in bootstrapGameApp.js):
 //   scene, camera, domElement, getPlayerPosition() → Vector3, setPlayerHidden(hidden),
 //   getPlayerName(), isPlayerDead()
@@ -57,6 +69,9 @@
 //   getCoins(), addCoins(delta), profileKey() → string | null, onLobby()
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
 //   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n)
+//   net (townNet.js, or null): start(), stop(), isOn(), ready(), isHost(), id(), hostId(),
+//   peerIds(), send(to, data), broadcast(data), loadRoomState(), saveRoomState(state),
+//   roomId(), canSave(), playerCount(), sendBounty(to, coins)
 
 import * as THREE from 'three';
 import { createGLBCharacterInstance, glbCharacterConfig, isMiiCharacterUrl } from '../models/glbCharacterModel.js';
@@ -195,6 +210,17 @@ const RAID_HOUR = 22;                // a guarded field is raided at this hour
 const SAVE_EVERY_S = 20;
 const SAVE_PREFIX = 'town_';
 
+// ── Shared town (Multiplayer) ──
+const NET_SEND_S = 0.25;             // townsfolk positions (host → everyone, a claimant → host)
+const NET_WORLD_S = 1;               // the clock + the market's stock
+const NET_FULL_S = 15;               // the whole town (late joiners, a new host)
+const NET_JOIN_TIMEOUT_S = 20;       // no shared town by then: a town of your own
+const NET_CLAIM_TIMEOUT_S = 10;      // a claimant not heard from: the host takes them back
+const NET_CLAIM_GRACE_S = 3;         // s a fresh claim / release waits on the host's word
+const BOUNTY_PER_STAR = 10;          // coins for bringing a wanted player down
+const PVP_CREDIT_S = 6;              // s a player's blow counts as what brought us down
+const MP_SAVE_PREFIX = 'town_mp_';   // + profile key + room: a player's own things in a shared town
+
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _UP = new THREE.Vector3(0, 1, 0);
@@ -257,6 +283,19 @@ export function createTownMode(ctx) {
   const campWatch = { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 }; // the player at the bandit camp
   let strongboxHeld = false;  // (chain: the sheriff's strongbox)
   let lastItems = null;       // the town gear, as it was when the player last left
+  // Shared town: 'off' (a town of your own), 'joining', 'host' (runs the townsfolk), 'client'
+  const net = ctx.net ?? null;
+  let netMode = 'off';
+  const netT = { send: 0, world: 0, full: 0, save: 0, label: 0 };
+  let joinUntil = 0;          // (wall clock ms)
+  let helloAt = 0;
+  let netFailed = false;
+  let netLoading = false;     // (the host loading the room's town)
+  let netSaying = false;      // (a speech bubble that came over the wire: not sent back)
+  let laidOut = false;        // layout in the scene, the player at the spawn
+  let lastPvp = null;         // { id, at } — the last player whose sword hit us
+  let pvpCrimeAt = -1e9;
+  let memoryPersonal = null;  // a guest's own things, { room, s }
 
   // ── DOM ──
   const hud = el('div', 'town-hud hidden');
@@ -344,8 +383,75 @@ export function createTownMode(ctx) {
     goods: { ...goods },
     items: ctx.getItems() ?? lastItems,
   });
+  // Shared town: the world (the host keeps it in the room — townNet.js) and the player's own
+  // things (saved per room on this device)
+  const worldSnapshot = () => ({
+    v: 1,
+    day: clock.day,
+    minutes: clock.minutes,
+    people: npcs.filter((n) => n.alive).map((n) => ({
+      id: n.id, name: n.name, role: n.role, url: n.url, home: n.homeIndex,
+      money: Math.round(n.money), carry: { ...n.carry },
+      jl: Math.max(0, Math.round(n.jailedUntil - simT)), ol: Math.max(0, Math.round(n.outlawUntil - simT)),
+    })),
+    pending: arrivals.map((a) => a.role),
+    departed,
+    nextId,
+    market: market.snapshot(),
+    at: Date.now(),
+  });
+  const personalSnapshot = () => ({
+    v: 1,
+    goods: { ...goods },
+    items: ctx.getItems() ?? lastItems,
+    att: Object.fromEntries(npcs.filter((n) => n.alive && Math.abs(n.attitude) > 0.01).map((n) => [n.id, Math.round(n.attitude * 100) / 100])),
+    vend: Object.fromEntries(npcs.filter((n) => n.alive && n.vendetta).map((n) => [n.id, n.vendettaFor || 'friend'])),
+    follow: npcs.filter((n) => n.alive && n.following && !n.escort).map((n) => n.id),
+    jobs: jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
+    nextJobId,
+    chainsDone: [...chainsDone],
+    strongboxHeld,
+  });
+  const personalKey = () => {
+    const k = ctx.profileKey();
+    const room = net?.roomId();
+    return k && room ? `${MP_SAVE_PREFIX}${k}_${room}` : null;
+  };
+  const loadPersonal = () => {
+    const key = personalKey();
+    if (key) {
+      try {
+        const s = JSON.parse(localStorage.getItem(key) || 'null');
+        if (s?.v === 1) return s;
+      } catch (_) { /* fresh */ }
+    }
+    return memoryPersonal && memoryPersonal.room === net?.roomId() ? memoryPersonal.s : null;
+  };
+  // What's the player's own in a shared town (attitude, grudges, followers) back on the townsfolk
+  const applyOwn = (own) => {
+    for (const n of npcs) {
+      n.attitude = Number(own?.att?.[n.id]) || 0;
+      const v = own?.vend?.[n.id];
+      n.vendetta = !!v;
+      n.vendettaFor = v || undefined;
+    }
+    for (const id of own?.follow ?? []) {
+      const n = npcById(id);
+      if (n && !n.def.law && !n.def.outlaw && take(n)) {
+        n.following = true;
+        setTask(n, { type: 'follow', dur: Infinity });
+      }
+    }
+  };
   const save = () => {
     if (!ready) return;
+    if (mp()) {
+      const s = personalSnapshot();
+      memoryPersonal = { room: net.roomId(), s };
+      const key = personalKey();
+      if (key) { try { localStorage.setItem(key, JSON.stringify(s)); } catch (_) { /* storage blocked */ } }
+      return;
+    }
     const state = snapshot();
     _memoryState = state;
     const key = saveKey();
@@ -684,6 +790,43 @@ export function createTownMode(ctx) {
   const playerPos = () => ctx.getPlayerPosition();
   const distToPlayer = (n) => { const p = playerPos(); return dist2(n.x, n.z, p.x, p.z); };
 
+  // ── Who runs a townsperson (shared town) ──
+  // The host runs everyone nobody's claimed; a player's game claims those it needs for its own
+  // player (take) and gives them back when they go back to normal life (release, from decide)
+  const mp = () => netMode === 'host' || netMode === 'client';
+  const isHost = () => netMode !== 'client';
+  const myId = () => net?.id() ?? null;
+  const mine = (n) => (netMode === 'client' ? n.ctrl === myId() : !n.ctrl || n.ctrl === myId());
+  const take = (n) => {
+    if (!n?.alive) return false;
+    if (mine(n)) return true;
+    if (netMode !== 'client' || n.ctrl) return false;
+    n.ctrl = myId();
+    n.claimAt = simT;
+    n.claimOk = false;
+    n.pendingHit = null;
+    n.task = null;
+    n.path = null;
+    net.send(net.hostId(), { w: 1, op: 'claim', id: n.id, st: dynOf(n) });
+    return true;
+  };
+  const release = (n) => {
+    if (netMode !== 'client' || n.ctrl !== myId()) return;
+    n.ctrl = null;
+    n.releasedAt = simT;
+    n.task = null;
+    n.path = null;
+    n.net = { x: n.x, z: n.z, yaw: n.yaw };
+    net.send(net.hostId(), { w: 1, op: 'rel', id: n.id, st: dynOf(n) });
+  };
+  // At their work (the merchant at the stall): from the task, or the host's word
+  const isWorking = (n) => (mine(n) ? n.task?.type === 'work' && n.task.phase === 'do' : !!n.netWorking);
+  // A townsperson's money changes (gifts, debts, bribes): the host keeps the books
+  const npcMoney = (n, delta) => {
+    n.money += delta;
+    if (netMode === 'client') net.send(net.hostId(), { w: 1, op: 'money', id: n.id, d: delta });
+  };
+
   // Line of sight from a townsperson's eyes to the player
   const sees = (n) => {
     const p = playerPos();
@@ -752,7 +895,7 @@ export function createTownMode(ctx) {
   // What to do next: the role's work in its hours, food when hungry, the fire when lonely,
   // bed at night, otherwise a stroll (scores + a little noise)
   const decide = (n) => {
-    if (!n.alive) return;
+    if (!n.alive || !mine(n)) return;
     const h = hour();
     const def = n.def;
     const night = h >= 21.5 || h < 6;
@@ -769,6 +912,8 @@ export function createTownMode(ctx) {
         return;
       }
     }
+    // (a claim's over: back to the host's town)
+    if (netMode === 'client') { release(n); return; }
     if (def.outlaw) { decideBandit(n, h); return; }
     // A drifter out at night may go after someone's purse
     if (n.role === 'drifter' && (h >= 21 || h < 4) && Math.random() < MUG_CHANCE && startMugging(n)) return;
@@ -846,6 +991,11 @@ export function createTownMode(ctx) {
   // ── Speech bubbles ──
   const say = (n, text, { big = false } = {}) => {
     if (text) n.lastSaid = text;
+    if (text && mp() && !netSaying && mine(n)) {
+      const msg = { w: 1, op: 'say', id: n.id, t: text, b: big ? 1 : 0 };
+      if (netMode === 'host') net.broadcast(msg);
+      else net.send(net.hostId(), msg);
+    }
     if (!n.body || !text) return;
     if (n.bubble) { n.body.container.remove(n.bubble.sprite); n.bubble.sprite.material.map?.dispose(); n.bubble.sprite.material.dispose(); }
     const sprite = makeTextSprite(text, { height: big ? 0.26 : 0.2, bg: 'rgba(255, 255, 255, 0.92)', color: '#1a1d29', border: 'rgba(14, 17, 27, 0.25)' });
@@ -939,7 +1089,7 @@ export function createTownMode(ctx) {
   // ── Fighting (a townsperson swapped for an EnemyPlayer) ──
   // (standoff: sword drawn, facing the player, not attacking until ctx.setFighterPassive(e, false))
   const promote = (n, { standoff = false } = {}) => {
-    if (n.fighter || !n.alive) return;
+    if (n.fighter || !n.alive || !take(n)) return;
     releaseBody(n);
     n.inside = false;
     const e = ctx.spawnFighter({
@@ -980,13 +1130,16 @@ export function createTownMode(ctx) {
     if (n.campStandoff) campFightAll();
     // (a follower's blow is theirs, not the player's — they only take on outlaws and townsfolk
     // already fighting the player)
-    const byPlayer = !n.followerHit;
+    // (another player's blow — shared town — isn't ours either)
+    const by = n.remoteBy ?? null;
+    const byPlayer = !n.followerHit && !by;
     n.followerHit = false;
+    n.remoteBy = null;
     if (byPlayer) n.attitude = Math.max(-1, n.attitude - 0.3);
     if (killed) {
       n.hp = 0;
       ctx.releaseFighterGear(n.fighter);
-      die(n, { byPlayer, bodyless: true });
+      die(n, { byPlayer, bodyless: true, by, noCoins: !!by });
       if (byPlayer && !isOutlaw(n)) crime('murder', n);
     } else if (byPlayer && n.def.law && law.stars < 2) {
       crime('assault', n);
@@ -996,6 +1149,12 @@ export function createTownMode(ctx) {
   // ── Hurt / death ──
   const hurt = (n, dir, amount = 1) => {
     n.lastHitAt = simT;
+    // (someone another game runs: the hit goes there — the crime is still ours)
+    if (!take(n)) { hurtRemote(n, dir, amount); return; }
+    // (a claim the host hasn't agreed to yet: if it says no, this hit goes to whoever runs them)
+    if (netMode === 'client' && !n.claimOk) {
+      n.pendingHit = { amt: (n.pendingHit?.amt ?? 0) + amount, dir: [r2(dir.x), r2(dir.z)] };
+    }
     // Kids can't be hurt: they just run off
     if (n.def.unhurt) {
       n.attitude = Math.max(-1, n.attitude - 0.3);
@@ -1032,7 +1191,8 @@ export function createTownMode(ctx) {
     }
     if (!outlaw) rally(n);
   };
-  const die = (n, { byPlayer = false, bodyless = false } = {}) => {
+  // (by: the player who did it in a shared town — their game drops the coins: noCoins)
+  const die = (n, { byPlayer = false, bodyless = false, by = null, noCoins = false } = {}) => {
     if (!n.alive) return;
     n.alive = false;
     n.moving = false;
@@ -1043,20 +1203,20 @@ export function createTownMode(ctx) {
       n.dying = { until: simT + DEAD_BODY_S };
     }
     const at = new THREE.Vector3(n.x, groundY(n) + 0.3, n.z);
-    if (n.money >= 1) ctx.dropCoins(at, Math.min(3, 1 + Math.floor(n.money / 8)));
+    if (n.money >= 1 && !noCoins) ctx.dropCoins(at, Math.min(3, 1 + Math.floor(n.money / 8)));
     endBrawl(n);
+    const killer = byPlayer ? myId() : by;
+    if (netMode === 'client') net.send(net.hostId(), { w: 1, op: 'died', id: n.id, by: killer });
+    else worldDeath(n, killer);
     if (n.def.outlaw) {
       // A bandit: the gang finds a new one in a while; no grief in town
       feedLine(`💀 ${n.name} is down.`);
-      arrivals.push({ role: n.role, at: simT + rand(...BANDIT_RETURN_S) });
       onJobDeath(n, byPlayer);
       save();
       return;
     }
     gossip.push({ kind: 'murder', who: firstName(n.name), by: byPlayer ? 'player' : null, at: simT, fresh: true });
     feedLine(`💀 ${n.name} the ${n.def.label} is dead.`);
-    arrivals.push({ role: n.role, at: simT + rand(...NEWCOMER_DELAY_S) });
-    departed = [...departed, firstName(n.name)].slice(-20);
     // Their family won't forget who did it
     if (byPlayer && !isOutlaw(n)) {
       for (const k of family(n)) {
@@ -1073,7 +1233,7 @@ export function createTownMode(ctx) {
   };
   // (from: what they run from — the player by default)
   const flee = (n, from = null) => {
-    if (!n.alive || n.fighter || n.jailedUntil > simT) return;
+    if (!n.alive || n.fighter || n.jailedUntil > simT || !take(n)) return;
     n.fear = 12;
     clearTalk(n);
     endBrawl(n);
@@ -1131,6 +1291,7 @@ export function createTownMode(ctx) {
     renderStars();
   };
   const respond = (n) => {
+    if (!take(n)) return;
     const target = { x: law.lastKnown.x, z: law.lastKnown.z };
     setTask(n, { type: 'respond', to: target, dur: 0, run: true });
     n.task.target = target;
@@ -1149,13 +1310,15 @@ export function createTownMode(ctx) {
   const updateLaw = () => {
     if (law.stars <= 0 || sequence) { law.seen = false; return; }
     const p = playerPos();
-    const officers = lawNpcs();
+    // (in a shared town: those not already busy with another player)
+    const officers = lawNpcs().filter((n) => mine(n) || (netMode === 'client' && !n.ctrl));
     // Who answers: the nearest guard at ★, the guards at ★★, everyone at ★★★
     officers.sort((a, b) => (a.role === 'sheriff') - (b.role === 'sheriff') || distToPlayer(a) - distToPlayer(b));
     const count = law.stars >= 3 ? officers.length : law.stars >= 2 ? Math.max(1, officers.filter((o) => o.role !== 'sheriff').length) : 1;
     const responders = officers.slice(0, count);
     let seen = false;
     for (const n of responders) {
+      if (!take(n)) continue;
       if (n.inside) { n.inside = false; n.x = n.home.x; n.z = n.home.z; }
       const d = distToPlayer(n);
       const sight = d < LAW_SIGHT && sees(n);
@@ -1260,7 +1423,7 @@ export function createTownMode(ctx) {
   // mode: 'mug' (the attacker takes the purse and goes), 'arrest' (a guard, until the other
   // gives up), 'fight'
   const startBrawl = (a, b, mode) => {
-    if (!a.alive || !b.alive || a.fighter || b.fighter) return;
+    if (!a.alive || !b.alive || a.fighter || b.fighter || !mine(a) || !mine(b)) return;
     a.task = { type: 'brawl', t: 0, phase: 'do', foe: b, mode, attacker: true };
     b.task = { type: 'brawl', t: 0, phase: 'do', foe: a, mode, attacker: false };
     a.path = null;
@@ -1279,7 +1442,7 @@ export function createTownMode(ctx) {
   };
   // One townsperson's blow on another
   const npcHit = (victim, attacker, amount = 1) => {
-    if (!victim.alive) return;
+    if (!victim.alive || !mine(victim)) return;
     if (victim.def.unhurt) { flee(victim, attacker); return; }
     victim.hp -= amount;
     victim.lastHurtAt = simT;
@@ -1311,7 +1474,7 @@ export function createTownMode(ctx) {
   // The nearest free guard goes to arrest an outlaw townsperson
   const sendGuard = (culprit) => {
     if (law.stars > 0 && distToPlayer(culprit) < LAW_SIGHT) return; // (busy with the player)
-    const guard = lawNpcs().filter((g) => !g.fighter && !g.inside && g.jailedUntil <= simT
+    const guard = lawNpcs().filter((g) => mine(g) && !g.fighter && !g.inside && g.jailedUntil <= simT
       && !['respond', 'search', 'arrest', 'brawl'].includes(g.task?.type))
       .sort((a, b) => dist2(a.x, a.z, culprit.x, culprit.z) - dist2(b.x, b.z, culprit.x, culprit.z))[0];
     if (!guard) return;
@@ -1334,7 +1497,7 @@ export function createTownMode(ctx) {
   };
   // A drifter (or bandit) picks someone out on their own
   const startMugging = (n) => {
-    const victim = npcs.filter((o) => o !== n && o.alive && !o.fighter && !o.inside && !o.def.law && !o.def.outlaw
+    const victim = npcs.filter((o) => o !== n && o.alive && mine(o) && !o.fighter && !o.inside && !o.def.law && !o.def.outlaw
       && !o.def.unhurt && !o.following && o.jailedUntil <= simT && o.money >= 2
       && dist2(o.x, o.z, n.x, n.z) < 28)
       .sort((a, b) => dist2(a.x, a.z, n.x, n.z) - dist2(b.x, b.z, n.x, n.z))[0];
@@ -1450,7 +1613,7 @@ export function createTownMode(ctx) {
       const took = Math.min(CAMP_ROB, ctx.getCoins());
       if (took > 0) {
         ctx.addCoins(-took);
-        (lookout ?? standing[0]).money += took;
+        npcMoney(lookout ?? standing[0], took);
         ctx.playSfx('coin');
         warn(SHOUT_CAMP_ROB);
         feedLine(`💰 The bandits took ${took} 🪙 off you.`);
@@ -1491,7 +1654,7 @@ export function createTownMode(ctx) {
   const canRecruit = (n) => n.alive && !n.following && n.attitude >= FOLLOW_ATTITUDE && !n.def.law && !n.def.outlaw
     && !n.def.unhurt && n.role !== 'merchant' && followers().length < MAX_FOLLOWERS && law.stars < 2;
   const recruit = (n) => {
-    if (!canRecruit(n)) return;
+    if (!canRecruit(n) || !take(n)) return;
     n.following = true;
     clearTalk(n);
     setTask(n, { type: 'follow', dur: Infinity });
@@ -1671,7 +1834,7 @@ export function createTownMode(ctx) {
           ctx.confiscate();
           feedLine('🗡️ The guards took your weapons.');
         }
-        advanceClock(3 * 60);
+        if (!mp()) advanceClock(3 * 60); // (a shared town's clock is everyone's)
         startJail();
         fadeTo(false);
         sequence = null;
@@ -1694,7 +1857,7 @@ export function createTownMode(ctx) {
         const P = layout.places;
         ctx.revivePlayer(P.spawn.x, P.spawn.z, Math.atan2(P.fire.x - P.spawn.x, P.fire.z - P.spawn.z));
         if (lost > 0) { ctx.addCoins(-lost); feedLine(`🪙 Someone helped themselves to ${lost} coins…`); }
-        advanceClock(2 * 60);
+        if (!mp()) advanceClock(2 * 60);
         fadeTo(false);
         sequence = null;
       });
@@ -1740,7 +1903,7 @@ export function createTownMode(ctx) {
       .sort((a, b) => b.attitude - a.attitude)[0];
     const ok = (officer && officer.attitude >= -0.2) || Math.random() < BRIBE_ODDS;
     if (ok) {
-      if (officer) officer.money += BRIBE;
+      if (officer) npcMoney(officer, BRIBE);
       endJail(`🤝 ${officer ? firstName(officer.name) : 'The guard'} looks the other way. You\'re out.`);
     } else {
       jail.left += 15;
@@ -1755,7 +1918,7 @@ export function createTownMode(ctx) {
     fadeTo(true);
     later(token, 800, () => {
       const h = hour();
-      advanceClock(((WAKE_HOUR - h + 24) % 24 || 24) * 60);
+      if (!mp()) advanceClock(((WAKE_HOUR - h + 24) % 24 || 24) * 60);
       endJail('☀️ Morning. The guard lets you out.');
       fadeTo(false);
       sequence = null;
@@ -1792,10 +1955,13 @@ export function createTownMode(ctx) {
     if (n.fear > 0) { say(n, talkLine(n)); return; }
     if (n.following) { say(n, fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() }), { big: true }); talking = { npc: n }; return; }
     const taskType = n.task?.type === 'talk' ? n.task.prevType : n.task?.type;
+    // (someone busy with another player — shared town — talks without stopping)
     if (n.task?.type !== 'talk') {
-      n.task = { type: 'talk', t: 0, phase: 'do', dur: 7, prevType: taskType };
-      n.path = null;
-      n.moving = false;
+      if (take(n)) {
+        n.task = { type: 'talk', t: 0, phase: 'do', dur: 7, prevType: taskType };
+        n.path = null;
+        n.moving = false;
+      }
     } else {
       n.task.t = 0;
     }
@@ -1813,7 +1979,7 @@ export function createTownMode(ctx) {
     if (ctx.getCoins() < GIFT_COINS) { say(n, giftLine(n, ctx.getPlayerName(), true), { big: true }); return; }
     ctx.addCoins(-GIFT_COINS);
     ctx.playSfx('coin');
-    n.money += GIFT_COINS;
+    npcMoney(n, GIFT_COINS);
     n.attitude = Math.min(1, n.attitude + 0.25);
     if (n.task?.type === 'talk') n.task.t = 0;
     say(n, giftLine(n, ctx.getPlayerName()), { big: true });
@@ -2098,6 +2264,7 @@ export function createTownMode(ctx) {
     if (!merchant || merchantShunsPlayer() || ctx.getCoins() < price || !market.take(g)) return false;
     ctx.addCoins(-price);
     merchant.money += price;
+    if (netMode === 'client') net.send(net.hostId(), { w: 1, op: 'trade', g, d: -1, cash: price });
     gain(g);
     noteStock();
     return true;
@@ -2110,6 +2277,7 @@ export function createTownMode(ctx) {
     renderGoods();
     market.put(g);
     merchant.money -= price;
+    if (netMode === 'client') net.send(net.hostId(), { w: 1, op: 'trade', g, d: 1, cash: -price });
     ctx.addCoins(price);
     noteStock();
   };
@@ -2192,10 +2360,14 @@ export function createTownMode(ctx) {
       return;
     }
     if (!n.alive) return;
+    // (someone the host / another player runs: drawn where the wire says)
+    if (!mine(n)) { followNet(n, dt); return; }
     if (n.fighter) {
       const e = n.fighter;
+      n.moving = Math.hypot(e.group.position.x - n.x, e.group.position.z - n.z) > dt * 0.3;
       n.x = e.group.position.x;
       n.z = e.group.position.z;
+      n.yaw = e.group.rotation.y;
       n.hp = e.hearts ?? n.hp;
       if (e.isDead) {
         // (killed some other way than a counted hit — the stage code fades it out)
@@ -2365,7 +2537,7 @@ export function createTownMode(ctx) {
   const marketOpen = () => inHours(hour(), MARKET_HOURS) && !!workingMerchant();
   // The merchant, if they're at the stall now
   const workingMerchant = () => npcs.find((m) => m.alive && !m.fighter && m.role === 'merchant'
-    && m.task?.type === 'work' && m.task.phase === 'do') ?? null;
+    && isWorking(m)) ?? null;
   // (feed: a good running out / coming back)
   const noteStock = () => {
     for (const g of GOOD_IDS) {
@@ -2429,7 +2601,7 @@ export function createTownMode(ctx) {
   };
 
   const tryStartChat = (n) => {
-    const o = npcs.find((m) => m !== n && m.alive && !m.fighter && !m.inside && m.fear <= 0
+    const o = npcs.find((m) => m !== n && m.alive && mine(m) && !m.fighter && !m.inside && m.fear <= 0
       && (m.task?.type === 'wander') && dist2(m.x, m.z, n.x, n.z) < 6);
     if (!o) return;
     const lines = chatLines(gossip, ctx.getPlayerName());
@@ -2636,7 +2808,7 @@ export function createTownMode(ctx) {
     jobs = jobs.filter((x) => x !== j);
     if (j.kind === 'findKid') {
       const kid = npcById(j.data.kidId);
-      if (kid) { kid.lost = false; kid.escort = false; kid.following = false; kid.task = null; }
+      if (kid && mine(kid)) { kid.lost = false; kid.escort = false; kid.following = false; kid.task = null; }
     }
     if (j.kind === 'fetchStrongbox' || j.kind === 'returnTo') {
       strongboxHeld = false;
@@ -2714,7 +2886,7 @@ export function createTownMode(ctx) {
   // A lost kid: off somewhere quiet, a little way out of town
   const loseKid = (j) => {
     const kid = npcById(j.data.kidId);
-    if (!kid) return;
+    if (!kid || !take(kid)) return;
     let spot = j.data.spot;
     if (!spot) {
       const nav = layout.nav;
@@ -2762,7 +2934,7 @@ export function createTownMode(ctx) {
     const creditor = npcById(j.data.creditorId);
     const paid = Math.min(j.data.amount, Math.floor(debtor.money));
     if (paid <= 0) { say(debtor, 'I\'ve got nothing! Honest!', { big: true }); return; }
-    debtor.money -= paid;
+    npcMoney(debtor, -paid);
     j.data.collected = paid;
     j.reward = { ...j.reward, coins: Math.round(paid * 0.4) };
     debtor.attitude = Math.max(-1, debtor.attitude - 0.3);
@@ -2787,13 +2959,15 @@ export function createTownMode(ctx) {
           d.raidStarted = true;
           d.failed = false;
           const field = P.fields[d.field] ?? P.fields[0];
-          const free = npcs.filter((n) => n.alive && n.def.outlaw && !n.fighter && n.jailedUntil <= simT);
-          while (free.length < 2) {
+          const free = npcs.filter((n) => n.alive && n.def.outlaw && !n.fighter && n.jailedUntil <= simT
+            && (mine(n) || (netMode === 'client' && !n.ctrl)));
+          // (only the host makes new townsfolk)
+          while (isHost() && free.length < 2) {
             const n = makeNpc({ id: nextId++, name: randomName('bandit', usedNames()), role: 'bandit', url: characterForRole('bandit') });
             npcs.push(n);
             free.push(n);
           }
-          d.raiders = free.slice(0, 2).map((n) => { startRaid(n, field, j.id); return n.id; });
+          d.raiders = free.filter((n) => take(n)).slice(0, 2).map((n) => { startRaid(n, field, j.id); return n.id; });
           feedLine('🌙 Raiders are heading for the field!');
         } else if (d.raidStarted && d.raiders.every((id) => !npcById(id) || npcById(id).jailedUntil > simT)) {
           markDone(j, '🌾 The field is safe');
@@ -2808,7 +2982,7 @@ export function createTownMode(ctx) {
       } else if (j.kind === 'findKid') {
         const kid = npcById(d.kidId);
         if (!kid) continue;
-        if (!d.found && distToPlayer(kid) < KID_FOUND_DIST) {
+        if (!d.found && distToPlayer(kid) < KID_FOUND_DIST && take(kid)) {
           d.found = true;
           kid.lost = false;
           kid.escort = true;
@@ -2824,7 +2998,7 @@ export function createTownMode(ctx) {
           for (const f of family(kid)) f.attitude = Math.min(1, f.attitude + 0.5);
           say(kid, 'Home! Thank you!', { big: true });
           markDone(j, `🏠 ${firstName(kid.name)} is home`);
-        } else if (d.found && !kid.following && kid.fear <= 0 && kid.jailedUntil <= simT) {
+        } else if (d.found && !kid.following && kid.fear <= 0 && kid.jailedUntil <= simT && take(kid)) {
           // (walked home with the player, not on their own: whatever pulled them away — a scare,
           // the evening fire, bedtime — they come back to the player)
           if (kid.inside) { kid.inside = false; kid.x = kid.home.x; kid.z = kid.home.z; }
@@ -2944,7 +3118,7 @@ export function createTownMode(ctx) {
       jobTalk.open({
         who, sub: j.title, text: lines[j.kind] ?? 'You did it! Here, this is yours.', reward: `Reward: ${reward}`,
         choices: [{ label: '🪙 Take the reward', primary: true, onClick: () => {
-          if (j.kind === 'debt') n.money += Math.max(0, (j.data.collected ?? 0) - j.reward.coins);
+          if (j.kind === 'debt') npcMoney(n, Math.max(0, (j.data.collected ?? 0) - j.reward.coins));
           const next = completeJob(j);
           if (next && next.giverId === n.id) {
             jobTalk.open({ who, sub: next.title, text: next.desc, choices: [{ label: '👍 On my way', primary: true }] });
@@ -3000,7 +3174,7 @@ export function createTownMode(ctx) {
       if (j.kind === 'findKid') {
         const kid = npcById(j.data.kidId);
         if (kid && !j.data.found) loseKid(j);
-        else if (kid) { kid.escort = true; kid.following = true; }
+        else if (kid && take(kid)) { kid.escort = true; kid.following = true; }
       }
     }
   };
@@ -3065,7 +3239,7 @@ export function createTownMode(ctx) {
     let best = null;
     let bd = TALK_RANGE;
     for (const n of npcs) {
-      if (!n.alive || !n.body || n.fighter || n.inside || n.dying || n.def.outlaw) continue;
+      if (!n.alive || !n.body || n.fighter || n.netFight || n.inside || n.dying || n.def.outlaw) continue;
       if (['brawl', 'mug', 'arrest'].includes(n.task?.type)) continue;
       const d = dist2(n.x, n.z, p.x, p.z);
       if (d < bd) { bd = d; best = n; }
@@ -3183,18 +3357,482 @@ export function createTownMode(ctx) {
     }
   };
 
+  // ── Shared town: the wire (Multiplayer — townNet.js carries it) ──
+  // [id, x, z, yaw, flags, hp, controller id | 0, money]; flags: 1 moving, 2 inside, 4 fighting,
+  // 8 in the cell, 16 lost, 32 following, 64 chopping, 128 farming, 256 at work
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const dynOf = (n) => {
+    const t = n.task;
+    const own = mine(n);
+    const anim = own ? (t?.phase === 'do' ? t.anim : null) : n.anim;
+    let f = 0;
+    if (n.moving) f |= 1;
+    if (n.inside) f |= 2;
+    if (n.fighter || (!own && n.netFight)) f |= 4;
+    if (n.jailedUntil > simT) f |= 8;
+    if (n.lost) f |= 16;
+    if (n.following) f |= 32;
+    if (anim === 'chop') f |= 64;
+    if (anim === 'farm') f |= 128;
+    if (isWorking(n)) f |= 256;
+    return [n.id, r2(n.x), r2(n.z), r2(n.yaw), f, n.hp, n.ctrl || 0, Math.round(n.money)];
+  };
+  // (withMoney: the host's word — the host keeps everyone's purse)
+  const applyDyn = (n, a, withMoney = true) => {
+    const [, x, z, yaw, f, hp, , money] = a;
+    if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(f)) return;
+    n.net = { x, z, yaw: Number.isFinite(yaw) ? yaw : n.yaw };
+    n.moving = !!(f & 1);
+    const inside = !!(f & 2);
+    if (inside !== n.inside) {
+      n.inside = inside;
+      if (!inside) { n.x = x; n.z = z; }
+    }
+    n.netFight = !!(f & 4);
+    n.jailedUntil = f & 8 ? Math.max(n.jailedUntil, simT + 3) : Math.min(n.jailedUntil, simT);
+    n.lost = !!(f & 16);
+    n.anim = f & 64 ? 'chop' : f & 128 ? 'farm' : null;
+    n.netWorking = !!(f & 256);
+    if (Number.isFinite(hp)) n.hp = hp;
+    if (withMoney && Number.isFinite(money)) n.money = money;
+  };
+  // A townsperson someone else runs: eased to where the wire says
+  const followNet = (n, dt) => {
+    const s = n.net;
+    if (s) {
+      const dx = s.x - n.x;
+      const dz = s.z - n.z;
+      if (dx * dx + dz * dz > 36) { n.x = s.x; n.z = s.z; n.yaw = s.yaw; }
+      else {
+        const k = 1 - Math.exp(-8 * dt);
+        n.x += dx * k;
+        n.z += dz * k;
+        n.yaw = angleLerp(n.yaw, s.yaw, k);
+      }
+    }
+    if (n.anim && n.body && simT > n.actionAt) {
+      n.actionAt = simT + (n.anim === 'chop' ? 2.2 : 3.4) + Math.random();
+      n.body.character.playAction(glbCharacterConfig.throwClip);
+    }
+    // (they still feel things about this player: a vendetta, a grudge — the reaction claims them)
+    if (simT > (n.reactAt ?? 0)) {
+      n.reactAt = simT + 0.5;
+      reactToPlayer(n);
+    }
+  };
+  // Our claim lost out (someone else's now, or the host's)
+  const dropClaim = (n, ctrl) => {
+    if (n.fighter) { ctx.removeFighter(n.fighter); n.fighter = null; n.hostile = false; n.campStandoff = false; }
+    clearTalk(n);
+    n.following = false;
+    n.escort = false;
+    n.ctrl = ctrl;
+    n.pendingHit = null;
+    n.task = null;
+    n.path = null;
+    n.net = { x: n.x, z: n.z, yaw: n.yaw };
+  };
+  // Our blow on someone another game runs
+  const hurtRemote = (n, dir, amount) => {
+    const p = playerPos();
+    net.send(n.ctrl || net.hostId(), { w: 1, op: 'hit', id: n.id, amt: amount, dir: [r2(dir.x), r2(dir.z)], from: [r2(p.x), r2(p.z)], by: myId() });
+    const gy = groundY(n);
+    if (!n.def.unhurt) ctx.spawnBlood(_v.set(n.x, gy + 0.55 * heightScale(n.url), n.z), gy);
+    ctx.playSfx('hit');
+    n.attitude = Math.max(-1, n.attitude - (n.def.unhurt ? 0.3 : 0.6));
+    if (n.def.unhurt) return;
+    if (isOutlaw(n)) heroic(n);
+    else crime('assault', n);
+  };
+  // Another player's blow on someone we run
+  const applyRemoteHit = (n, d, by) => {
+    const amt = Math.max(1, Math.min(3, Math.round(Number(d.amt) || 1)));
+    const dir = Array.isArray(d.dir) && d.dir.every(Number.isFinite) ? { x: d.dir[0], z: d.dir[1] } : { x: 0, z: 0 };
+    const from = Array.isArray(d.from) && d.from.every(Number.isFinite) ? { x: d.from[0], z: d.from[1] } : null;
+    if (n.fighter) {
+      n.remoteBy = by;
+      const killed = n.fighter.applyDamage(amt);
+      n.remoteBy = null;
+      if (!killed) n.fighter.applyDirectKnockback?.({ direction: new THREE.Vector3(dir.x, 0, dir.z), horizSpeed: 3, upVelocity: 0.2, torqueMag: 0, ragdoll: false });
+      return;
+    }
+    if (n.def.unhurt) { flee(n, from); return; }
+    n.lastHurtAt = simT;
+    n.lastHitAt = simT;
+    n.hp -= amt;
+    if (n.body && distToPlayer(n) < 25) {
+      const gy = groundY(n);
+      ctx.spawnBlood(_v.set(n.x, gy + 0.55 * heightScale(n.url), n.z), gy);
+      if (distToPlayer(n) < 12) ctx.playSfx('hit');
+    }
+    n.knock = { vx: dir.x * 3, vz: dir.z * 3, left: 0.25 };
+    if (n.hp <= 0) { die(n, { by, noCoins: true }); return; }
+    clearTalk(n);
+    say(n, shout(SHOUT_HURT));
+    flee(n, from);
+  };
+  // The host's part of a death: someone moves in later, everyone's told
+  const worldDeath = (n, killer, except = null) => {
+    arrivals.push({ role: n.role, at: simT + rand(...(n.def.outlaw ? BANDIT_RETURN_S : NEWCOMER_DELAY_S)) });
+    if (!n.def.outlaw) departed = [...departed, firstName(n.name)].slice(-20);
+    if (!mp()) return;
+    for (const pid of net.peerIds()) if (pid !== except) net.send(pid, { w: 1, op: 'dead', id: n.id, by: killer ?? null });
+  };
+  // Someone died in another game (killer: whose blow it was — ours drops the coins, and counts)
+  const remoteDeath = (n, killer) => {
+    if (!n.alive) return;
+    if (n.fighter) { ctx.removeFighter(n.fighter); n.fighter = null; }
+    n.alive = false;
+    n.moving = false;
+    n.ctrl = null;
+    clearTalk(n);
+    if (n.body) {
+      clearBubble(n);
+      n.body.character.playDeath();
+      n.dying = { until: simT + DEAD_BODY_S };
+    }
+    const byMe = !!killer && killer === myId();
+    if (byMe && n.money >= 1) ctx.dropCoins(new THREE.Vector3(n.x, groundY(n) + 0.3, n.z), Math.min(3, 1 + Math.floor(n.money / 8)));
+    if (byMe || distToPlayer(n) < 60) feedLine(n.def.outlaw ? `💀 ${n.name} is down.` : `💀 ${n.name} the ${n.def.label} is dead.`);
+    if (!n.def.outlaw) gossip.push({ kind: 'murder', who: firstName(n.name), by: byMe ? 'player' : null, at: simT, fresh: true });
+    if (byMe && !isOutlaw(n)) {
+      crime('murder', n);
+      for (const k of family(n)) {
+        k.attitude = -1;
+        if (!k.def.unhurt) { k.vendetta = true; k.vendettaFor = relationOf(n.role); }
+      }
+    }
+    onJobDeath(n, byMe);
+    save();
+  };
+  // Gone from the host's town without a word (died while we weren't listening)
+  const vanish = (n) => {
+    if (n.fighter) { ctx.removeFighter(n.fighter); n.fighter = null; }
+    n.alive = false;
+    n.dying = null;
+    releaseBody(n);
+  };
+  const fullSnapshot = () => ({ ...worldSnapshot(), dyn: npcs.filter((n) => n.alive).map(dynOf) });
+  const placeFromDyn = (dyn) => {
+    for (const a of Array.isArray(dyn) ? dyn : []) {
+      const n = Array.isArray(a) ? npcs.find((m) => m.id === a[0]) : null;
+      if (!n?.alive || mine(n)) continue;
+      n.ctrl = a[6] || null;
+      if (n.ctrl === myId()) n.ctrl = null; // (a claim of ours the host still holds: it's let go below)
+      const first = !n.net;
+      applyDyn(n, a);
+      if (first && n.net) { n.x = n.net.x; n.z = n.net.z; n.yaw = n.net.yaw; }
+    }
+  };
+  // The whole town from the host: the first time it's the town; later, it puts ours right
+  const applyFull = (s) => {
+    if (!s || !Array.isArray(s.people)) return;
+    if (!ready) {
+      spawnTown(s, loadPersonal());
+      placeFromDyn(s.dyn);
+      topPlace.textContent = `🏘️ ${TOWN_NAME} · 👥 ${net.playerCount()}`;
+      feedLine(`Welcome to ${TOWN_NAME}! ${net.playerCount() > 1 ? `${net.playerCount()} players are in town.` : 'Walk up to people to talk.'}`);
+      return;
+    }
+    if (Number.isFinite(s.day)) clock.day = s.day;
+    if (Number.isFinite(s.minutes)) clock.minutes = s.minutes;
+    if (Array.isArray(s.departed)) departed = s.departed;
+    if (s.market) { for (const g of GOOD_IDS) if (Number.isFinite(s.market[g])) market.stock[g] = s.market[g]; noteStock(); }
+    const ids = new Set();
+    let added = false;
+    for (const p of s.people) {
+      if (!ROLES[p.role]) continue;
+      ids.add(p.id);
+      let n = npcs.find((m) => m.id === p.id);
+      if (!n) {
+        n = makeNpc({ ...p, attitude: 0 });
+        npcs.push(n);
+        added = true;
+        nextId = Math.max(nextId, p.id + 1);
+        feedLine(n.def.outlaw ? `💀 ${n.name} joined the bandits.` : `🧳 ${n.name} the ${n.def.label} moved to ${TOWN_NAME}.`);
+      }
+      if (!mine(n) && n.alive) {
+        if (Number.isFinite(p.money)) n.money = p.money;
+        if (p.carry) n.carry = { ...n.carry, ...p.carry };
+      }
+    }
+    for (const n of npcs) if (n.alive && !ids.has(n.id) && !mine(n)) vanish(n);
+    if (added) assignWork();
+    placeFromDyn(s.dyn);
+  };
+  // The host's townsfolk, a few times a second
+  let fullAskedAt = -1e9;
+  const onNpcs = (list) => {
+    const seen = new Set();
+    let unknown = false;
+    const me = myId();
+    for (const a of list) {
+      if (!Array.isArray(a)) continue;
+      const n = npcs.find((m) => m.id === a[0]);
+      if (!n) { unknown = true; continue; }
+      seen.add(n.id);
+      if (!n.alive) continue;
+      let ctrl = a[6] || null;
+      // (our release hasn't reached the host yet)
+      if (ctrl === me && n.ctrl !== me && simT - (n.releasedAt ?? -1e9) < NET_CLAIM_GRACE_S) ctrl = null;
+      if (n.ctrl === me && ctrl === me) { n.claimOk = true; n.pendingHit = null; }
+      if (n.ctrl === me && ctrl !== me) {
+        // (our claim hasn't reached the host yet — or went to someone else)
+        if (simT - (n.claimAt ?? -1e9) < NET_CLAIM_GRACE_S) continue;
+        dropClaim(n, ctrl);
+      }
+      n.ctrl = ctrl;
+      if (mine(n)) continue; // (the host thinks we run them: back to it with the next decide)
+      applyDyn(n, a);
+    }
+    for (const n of npcs) if (n.alive && !seen.has(n.id) && !mine(n)) vanish(n);
+    if (unknown && simT - fullAskedAt > 3) {
+      fullAskedAt = simT;
+      net.send(net.hostId(), { w: 1, op: 'hello' });
+    }
+  };
+  const handleNet = (from, d) => {
+    if (!active || !layout || !net || typeof d?.op !== 'string') return;
+    const n = Number.isFinite(d.id) ? npcs.find((m) => m.id === d.id) ?? null : null;
+    const fromHost = from === net.hostId();
+    switch (d.op) {
+      case 'hello':
+        if (netMode === 'host' && ready) net.send(from, { w: 1, op: 'full', s: fullSnapshot() });
+        return;
+      case 'full':
+        if (!fromHost || netMode === 'host' || netMode === 'off' || !laidOut) return;
+        netMode = 'client';
+        applyFull(d.s);
+        return;
+      case 'npcs':
+        if (fromHost && netMode === 'client' && ready && Array.isArray(d.l)) onNpcs(d.l);
+        return;
+      case 'w':
+        if (!fromHost || netMode !== 'client' || !ready) return;
+        if (Number.isFinite(d.d)) clock.day = d.d;
+        if (Number.isFinite(d.m)) clock.minutes = d.m;
+        if (d.mk) { for (const g of GOOD_IDS) if (Number.isFinite(d.mk[g])) market.stock[g] = d.mk[g]; noteStock(); }
+        return;
+      case 'dead':
+        if (ready && n?.alive) remoteDeath(n, typeof d.by === 'string' ? d.by : null);
+        return;
+      case 'deny': {
+        if (!n || n.ctrl !== myId()) return;
+        const hit = n.pendingHit;
+        dropClaim(n, d.c && d.c !== net.hostId() ? d.c : null);
+        if (hit && n.alive) {
+          const p = playerPos();
+          net.send(n.ctrl || net.hostId(), { w: 1, op: 'hit', id: n.id, amt: hit.amt, dir: hit.dir, from: [r2(p.x), r2(p.z)], by: myId() });
+        }
+        return;
+      }
+      case 'say':
+        if (!ready || !n?.alive || mine(n) || typeof d.t !== 'string') return;
+        netSaying = true;
+        say(n, d.t.slice(0, 140), { big: !!d.b });
+        netSaying = false;
+        if (netMode === 'host') for (const pid of net.peerIds()) if (pid !== from) net.send(pid, d);
+        return;
+      case 'hit': {
+        if (!ready || !n?.alive) return;
+        const by = typeof d.by === 'string' ? d.by : from;
+        if (mine(n)) applyRemoteHit(n, d, by);
+        else if (netMode === 'host' && n.ctrl && n.ctrl !== from) net.send(n.ctrl, d); // (claimed meanwhile)
+        return;
+      }
+      default:
+    }
+    if (netMode !== 'host' || !ready) return;
+    switch (d.op) {
+      case 'claim': {
+        if (!n?.alive) return;
+        const busy = (n.ctrl && n.ctrl !== from && net.peerIds().includes(n.ctrl))
+          || (!n.ctrl && (n.fighter || n.following || n.lost || talking?.npc === n
+            || ['respond', 'search', 'talk', 'flee'].includes(n.task?.type)));
+        if (busy) { net.send(from, { w: 1, op: 'deny', id: n.id, c: n.ctrl || myId() }); return; }
+        endBrawl(n);
+        n.ctrl = from;
+        n.ctrlSeenAt = simT;
+        n.task = null;
+        n.path = null;
+        if (Array.isArray(d.st)) applyDyn(n, d.st, false);
+        return;
+      }
+      case 'rel':
+        if (!n?.alive || n.ctrl !== from) return;
+        if (Array.isArray(d.st)) applyDyn(n, d.st, false);
+        if (n.net) { n.x = n.net.x; n.z = n.net.z; n.yaw = n.net.yaw; }
+        n.ctrl = null;
+        n.net = null;
+        n.netFight = false;
+        n.task = null;
+        n.path = null;
+        return;
+      case 'own':
+        if (!Array.isArray(d.l)) return;
+        for (const a of d.l) {
+          const m = Array.isArray(a) ? npcs.find((x) => x.id === a[0]) : null;
+          if (!m?.alive || m.ctrl !== from) continue;
+          m.ctrlSeenAt = simT;
+          applyDyn(m, a, false);
+        }
+        return;
+      case 'died':
+        if (!n?.alive) return;
+        remoteDeath(n, typeof d.by === 'string' ? d.by : null);
+        worldDeath(n, typeof d.by === 'string' ? d.by : null, from);
+        return;
+      case 'trade': {
+        if (!GOODS[d.g]) return;
+        if (d.d < 0) market.take(d.g);
+        else market.put(d.g);
+        const m = workingMerchant() ?? npcs.find((x) => x.alive && x.role === 'merchant');
+        if (m && Number.isFinite(d.cash)) m.money = Math.max(0, m.money + Math.max(-200, Math.min(200, d.cash)));
+        noteStock();
+        return;
+      }
+      case 'money':
+        if (n?.alive && Number.isFinite(d.d)) n.money = Math.max(0, n.money + Math.max(-200, Math.min(200, d.d)));
+        return;
+      default:
+    }
+  };
+  // Waiting on the room: its host loads the town (or founds it), the rest ask the host for it
+  const tickJoin = () => {
+    const now = performance.now();
+    if (netFailed || now > joinUntil) {
+      net.stop();
+      netMode = 'off';
+      spawnTown();
+      feedLine(`Welcome to ${TOWN_NAME}! (No shared town right now — this one's yours.)`);
+      return;
+    }
+    if (!net.isOn() || !net.ready()) return;
+    if (net.isHost()) {
+      if (netLoading) return;
+      netLoading = true;
+      const token = enterToken;
+      net.loadRoomState().then((state) => {
+        netLoading = false;
+        if (!active || token !== enterToken || netMode !== 'joining') return;
+        netMode = 'host';
+        spawnTown(state?.v === 1 && Array.isArray(state.people) ? state : null, loadPersonal());
+        netT.full = 0;
+        feedLine(`Welcome to ${TOWN_NAME}! ${net.playerCount() > 1 ? `${net.playerCount()} players are in town.` : 'Walk up to people to talk.'}`);
+      });
+      return;
+    }
+    if (now > helloAt) {
+      helloAt = now + 2000;
+      net.send(net.hostId(), { w: 1, op: 'hello' });
+    }
+  };
+  // The host left (we run the town now) — or another game took over from us
+  const checkNetRole = () => {
+    if (!net.isOn()) {
+      // (lost the room: everyone's ours, a town of our own from here)
+      becomeHost();
+      netMode = 'off';
+      topPlace.textContent = `🏘️ ${TOWN_NAME}`;
+      feedLine('📴 Lost the connection — the town carries on, just you now.');
+      return;
+    }
+    if (!net.ready()) return;
+    if (netMode === 'client' && net.isHost()) becomeHost();
+    else if (netMode === 'host' && !net.isHost()) becomeClient();
+  };
+  const becomeHost = () => {
+    netMode = 'host';
+    const peers = new Set(net.peerIds());
+    for (const n of npcs) {
+      if (n.ctrl === myId() || (n.ctrl && !peers.has(n.ctrl))) n.ctrl = null;
+      if (n.ctrl) { n.ctrlSeenAt = simT; continue; }
+      if (!n.task) {
+        if (n.net) { n.x = n.net.x; n.z = n.net.z; n.yaw = n.net.yaw; }
+        n.net = null;
+        n.netFight = false;
+        n.netWorking = false;
+        n.anim = null;
+      }
+    }
+    if (isHost()) ensureGang();
+    netT.full = 0;
+    netT.send = 0;
+  };
+  const becomeClient = () => {
+    netMode = 'client';
+    const me = myId();
+    for (const n of npcs) {
+      if (!n.alive || n.ctrl) continue;
+      const keep = n.fighter || n.following || n.lost || talking?.npc === n || ['respond', 'search', 'flee', 'talk'].includes(n.task?.type);
+      if (keep) {
+        n.ctrl = me;
+        n.claimAt = simT;
+        net.send(net.hostId(), { w: 1, op: 'claim', id: n.id, st: dynOf(n) });
+      } else {
+        n.task = null;
+        n.path = null;
+        n.net = { x: n.x, z: n.z, yaw: n.yaw };
+      }
+    }
+    arrivals = [];
+    fullAskedAt = simT;
+    net.send(net.hostId(), { w: 1, op: 'hello' });
+  };
+  const netTick = () => {
+    if (simT > netT.label) {
+      netT.label = simT + 1;
+      topPlace.textContent = `🏘️ ${TOWN_NAME} · 👥 ${net.playerCount()}`;
+    }
+    if (netMode === 'host') {
+      if (simT > netT.send) {
+        netT.send = simT + NET_SEND_S;
+        net.broadcast({ w: 1, op: 'npcs', l: npcs.filter((n) => n.alive).map(dynOf) });
+      }
+      if (simT > netT.world) {
+        netT.world = simT + NET_WORLD_S;
+        net.broadcast({ w: 1, op: 'w', d: clock.day, m: r2(clock.minutes), mk: market.snapshot() });
+        // Claims of players who left (or went quiet) go back to the town
+        const peers = new Set(net.peerIds());
+        for (const n of npcs) {
+          if (!n.ctrl || (peers.has(n.ctrl) && simT - (n.ctrlSeenAt ?? 0) < NET_CLAIM_TIMEOUT_S)) continue;
+          n.ctrl = null;
+          if (n.net) { n.x = n.net.x; n.z = n.net.z; }
+          n.net = null;
+          n.netFight = false;
+          n.task = null;
+          n.path = null;
+        }
+      }
+      if (simT > netT.full) {
+        netT.full = simT + NET_FULL_S;
+        net.broadcast({ w: 1, op: 'full', s: fullSnapshot() });
+      }
+      if (simT > netT.save) {
+        netT.save = simT + SAVE_EVERY_S;
+        if (net.canSave()) net.saveRoomState(worldSnapshot());
+      }
+    } else if (simT > netT.send) {
+      netT.send = simT + NET_SEND_S;
+      netT.world = simT + NET_WORLD_S;
+      const own = npcs.filter((n) => n.alive && n.ctrl === myId()).map(dynOf);
+      if (own.length) net.send(net.hostId(), { w: 1, op: 'own', l: own });
+    }
+  };
+
   // ── Lifecycle ──
-  const spawnTown = () => {
-    const state = load();
+  // state: the town (a save of your own, or a shared town's world); own: the player's things
+  // (the same save for a town of your own)
+  const spawnTown = (state = load(), own = state) => {
     npcs = [];
     gossip = [];
     arrivals = [];
     departed = Array.isArray(state?.departed) ? state.departed : [];
     market = createMarket(state?.market);
     soldOut.clear();
-    GOOD_IDS.forEach((g) => { goods[g] = Math.max(0, Math.floor(state?.goods?.[g] || 0)); });
+    GOOD_IDS.forEach((g) => { goods[g] = Math.max(0, Math.floor(own?.goods?.[g] || 0)); });
     renderGoods();
-    lastItems = state?.items ?? null;
+    lastItems = own?.items ?? null;
     // In Town the player has only what they bought here (nothing, the first time)
     ctx.startLoadout(lastItems ?? {});
     nextId = state?.nextId ?? 1;
@@ -3204,7 +3842,11 @@ export function createTownMode(ctx) {
       for (const p of state.people) {
         if (!ROLES[p.role]) continue;
         // (Miis are Classic's only: an old save's Mii townsperson gets another body)
-        npcs.push(makeNpc(isMiiCharacterUrl(p.url) ? { ...p, url: characterForRole(p.role) } : p));
+        const n = makeNpc(isMiiCharacterUrl(p.url) ? { ...p, url: characterForRole(p.role) } : p);
+        // (a shared town's world: still in the cell / wanted for this long)
+        if (p.jl > 0) { n.jailedUntil = simT + p.jl; n.x = layout.places.jail.x; n.z = layout.places.jail.z; }
+        if (p.ol > 0) n.outlawUntil = simT + p.ol;
+        npcs.push(n);
         nextId = Math.max(nextId, (p.id ?? 0) + 1);
       }
       for (const role of state.pending ?? []) arrivals.push({ role, at: simT + rand(...NEWCOMER_DELAY_S) });
@@ -3221,13 +3863,15 @@ export function createTownMode(ctx) {
         npcs.push(makeNpc({ id: nextId++, name, role, url: characterForRole(role), home: i % households }));
       });
     }
-    ensureGang();
+    if (isHost()) ensureGang();
     assignWork();
-    restoreJobs(state);
+    if (mp()) applyOwn(own);
+    restoreJobs(own);
     // Start mid-day: everyone already at whatever they'd be doing
     isNight = null;
     applyTime();
     for (const n of npcs) {
+      if (!mine(n)) continue; // (a shared town's client: they're where the host says)
       decide(n);
       const t = n.task;
       if (t?.to) {
@@ -3253,6 +3897,18 @@ export function createTownMode(ctx) {
     renderStars();
     window.addEventListener('keydown', onKey);
     stalls.setActive(true);
+    // Shared town: find the player's room meanwhile (townNet.js) — the town waits on it
+    netMode = 'off';
+    laidOut = false;
+    if (net) {
+      netMode = 'joining';
+      netFailed = false;
+      netLoading = false;
+      helloAt = 0;
+      joinUntil = performance.now() + NET_JOIN_TIMEOUT_S * 1000;
+      net.start().then((ok) => { if (!ok && token === enterToken) netFailed = true; })
+        .catch(() => { if (token === enterToken) netFailed = true; });
+    }
     // (built on the next frame: the first nav grid samples a few thousand ground heights)
     setTimeout(() => {
       if (!active || token !== enterToken) return;
@@ -3264,9 +3920,11 @@ export function createTownMode(ctx) {
       }
       ctx.scene.add(root);
       root.add(layout.props.group);
-      spawnTown();
       const P = layout.places;
       ctx.teleport(P.spawn.x, P.spawn.z, Math.atan2(P.market.x - P.spawn.x, P.market.z - P.spawn.z));
+      laidOut = true;
+      if (netMode === 'joining') { feedLine(`🏘️ Finding your town…`); return; }
+      spawnTown();
       feedLine(`Welcome to ${TOWN_NAME}! Walk up to people to talk.`);
     }, 30);
   };
@@ -3274,6 +3932,7 @@ export function createTownMode(ctx) {
   const exit = () => {
     if (!active) return;
     save();
+    if (netMode === 'host' && ready && net.canSave()) net.saveRoomState(worldSnapshot());
     lastItems = ctx.endLoadout() ?? lastItems;
     closeMarket();
     jobTalk.close();
@@ -3310,15 +3969,22 @@ export function createTownMode(ctx) {
     document.body.classList.remove('town-mode');
     window.removeEventListener('keydown', onKey);
     isNight = null;
+    netMode = 'off';
+    laidOut = false;
+    net?.stop();
+    topPlace.textContent = `🏘️ ${TOWN_NAME}`;
   };
 
   const update = (dt) => {
-    if (!active || !ready) return;
+    if (!active) return;
+    if (netMode === 'joining') { if (laidOut) tickJoin(); return; }
+    if (!ready) return;
     dt = Math.min(dt, 0.1);
     simT += dt;
     clock.minutes += dt * MINUTES_PER_SEC;
     if (clock.minutes >= 1440) { clock.minutes -= 1440; clock.day += 1; }
     applyTime();
+    if (mp()) { checkNetRole(); netTick(); }
     updateCampfire(layout.props.fire, simT);
     if (jail) {
       jail.left -= dt;
@@ -3345,7 +4011,7 @@ export function createTownMode(ctx) {
     // (the market panel shuts when the merchant leaves the stall or the player walks off)
     if (marketPanel.isOpen() && (!marketOpen() || !nearStall())) closeMarket();
     for (const g of gossip) if (simT - g.at > 240) g.fresh = false;
-    updateArrivals();
+    if (isHost()) updateArrivals();
     if (simT > law.tickAt) { law.tickAt = simT + 0.5; updateLaw(); updateCampWatch(); updateJobs(); }
     updateMarkers();
     if (simT > lodAt) { lodAt = simT + 0.4; updateLod(); }
@@ -3380,8 +4046,13 @@ export function createTownMode(ctx) {
   // The player went down: wanted → busted, otherwise knocked out. True when handled.
   const onPlayerDown = () => {
     if (!active) return false;
-    if (law.stars > 0) busted();
-    else knockedOut();
+    // (shared town: a player brought us down — wanted, that's their bounty)
+    const hunter = lastPvp && simT - lastPvp.at < PVP_CREDIT_S ? lastPvp.id : null;
+    lastPvp = null;
+    if (law.stars > 0) {
+      if (hunter && mp()) net.sendBounty(hunter, BOUNTY_PER_STAR * law.stars);
+      busted();
+    } else knockedOut();
     return true;
   };
 
@@ -3394,10 +4065,27 @@ export function createTownMode(ctx) {
     getMagicTargets,
     onPlayerDown,
     interact,
+    // Shared town (townNet.js / bootstrapGameApp.js)
+    handleNet,
+    getStars: () => (active ? law.stars : 0),
+    // Another player's sword hit us (for the bounty if it brings us down)
+    onPvpHurt: (fromId) => { if (active) lastPvp = { id: fromId, at: simT }; },
+    // Our sword hit another player: hurting someone who isn't wanted is assault
+    onAttackPlayer: ({ stars }) => {
+      if (!active || !ready || stars > 0 || simT - pvpCrimeAt < 2) return;
+      pvpCrimeAt = simT;
+      crime('assault', null);
+    },
+    onBounty: (name, coins) => {
+      if (!active) return;
+      ctx.addCoins(coins);
+      feedLine(`💰 You brought ${name} in · +${coins} 🪙`);
+      ctx.showBanner('BOUNTY!', `${name} is off to jail · 🪙 +${coins}`, 2600);
+    },
     isActive: () => active,
     // The phone's Block bar label while there's something to do (undefined: it stays Block)
     interactLabel: () => (active && acts.length ? acts[0].label : undefined),
     // (dev console)
-    debug: () => ({ npcs, layout, law, clock, arrivals, market, goods, stalls, ctx, jobs, chainsDone, simT: () => simT, stallItemState, kill: (n) => die(n, { byPlayer: true }) }),
+    debug: () => ({ netMode, npcs, layout, law, clock, arrivals, market, goods, stalls, ctx, jobs, chainsDone, simT: () => simT, stallItemState, kill: (n) => die(n, { byPlayer: true }) }),
   };
 }
