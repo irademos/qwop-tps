@@ -54,6 +54,7 @@ import {
 } from '../combat/magicBlast.js';
 import { setWandGlow, createWandModel } from '../items/magicWand.js';
 import { createFishingRodModel, ROD_HOLD_PITCH } from '../items/fishingRod.js';
+import { createLantern } from '../items/lantern.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
@@ -8547,6 +8548,21 @@ async function initCore(runtimeContext) {
     onLobby: () => { void appState.returnToLobby(); },
   });
   window.town = town; // (dev console: town.debug())
+  // Town at night, out past the houses (town.wantsLantern): a lantern on the player's left
+  // hand — the game 'right' floating hand (labels are mirrored); with `lanternHeld` set,
+  // updateProceduralPlayerRig poses that arm for it and grips weapons with the other hand only
+  let _townLantern = null;
+  const _updateTownLantern = () => {
+    const want = !!(playerModel && town?.wantsLantern() && !playerDead);
+    if (playerModel) playerModel.userData.lanternHeld = want;
+    if (!want && !_townLantern) return;
+    if (!_townLantern) _townLantern = createLantern();
+    const hand = want ? playerModel.children.find((c) => c.userData?.proceduralHand === 'right') : null;
+    if (hand && _townLantern.group.parent !== hand) hand.add(_townLantern.group);
+    // (the light stays put while Town is on, dark, so it doesn't recompile the scene's shaders)
+    if (!town?.isActive() && _townLantern.group.parent) _townLantern.group.parent.remove(_townLantern.group);
+    if (_townLantern.isLit() !== want) _townLantern.setLit(want);
+  };
   const startTownMode = () => {
     _resetForMenu();
     town.enter();
@@ -9884,6 +9900,7 @@ async function initCore(runtimeContext) {
     village?.update(frameDelta);
     // Town mode: the townsfolk, the clock, the law
     town?.update(frameDelta);
+    _updateTownLantern();
     // Ships on the sea bob on the swell
     _activeMap?.animate?.(performance.now() / 1000);
     // Showdown death: the carriers + the fixed camera

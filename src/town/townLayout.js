@@ -206,7 +206,9 @@ export function installTownLayout(T, ctx) {
     };
     // Every tree in town can be chopped (wood: what it has left; it grows back)
     const choppable = trees.map((t) => ({ x: t.x, z: t.z, wood: TREE_WOOD, hits: 0, growAt: 0, hitAt: -1 }));
-    return { nav, places, trees: choppable, props: buildProps(places) };
+    // (the houses, shops included: out of their reach at night the player carries a lantern)
+    const houses = buildings.map((b) => ({ x: b.x, z: b.z, radius: b.radius }));
+    return { nav, places, trees: choppable, buildings: houses, props: buildProps(places) };
   };
 
   // ── Props: the shops, campfire, jail cell, fields ──
