@@ -7279,7 +7279,8 @@ async function initCore(runtimeContext) {
   };
 
   const updateRoadLightsNearPlayer = () => {
-    if (!scene || !playerModel?.position || !isNightDisplayMode()) {
+    // (none in Town: the player's lantern lights the way there)
+    if (!scene || !playerModel?.position || !isNightDisplayMode() || town?.isActive()) {
       clearRoadLightPool();
       return;
     }

@@ -64,13 +64,14 @@ export const FIREWOOD_CHANCE = 0.35;        // a townsperson buying food takes s
 export const MARKET_HOURS = [7, 20];
 export const TRADE_DIST = 3.4;              // m from a shop's back counter for its buttons (🧺 Goods / 💰 Sell, ⚔️ Weapons)
 // The shops (townStalls.js): two of the town's houses are the goods shop and the weapon shop;
-// 🚪 Enter at the door puts the player inside — a room (shop.glb) far off the island, out of
+// walking in through the door puts the player inside — a room (shop.glb) far off the island, out of
 // sight, where every shop's floor is its own ground (world m: the middle of its floor)
 export const SHOP_INTERIORS = {
   goods: { x: -250, y: 30, z: -45 },
   gear: { x: -250, y: 30, z: -20 },
 };
-export const SHOP_DOOR_DIST = 2.6;          // m from a shop's door outside for 🚪 Enter
+export const SHOP_DOOR_DIST = 2.6;          // m from a shop's door outside: stepped away from it after coming out
+export const SHOP_DOOR_ENTER_DIST = 1.6;    // m from a shop's door outside where walking toward the house goes in
 export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the weapon shop
 export const CHEST_PRICE = 30;              // the weapon shop's mystery chest
 export const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
