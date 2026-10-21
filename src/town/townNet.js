@@ -240,6 +240,8 @@ export function createTownNet(ctx) {
     for (const p of players.values()) {
       const model = ctx.getRemoteModel(p.id);
       if (!model) continue;
+      // (hands on the sword only while they hold it — otherwise their arms hang / walk as on their screen)
+      model.userData.remoteArmed = p.swordTarget.has;
       model.userData.remoteHandTarget = p.hand;
       if (!p.sword) {
         p.sword = ctx.createSwordMesh(p.url);
