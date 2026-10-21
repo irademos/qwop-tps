@@ -22,13 +22,15 @@ export const TREE_RE = /tree/i;
 // the door spot walking toward the house goes in (m; default DOOR_ENTER_DIST) — wider for the
 // deeply set-in doors, which the player would otherwise climb the front wall trying to reach.
 export const HOUSE_DOORS = {
-  'medieval_building_002.glb': { side: '-x', at: 0.35, inset: 0.65, enter: 0.8 },
-  'medieval_building_004.glb': { side: '+z', at: 0.45, inset: 0.38, enter: 0.8 },
-  'medieval_building_005.glb': { side: '+x', at: 0.36, inset: 0.55, enter: 0.8 },
-  'fantasy_house.glb': { side: '+z', at: 0.3, inset: 0.63, enter: 0.8 },
+  'medieval_building_002.glb': { side: '-x', at: 0.35, inset: 0.65, enter: 1.2 },
+  'medieval_building_004.glb': { side: '+z', at: 0.45, inset: 0.38, enter: 1.2 },
+  'medieval_building_005.glb': { side: '+x', at: 0.36, inset: 0.55, enter: 1.2 },
+  'fantasy_house.glb': { side: '+z', at: 0.3, inset: 0.63, enter: 1.2 },
   'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48 },
 };
-export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)
+export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)…
+export const HOUSE_DOOR_MAX_OUT = 3.5;      // …or further out (up to this), past a roof overhang the height ray lands on
+export const HOUSE_DOOR_STEP = 0.5;         // m above the lowest ground in front of the door the spot may stand (porch steps)
 export const TREE_TRUNK_RADIUS = 0.6;
 // ── Clock ── (an hour = 20 s, a day = 8 min)
 export const MINUTES_PER_SEC = 3;
