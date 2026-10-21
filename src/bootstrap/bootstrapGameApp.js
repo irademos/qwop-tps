@@ -8416,7 +8416,19 @@ async function initCore(runtimeContext) {
             const c = _townMapObjectBox.getCenter(new THREE.Vector3());
             const size = _townMapObjectBox.getSize(new THREE.Vector3());
             if (c.x >= b.minX && c.x <= b.maxX && c.z >= b.minZ && c.z <= b.maxZ) {
-              out.push({ file: mo.modelFile ?? '', x: c.x, z: c.z, radius: Math.max(size.x, size.z) / 2 });
+              // (local: the object's own frame — its GLB's axes — and its bounds there, for
+              // spots on the model like a house's front door)
+              const local = new THREE.Box3();
+              const inv = new THREE.Matrix4().copy(o.matrixWorld).invert();
+              o.traverse((m) => {
+                if (!m.isMesh || !m.geometry) return;
+                if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+                local.union(m.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld)));
+              });
+              out.push({
+                file: mo.modelFile ?? '', x: c.x, z: c.z, radius: Math.max(size.x, size.z) / 2,
+                local, matrix: o.matrixWorld.clone(),
+              });
             }
           }
           return; // (its own meshes aren't separate objects)

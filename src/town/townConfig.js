@@ -14,6 +14,17 @@ export const NAV_CELL = 1.25;
 export const NAV_START = { x: -24.9, z: -31.5 };
 export const BUILDING_RE = /house|building|cabin/i;
 export const TREE_RE = /tree/i;
+// Where each house model's front door is (its own frame — the GLB's axes): the wall it's in
+// ('+x' / '-x' / '+z' / '-z') and how far along that wall from its middle (-1 … 1 of the
+// half width: x along a ±z wall, z along a ±x wall). The shops are entered there.
+export const HOUSE_DOORS = {
+  'medieval_building_002.glb': { side: '-x', at: 0.35 },
+  'medieval_building_004.glb': { side: '+z', at: 0.45 },
+  'medieval_building_005.glb': { side: '+x', at: 0.36 },
+  'fantasy_house.glb': { side: '+z', at: 0.3 },
+  'fantasy_house (1).glb': { side: '+z', at: 0 },
+};
+export const HOUSE_DOOR_OUT = 0.45;         // m out from the wall: the door spot outside
 export const TREE_TRUNK_RADIUS = 0.6;
 // ── Clock ── (an hour = 20 s, a day = 8 min)
 export const MINUTES_PER_SEC = 3;
@@ -70,8 +81,8 @@ export const SHOP_INTERIORS = {
   goods: { x: -250, y: 30, z: -45 },
   gear: { x: -250, y: 30, z: -20 },
 };
-export const SHOP_DOOR_DIST = 1.4;          // m from a shop's door outside: stepped away from it after coming out
-export const SHOP_DOOR_ENTER_DIST = 0.4;    // m from a shop's door outside where walking toward the house goes in
+export const SHOP_DOOR_DIST = 0.7;          // m from a shop's door outside: stepped away from it after coming out
+export const SHOP_DOOR_ENTER_DIST = 0.2;    // m from a shop's door outside where walking toward the house goes in
 export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the weapon shop
 export const CHEST_PRICE = 30;              // the weapon shop's mystery chest
 export const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
