@@ -105,9 +105,9 @@ const statsForSave = (stats) => (stats ? { ...stats, showdownMaxHealthSegments: 
 // Guests (no profile) have nameKey null: nothing is saved.
 // Multiplayer battles (matchCtx.startMatchLoadout): the pickup loadout is never saved.
 let _statSavesSuspended = false;
-// Town mode (startTownLoadout): the real items set aside while the town's own are in hand —
-// { stats: { bombs, … }, inventory: { itemId: entry | null } }. Saves write these instead, so
-// coins etc. keep saving but the town's gear never reaches the profile.
+// Town mode (startTownLoadout): the real items and stats set aside while the town's own are in
+// hand — { stats: { coins, health, maxHealthSegments, bombs, … }, inventory: { itemId: entry | null } }.
+// Saves write these instead, so the town's coins, health and gear never reach the profile.
 let _saveAside = null;
 // (stats, [lastStatUpdateAt, inventory]) → the save call's arguments after nameKey
 const _statsSaveArgs = (stats, rest) => {
@@ -6674,9 +6674,10 @@ async function initCore(runtimeContext) {
     getPhoneSwordStats: () => ({ ..._psStats }),
     // Everything Settings → Profile shows (Showdown / Classic stage stats, upgrades, characters)
     getProfileStats: () => ({
-      level: statsState.level,
-      xp: statsState.xp,
-      coins: statsState.coins,
+      // (in Town: Showdown's, set aside — _saveAside)
+      level: _saveAside?.stats.level ?? statsState.level,
+      xp: _saveAside?.stats.xp ?? statsState.xp,
+      coins: _saveAside?.stats.coins ?? statsState.coins,
       showdown: {
         // (_psStage holds Classic's stage while Classic runs; guests have nothing saved)
         currentStage: profileNameKey
@@ -6685,7 +6686,7 @@ async function initCore(runtimeContext) {
         highestStage: _psStats.highestStage,
         kills: _psStats.kills,
         deaths: _psStats.deaths,
-        maxHearts: statsState.maxHealthSegments,
+        maxHearts: _saveAside?.stats.maxHealthSegments ?? statsState.maxHealthSegments,
         shieldUpgrades: statsState.shieldUpgrades || 0,
         bombs: getPlayerBombCount(),
         bubbles: getBubbleCount(),
@@ -8098,14 +8099,21 @@ async function initCore(runtimeContext) {
     devRoam.enter();
   };
 
-  // ── Town loadout: the gear the player bought in Town (src/town/townMode.js keeps it in its
-  // save) instead of the real inventory, which is set aside meanwhile (and is still what gets
-  // saved — _saveAside). Nothing at all to start with: even the sword is bought.
+  // ── Town loadout: the gear, coins and health the player has in Town (src/town/townMode.js
+  // keeps them in its save) instead of the real inventory and stats, which are set aside
+  // meanwhile (and are still what gets saved — _saveAside). Nothing to start with but a few
+  // coins: even the sword is bought, and Showdown's coins / max health don't come along.
   const TOWN_ITEM_IDS = [FOAM_SWORD_ITEM_ID, 'pistol', SHIELD_ITEM_ID, MAGIC_WAND_ITEM_ID];
+  // (stats Town keeps its own of: Showdown's wait in _saveAside meanwhile)
+  const TOWN_ASIDE_STATS = ['coins', 'health', 'maxHealthSegments', 'level', 'xp', 'strength', 'bombs', 'bubbles', 'mana'];
+  const TOWN_START_COINS = 5;
+  const TOWN_HEALTH_SEGMENTS = SHOWDOWN_BASE_HEALTH_SEGMENTS;
   const TOWN_GUN_AMMO = 12;        // bullets that come with a gun
   const TOWN_MANA_REFILL = 50;     // a mana purchase
-  // { sword, gun, ammo, shield (health), wand, mana, bombs, bubbles }
+  // { sword, gun, ammo, shield (health), wand, mana, bombs, bubbles, coins, health }
   const _townItems = () => ({
+    coins: Number.isFinite(statsState.coins) ? statsState.coins : 0,
+    health: statsState.health,
     sword: !!_townLoadout?.hasSword,
     gun: (inventoryState.pistol?.count ?? 0) > 0,
     ammo: getPistolAmmoCount(),
@@ -8146,11 +8154,17 @@ async function initCore(runtimeContext) {
   const startTownLoadout = (items) => {
     if (_townLoadout) return;
     _putWeaponsAway();
-    const aside = { stats: { bombs: statsState.bombs, bubbles: statsState.bubbles, mana: statsState.mana }, inventory: {} };
+    const aside = { stats: {}, inventory: {} };
+    TOWN_ASIDE_STATS.forEach((key) => { aside.stats[key] = statsState[key]; });
     TOWN_ITEM_IDS.forEach((id) => { aside.inventory[id] = inventoryState[id] ?? null; });
     _saveAside = aside;
     _townLoadout = { hasSword: false };
     _setTownItems(items);
+    // The town's own wallet and hearts (a save from before Town had its own: a few coins)
+    statsState.coins = Number.isFinite(items.coins) ? Math.max(0, Math.floor(items.coins)) : TOWN_START_COINS;
+    statsState.maxHealthSegments = TOWN_HEALTH_SEGMENTS;
+    statsState.health = items.health > 0 ? Math.min(TOWN_HEALTH_SEGMENTS, Math.round(items.health)) : TOWN_HEALTH_SEGMENTS;
+    updateHealthUI();
     _refreshGearUI();
   };
   // Back to the real inventory; returns the town's gear (for its save)
@@ -8168,6 +8182,8 @@ async function initCore(runtimeContext) {
       else delete inventoryState[id];
     }
     Object.assign(statsState, aside.stats);
+    updateHealthUI();
+    updatePlayerInfoUI();
     equipInventoryItem(FOAM_SWORD_ITEM_ID);
     _refreshGearUI();
     return items;
