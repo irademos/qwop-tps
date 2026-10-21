@@ -1664,14 +1664,20 @@ async function initCore(runtimeContext) {
     if (data.type === 'projectile') {
       // Battle: another fighter's bullet (their game deals its damage)
       const fromMatch = !!matchMode?.isInMatch() && matchMode.acceptsPresenceFrom(peerId);
-      if (!duelMode?.acceptsPresenceFrom(peerId) && !fromMatch) return;
+      const fromTown = !!townNet?.acceptsPresenceFrom(peerId);
+      if (!duelMode?.acceptsPresenceFrom(peerId) && !fromMatch && !fromTown) return;
       if (!isProjectileMessage(data)) {
         logInvalidPayload('projectile', data);
         return;
       }
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
-      if (fromMatch) spawnPistolBullet(position, direction, peerId);
+      if (fromTown) {
+        // (Town: drawn here only — the shooter's game deals the damage)
+        spawnPistolBullet(position, direction, peerId);
+        const shot = projectiles[projectiles.length - 1];
+        if (shot) shot.userData.remoteShot = true;
+      } else if (fromMatch) spawnPistolBullet(position, direction, peerId);
       else spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
     }
   }
@@ -4165,6 +4171,19 @@ async function initCore(runtimeContext) {
   const _magicTargets = (blast) => {
     // Multiplayer battle blasts (anyone's): matchMode decides who they can hit
     if (blast.side === 'match') return matchMode?.getMagicTargets(blast) ?? [];
+    // Another Town player's spell: it can only hit us here (their game shows it hitting nothing)
+    if (blast.side === 'town') {
+      if (playerDead || !town?.isActive()) return [];
+      _playerBlastTarget.center.copy(playerModel.position).setY(playerModel.position.y + 0.5);
+      return [{
+        ..._playerBlastTarget,
+        onHit: (b) => {
+          town.onPvpHurt(b.caster);
+          townNet?.sendHurt(b.caster, town.getStars());
+          _playerBlastTarget.onHit(b);
+        },
+      }];
+    }
     if (blast.side === 'enemy') {
       if (playerDead || _attacksHeld()) return [];
       _playerBlastTarget.center.copy(playerModel.position).setY(playerModel.position.y + 0.5);
@@ -4230,6 +4249,7 @@ async function initCore(runtimeContext) {
       ignoreMap: !!showdownTutorial?.isActive(),
     });
     if (inMatch) matchMode.onLocalCast({ origin, forward, line: blast.line, element: blast.element });
+    else if (townNet?.isOn() && town?.isActive()) townNet.sendMagic({ origin, forward, line: blast.line, element: blast.element });
     _wandGlow.level = 1;
     _wandGlow.color.set(MAGIC_ELEMENTS[blast.element].glow);
     _playerCasts += 1;
@@ -4393,6 +4413,8 @@ async function initCore(runtimeContext) {
     const groundY = getTerrainHeight(target.x, target.z);
     if (Number.isFinite(groundY)) target.y = groundY;
     if (_matchLoadout && matchMode?.throwLocalBomb(_playerBombPalm.clone(), target)) return;
+    // (Town: the other players see it — and their games check it against them)
+    if (townNet?.isOn() && town?.isActive()) townNet.sendBomb(_playerBombPalm, target);
     playerBombs.throw(_playerBombPalm, target);
   };
   const finishPlayerBombThrow = () => {
@@ -8187,6 +8209,7 @@ async function initCore(runtimeContext) {
     enemy.stationary = on;
   };
   // Town's shared room: assignment, the connection, the other players (src/town/townNet.js)
+  const TOWN_PVP_BOMB_DAMAGE = 2; // (a battle's BOMB_DAMAGE)
   townNet = createTownNet({
     scene,
     getMultiplayer: () => multiplayer,
@@ -8203,12 +8226,33 @@ async function initCore(runtimeContext) {
     getLocalWeapon: () => matchCtx.getLocalWeapon(),
     getWeaponGear: () => matchCtx.getWeaponGear(),
     getLocalSwordState: duelCtx.getLocalSwordState,
+    getLocalPosition: () => playerModel.position,
+    // Another player's bomb: its blast can only hurt us here (BOMB_DAMAGE as in battles)
+    launchRemoteBomb: (origin, target, fromId) => {
+      playerBombs.throw(origin, target, {
+        keepHeld: true,
+        getBlastTargets: () => (playerDead || !town?.isActive() ? [] : [{
+          group: playerModel,
+          isDead: false,
+          applyDamage: () => false,
+          applyBlastKnockback: ({ direction }) => {
+            const src = playerModel.position.clone().sub(direction);
+            town.onPvpHurt(fromId);
+            townNet.sendHurt(fromId, town.getStars());
+            duelCtx.applyHit(TOWN_PVP_BOMB_DAMAGE, [direction.x, direction.z], { kind: 'bomb', src: [src.x, src.z] });
+          },
+        }]),
+      });
+    },
+    spawnRemoteMagic: ({ origin, forward, line, element, caster }) => {
+      magicBlasts.spawn({ origin, forward, line, element, side: 'town', caster, speed: PLAYER_BLAST_SPEED_MPS, length: PLAYER_BLAST_LENGTH });
+    },
     getLocalCharacterUrl: () => playerModel.userData.qwopRig?.characterUrl ?? null,
     getStars: () => town?.getStars() ?? 0,
-    applyPvpHit: (dmg, dir, fromId) => {
+    applyPvpHit: (dmg, dir, fromId, ranged) => {
       if (!town?.isActive() || playerDead) return;
       town.onPvpHurt(fromId);
-      duelCtx.applyHit(dmg, dir);
+      duelCtx.applyHit(dmg, dir, ranged);
     },
     onSwingBlocked: () => duelCtx.onSwingBlocked(),
     onAttackPlayer: (info) => town?.onAttackPlayer(info),
@@ -9682,7 +9726,8 @@ async function initCore(runtimeContext) {
       multiplayer,
       // (Town: the townsfolk near the player too)
       hordeEnemies: town?.isActive() ? [...hordeEnemies, ...town.getWeaponTargets()] : hordeEnemies,
-      pvpTargets: matchMode?.getShotTargets() ?? null,
+      pvpTargets: matchMode?.getShotTargets() ?? (townNet?.isOn() && town?.isActive() ? townNet.getShotTargets() : null),
+      pvpAlsoEnemies: !!(townNet?.isOn() && town?.isActive()),
       localTarget: _attacksHeld() ? null : _pembertonShotTarget
     });
     // A stage boss's talk box; spared bosses stand there facing the player

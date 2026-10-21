@@ -13,7 +13,9 @@
 // (sendTo). Its host (the oldest peer in the room) runs the townsfolk — townMode.js has the
 // world protocol (messages with `w: 1`, handed to ctx.onWorldMessage). This module also does the
 // players themselves: each sends `pl` (name, character, wanted stars, weapon, sword pose) a few
-// times a second; their sword / wand / gun / shield are drawn on their models and are hit targets for the local sword (PvP:
+// times a second; their sword / wand / gun / shield are drawn on their models. Bullets: the
+// shooter's game detects the hit (`pvp` with k 'gun'); bombs and spells go to everyone (`bomb` /
+// `magic`) and each game checks them against its own player (who tells the attacker — `hurt`) and are hit targets for the local sword (PvP:
 // the attacker detects the hit — `pvp` — the victim applies it); `bounty` pays whoever brought
 // a wanted player down.
 
@@ -97,6 +99,7 @@ export const saveTownRoomState = (roomId, state) => set(ref(db, `townRoomState/$
 // ctx: getMultiplayer(), startMultiplayer(roomId), stopMultiplayer(), profileKey(), memberKey(), getPlayerName(),
 //   scene, getRemoteModel(id), setRemoteCharacter(id, url), createSwordMesh(url), createWandMesh(),
 //   getLocalWeapon() → 'sword' | 'gun' | 'shield' | 'wand' | null, getWeaponGear() (matchCtx's),
+//   getLocalPosition(), launchRemoteBomb(origin, target, fromId), spawnRemoteMagic({ …, caster }),
 //   getLocalSwordState(), getLocalCharacterUrl(), getStars(), applyPvpHit(dmg, dir, fromId),
 //   onSwingBlocked(), onAttackPlayer(info), onBounty(fromName, coins), onWorldMessage(from, data)
 export function createTownNet(ctx) {
@@ -206,9 +209,30 @@ export function createTownNet(ctx) {
         p.weapon = ['sword', 'gun', 'shield', 'wand'].includes(data.w) ? data.w : null;
         return;
       }
-      case 'pvp':
-        ctx.applyPvpHit(Math.max(1, Math.min(2, Math.round(Number(data.dmg) || 1))), isVec(data.dir, 2) ? data.dir : null, from);
+      case 'pvp': {
+        // (a bullet: where it came from, for a shield facing it)
+        const ranged = data.k === 'gun' && isVec(data.src, 2) ? { kind: 'gun', src: data.src } : null;
+        ctx.applyPvpHit(Math.max(1, Math.min(2, Math.round(Number(data.dmg) || 1))), isVec(data.dir, 2) ? data.dir : null, from, ranged);
         return;
+      }
+      // Another player's bomb / spell: drawn here, and this game checks whether it hit us
+      case 'bomb':
+        if (isVec(data.o, 3) && isVec(data.t, 3)) ctx.launchRemoteBomb(new THREE.Vector3().fromArray(data.o), new THREE.Vector3().fromArray(data.t), from);
+        return;
+      case 'magic':
+        if (isVec(data.o, 3) && isVec(data.f, 3) && isVec(data.l, 3)) {
+          ctx.spawnRemoteMagic({
+            origin: new THREE.Vector3().fromArray(data.o), forward: new THREE.Vector3().fromArray(data.f),
+            line: new THREE.Vector3().fromArray(data.l), element: data.e === 'ice' ? 'ice' : 'fire', caster: from,
+          });
+        }
+        return;
+      // Our bomb / spell hurt them (their game said so): the attacker's crime, as for a blow
+      case 'hurt': {
+        const p = players.get(from);
+        ctx.onAttackPlayer?.({ id: from, name: p?.name ?? 'Player', stars: Math.max(0, Math.floor(Number(data.st) || 0)) });
+        return;
+      }
       case 'pvpb':
         ctx.onSwingBlocked();
         return;
@@ -299,6 +323,33 @@ export function createTownNet(ctx) {
     p.gearModel = model;
   };
 
+  // Everyone a bullet can stop at (projectiles.js pvpTargets): our own shots hurt them
+  const shotTargets = new Map();
+  const getShotTargets = () => {
+    const out = [];
+    for (const p of players.values()) {
+      const model = ctx.getRemoteModel(p.id);
+      if (!model?.visible) continue;
+      let t = shotTargets.get(p.id);
+      if (!t) {
+        t = {
+          id: p.id,
+          position: null,
+          onHit: (shooterId, dir) => {
+            if (shooterId !== id()) return; // (someone else's shot, drawn here)
+            const me = ctx.getLocalPosition();
+            send(p.id, { op: 'pvp', dmg: 1, k: 'gun', dir: [round3(dir.x), round3(dir.z)], src: [round3(me.x), round3(me.z)] });
+            ctx.onAttackPlayer?.({ id: p.id, name: p.name, stars: p.stars });
+          },
+        };
+        shotTargets.set(p.id, t);
+      }
+      t.position = model.position;
+      out.push(t);
+    }
+    return out;
+  };
+
   // Everyone the local sword can hit (the duel opponent's shape — see _getPvpTargets)
   const getPvpTargets = () => {
     const out = [];
@@ -327,6 +378,7 @@ export function createTownNet(ctx) {
     update,
     handleMessage,
     getPvpTargets,
+    getShotTargets,
     isOn: () => on,
     id,
     hostId,
@@ -348,5 +400,12 @@ export function createTownNet(ctx) {
     playerName: (pid) => players.get(pid)?.name ?? null,
     playerCount: () => (on ? peerIds().length + 1 : 1),
     sendBounty: (to, coins) => send(to, { op: 'bounty', coins }),
+    // Our bomb / spell — everyone draws it and checks it against themselves
+    sendBomb: (origin, target) => broadcast({ op: 'bomb', o: origin.toArray().map(round3), t: target.toArray().map(round3) }),
+    sendMagic: ({ origin, forward, line, element }) => broadcast({
+      op: 'magic', o: origin.toArray().map(round3), f: forward.toArray().map(round3), l: line.toArray().map(round3), e: element,
+    }),
+    // A bomb / spell of theirs hurt us: tell them (their crime), with our stars
+    sendHurt: (to, stars) => send(to, { op: 'hurt', st: stars }),
   };
 }
