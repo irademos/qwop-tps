@@ -1,4 +1,4 @@
-// Town mode: the market's two shops — two of the town's houses; 🚪 Enter at the door puts the
+// Town mode: the market's two shops — two of the town's houses; walking in through the door puts the
 // player inside a room (shop.glb: walls, three counters; a front wall with the doorway and a
 // ceiling added here) far off the island (SHOP_INTERIORS), shopped the Showdown village's way —
 // the things for sale sit on the counters, tap one (or swipe / ‹ › / arrow keys) for its buy card.

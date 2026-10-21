@@ -10,7 +10,7 @@
 // market and are paid by the merchant; everyone buys their food (and firewood) there; prices
 // follow the stock. The player gathers too — chops trees with the sword, fishes at the fishing
 // spot with a rod bought at the weapon shop (townFishing.js), picks veg (stealing, if anyone sees) — and trades at the market: two of the
-// houses are shops (townStalls.js) — 🚪 Enter at the door puts the player in the shop's room,
+// houses are shops (townStalls.js) — walking in through the door puts the player in the shop's room,
 // shopped like the Showdown village's — the goods shop (wood / fish / veg, the merchant behind
 // the counter) and the weapon shop (the gear + a mystery chest); townsfolk walk in and out of
 // them too; selling goods is the market panel (townMarketPanel.js). In Town the player owns only what they bought here,
@@ -123,6 +123,8 @@ export function createTownMode(ctx) {
   const law = { stars: 0, peak: 0, lastSeenAt: 0, lastKnown: new THREE.Vector3(), seen: false, tickAt: 0 };
   T.jail = null;              // { left } while the player is in the cell
   T.inShop = null;            // the shop the player's in ('goods' | 'gear', townStalls.js)
+  T.doorRearm = null;         // a shop door just walked out of (not back in till stepped away from)
+  T.doorLast = null;          // the player's spot last frame (walking into a shop door)
   T.sequence = null;          // busted / knocked out in progress (timeout token)
   T.gossip = [];              // [{ kind, who, by, at, fresh }]
   T.arrivals = [];            // [{ role, at }]

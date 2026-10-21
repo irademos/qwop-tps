@@ -178,12 +178,8 @@ export function installTownActs(T, ctx) {
       const sb = T.layout.places.strongbox;
       if (dist2(p.x, p.z, sb.x, sb.z) < 2) out.push({ key: 'strongbox', label: '📦 Take the strongbox', onClick: T.takeStrongbox });
     }
-    // The shops: 🚪 Enter at a door outside; inside, 🚪 Leave by the doorway and the back
-    // counter's buttons
-    const door = calm ? T.nearShopDoor() : null;
-    if (door) {
-      out.push({ key: `enter:${door}`, label: door === 'gear' ? '🚪 Enter Weapon Shop' : '🚪 Enter Goods Shop', onClick: () => T.enterShop(door) });
-    }
+    // The shops (walked into through the door — updateShop): inside, 🚪 Leave by the doorway
+    // and the back counter's buttons
     if (T.inShop) {
       const p = T.playerPos();
       const d = T.stalls.doorInside(T.inShop);

@@ -6,7 +6,7 @@ import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import {
-  BUILDING_RE, CAMP_DIST, NAV_BOUNDS, NAV_CELL, NAV_START, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CAMP_DIST, HOUSE_DOORS, HOUSE_DOOR_OUT, NAV_BOUNDS, NAV_CELL, NAV_START, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, TREE_WOOD, dist2,
 } from './townConfig.js';
 
@@ -56,23 +56,50 @@ export function installTownLayout(T, ctx) {
       return false;
     };
 
-    // The shops: the two houses nearest the middle with an open spot by them (their door — the
-    // side facing the middle of town) are the goods shop and the weapon shop (nobody lives there);
-    // the campfire a little way off the goods shop; the jail by a road further out
+    // The shops: the house nearest the middle whose model's front door is known (HOUSE_DOORS)
+    // is the goods shop, the nearest other house of the same model the weapon shop (nobody
+    // lives there); the campfire a little way off the goods shop; the jail by a road further out
     const offRoad = (i) => nav.kindAt(i) !== 2;
+    // A house's front door: the spot just outside it, and the way out (null: model unknown, or
+    // no walkable ground in front of it)
     const doorOf = (b) => {
-      const reach = b.radius + 2.5;
-      const cells = nav.cellsWhere((i) => nav.clearanceAt(i) >= 1.25
-        && dist2(nav.cellX(i), nav.cellZ(i), b.x, b.z) < reach);
-      const i = best(cells, (j) => -dist2(nav.cellX(j), nav.cellZ(j), b.x, b.z) - dC(j) * 0.35);
-      return i >= 0 ? cellPos(i) : null;
+      const spec = HOUSE_DOORS[b.file?.split('/').pop()];
+      if (!spec || !b.local || b.local.isEmpty()) return null;
+      const { min, max } = b.local;
+      const mx = (min.x + max.x) / 2;
+      const mz = (min.z + max.z) / 2;
+      const hx = (max.x - min.x) / 2;
+      const hz = (max.z - min.z) / 2;
+      const axisX = spec.side.endsWith('x');
+      const sign = spec.side[0] === '-' ? -1 : 1;
+      const inset = 1 - (spec.inset ?? 0);
+      const wall = axisX
+        ? new THREE.Vector3(mx + sign * hx * inset, 0, mz + spec.at * hz)
+        : new THREE.Vector3(mx + spec.at * hx, 0, mz + sign * hz * inset);
+      const normal = axisX ? new THREE.Vector3(sign, 0, 0) : new THREE.Vector3(0, 0, sign);
+      wall.applyMatrix4(b.matrix);
+      normal.transformDirection(b.matrix).setY(0).normalize();
+      const door = { x: wall.x + normal.x * HOUSE_DOOR_OUT, z: wall.z + normal.z * HOUSE_DOOR_OUT };
+      // (townsfolk walk the last bit onto it from the grid)
+      const i = nav.nearestWalkable(door.x, door.z);
+      if (i < 0 || dist2(nav.cellX(i), nav.cellZ(i), door.x, door.z) > 2) return null;
+      return { door, exitYaw: Math.atan2(normal.x, normal.z) };
     };
     const shopHouses = [];
-    for (const b of [...buildings].sort((a, b2) => dist2(a.x, a.z, C.x, C.z) - dist2(b2.x, b2.z, C.x, C.z))) {
-      if (shopHouses.length >= 2 || buildings.length - shopHouses.length <= 1) break;
-      if (shopHouses.some((h) => dist2(h.building.x, h.building.z, b.x, b.z) < 6)) continue;
-      const door = doorOf(b);
-      if (door) shopHouses.push({ building: b, door });
+    const byMiddle = [...buildings].sort((a, b2) => dist2(a.x, a.z, C.x, C.z) - dist2(b2.x, b2.z, C.x, C.z));
+    const pickShopHouse = (want) => {
+      for (const b of byMiddle) {
+        if (buildings.length - shopHouses.length <= 1) return false;
+        if (want && !want(b)) continue;
+        if (shopHouses.some((h) => h.building === b || dist2(h.building.x, h.building.z, b.x, b.z) < 6)) continue;
+        const d = doorOf(b);
+        if (d) { shopHouses.push({ building: b, ...d }); return true; }
+      }
+      return false;
+    };
+    if (pickShopHouse()) {
+      const file = shopHouses[0].building.file;
+      if (!pickShopHouse((b) => b.file === file)) pickShopHouse();
     }
     // (no houses to spare: the doors stand on the most open spots off the road)
     while (shopHouses.length < 2) {
@@ -80,14 +107,13 @@ export function installTownLayout(T, ctx) {
       const cell = best(nav.cellsWhere((i) => offRoad(i) && dC(i) < 18 && nav.clearanceAt(i) >= 2.5
         && taken.every((t) => dist2(nav.cellX(i), nav.cellZ(i), t.x, t.z) > 6)), (i) => nav.clearanceAt(i) * 2 - dC(i) * 0.2);
       const door = cell >= 0 ? cellPos(cell) : { x: NAV_START.x + shopHouses.length * 6, z: NAV_START.z };
-      shopHouses.push({ building: null, door });
+      // (walking out: away from the middle)
+      const exitYaw = dist2(door.x, door.z, C.x, C.z) > 0.1 ? Math.atan2(door.x - C.x, door.z - C.z) : 0;
+      shopHouses.push({ building: null, door, exitYaw });
     }
     const shops = {};
     ['goods', 'gear'].forEach((key, k) => {
-      const { building, door } = shopHouses[k];
-      // (walking out: away from the house)
-      const from = building ?? C;
-      const exitYaw = dist2(door.x, door.z, from.x, from.z) > 0.1 ? Math.atan2(door.x - from.x, door.z - from.z) : 0;
+      const { building, door, exitYaw } = shopHouses[k];
       shops[key] = { key, building, door, exitYaw };
     });
     const market = shops.goods.door;
@@ -222,13 +248,10 @@ export function installTownLayout(T, ctx) {
     // door outside, its sign
     for (const [key, label, sign] of [['goods', '🧺 Goods', '🧺 Goods Shop'], ['gear', '⚔️ Weapons', '⚔️ Weapon Shop']]) {
       T.stalls.build(group, { key, label, keeper: key === 'gear' });
-      const { door, building } = places.shops[key];
+      const { door, exitYaw } = places.shops[key];
       // (a little out from the door, away from the house)
-      const len = building ? Math.max(0.1, dist2(door.x, door.z, building.x, building.z)) : 1;
-      const dx = building ? (door.x - building.x) / len : 0;
-      const dz = building ? (door.z - building.z) / len : 0;
       const signSprite = makeTextSprite(sign, { height: 0.34 });
-      signSprite.position.set(door.x + dx * 0.4, groundAt(door.x, door.z) + 2.5, door.z + dz * 0.4);
+      signSprite.position.set(door.x + Math.sin(exitYaw) * 0.3, groundAt(door.x, door.z) + 2.5, door.z + Math.cos(exitYaw) * 0.3);
       group.add(signSprite);
     }
     // Campfire

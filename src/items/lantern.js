@@ -13,7 +13,7 @@ const LANTERN_GLASS_Y = 1.4;           // model units: the light sits in the gla
 const LANTERN_GLASS_MATERIAL = 'Material.001';
 const LANTERN_GLOW = Object.freeze({ color: 0xffd98a, intensity: 1.6 });
 // Like the road lights' (ROAD_LIGHT_POINT_LIGHT_CONFIG), a little shorter reach
-export const LANTERN_LIGHT_CONFIG = Object.freeze({ color: 0xfff1c1, intensity: 2.4, distance: 22, decay: 0.8 });
+export const LANTERN_LIGHT_CONFIG = Object.freeze({ color: 0xfff1c1, intensity: 4, distance: 45, decay: 0.6 });
 
 let templatePromise = null;
 const loadTemplate = () => {

@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
 import {
   CHEST_PRICE, CHOP_HITS, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
-  MARKET_HOURS, PICK_DIST, PRODUCE, SHOP_DOOR_DIST, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
+  MARKET_HOURS, PICK_DIST, PRODUCE, SHOP_DOOR_DIST, SHOP_DOOR_ENTER_DIST, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
 
@@ -109,11 +109,11 @@ export function installTownTrade(T, ctx) {
   const nearestStall = () => (nearStallKey('gear') ? 'gear' : nearStallKey('goods') ? 'goods' : null);
   const nearStall = () => nearStallKey('goods');
   // The shop door outside the player's at, or null
-  const nearShopDoor = () => {
+  const nearShopDoor = (dist = SHOP_DOOR_DIST) => {
     if (playerShop()) return null;
     const p = T.playerPos();
     for (const [key, s] of Object.entries(T.layout.places.shops)) {
-      if (dist2(p.x, p.z, s.door.x, s.door.z) < SHOP_DOOR_DIST) return key;
+      if (dist2(p.x, p.z, s.door.x, s.door.z) < dist) return key;
     }
     return null;
   };
@@ -130,7 +130,9 @@ export function installTownTrade(T, ctx) {
     T.stopFishingRig?.();
     ctx.putWeaponsAway?.();
     const d = T.stalls.doorInside(key);
-    ctx.teleport(d.x, d.z, Math.PI); // (facing in: the back counter)
+    // (turned the way the player faced the door: in the room, π faces in — the back counter;
+    // outside, exitYaw + π)
+    ctx.teleportTurned(d.x, d.z, -T.layout.places.shops[key].exitYaw);
     ctx.setPositionConstraint(T.stalls.constrainPlayer);
     T.inShop = key;
     T.stalls.setInside(key);
@@ -146,12 +148,38 @@ export function installTownTrade(T, ctx) {
     ctx.setPositionConstraint(null);
     T.inShop = null;
     T.stalls.setInside(null);
-    ctx.teleport(s.door.x, s.door.z, s.exitYaw);
+    // (facing out of the room the way the player faced its doorway)
+    ctx.teleportTurned(s.door.x, s.door.z, s.exitYaw);
+    // (not straight back in: the door walks in again once the player has stepped away from it)
+    T.doorRearm = key;
+    T.doorLast = null;
     T.actsAt = 0;
+  };
+  // Outside: walking into a shop's door (close to it, heading for the house) goes in — no button
+  const walkInDoor = () => {
+    const p = T.playerPos();
+    const last = T.doorLast;
+    T.doorLast = { x: p.x, z: p.z };
+    if (T.doorRearm) {
+      const d = T.layout.places.shops[T.doorRearm].door;
+      if (dist2(p.x, p.z, d.x, d.z) < SHOP_DOOR_DIST) return;
+      T.doorRearm = null;
+    }
+    if (!last) return;
+    const mx = p.x - last.x;
+    const mz = p.z - last.z;
+    const step = Math.hypot(mx, mz);
+    if (step < 0.005 || step > 1) return; // (standing still, or a teleport)
+    const key = nearShopDoor(SHOP_DOOR_ENTER_DIST);
+    if (!key || !canEnterShop()) return;
+    // (in = toward the house: against the way out)
+    const yaw = T.layout.places.shops[key].exitYaw;
+    if ((mx * -Math.sin(yaw) + mz * -Math.cos(yaw)) / step > 0.4) enterShop(key);
   };
   // Each frame: out through the doorway; or moved out of the shop some other way (knocked
   // out, arrested…) — its constraint and light go
   const updateShop = () => {
+    if (!T.inShop && !T.jail && !T.sequence) walkInDoor();
     const p = T.playerPos();
     const at = T.stalls.shopAt(p.x, p.z);
     if (T.inShop && at === T.inShop && T.stalls.leftThroughDoor(p.x, p.z)) { leaveShop(); return; }
