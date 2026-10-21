@@ -122,9 +122,9 @@ export function createTownMode(ctx) {
   T.lantern = false;          // the player carries a lantern (night, out of town)
   const law = { stars: 0, peak: 0, lastSeenAt: 0, lastKnown: new THREE.Vector3(), seen: false, tickAt: 0 };
   T.jail = null;              // { left } while the player is in the cell
-  T.inShop = null;            // the shop the player's in ('goods' | 'gear', townStalls.js)
-  T.doorRearm = null;         // a shop door just walked out of (not back in till stepped away from)
-  T.doorLast = null;          // the player's spot last frame (walking into a shop door)
+  T.inRoom = null;            // the room the player's in ('goods' | 'gear' | 'home<i>', townRooms.js)
+  T.doorRearm = null;         // a door just walked out of (not back in till stepped away from)
+  T.doorLast = null;          // the player's spot last frame (walking into a door)
   T.sequence = null;          // busted / knocked out in progress (timeout token)
   T.gossip = [];              // [{ kind, who, by, at, fresh }]
   T.arrivals = [];            // [{ role, at }]
@@ -399,14 +399,14 @@ export function createTownMode(ctx) {
     if (night !== T.isNight) {
       T.isNight = night;
       ctx.setTimeOfDay(night ? 'night' : 'day');
-      T.stalls.setNight(night);
+      T.rooms.setNight(night);
     }
     topClock.textContent = clockText();
   };
   // At night, out past the houses, the player carries a lantern (a little nearer before it's
   // put away again, so it doesn't flicker on the edge)
   const updateLantern = () => {
-    if (!T.isNight || T.inShop || T.jail || !T.layout.buildings.length) { T.lantern = false; return; }
+    if (!T.isNight || T.inRoom || T.jail || !T.layout.buildings.length) { T.lantern = false; return; }
     const p = T.playerPos();
     let d = Infinity;
     for (const b of T.layout.buildings) d = Math.min(d, Math.hypot(p.x - b.x, p.z - b.z) - b.radius);
@@ -493,6 +493,7 @@ export function createTownMode(ctx) {
     renderStars();
     window.addEventListener('keydown', T.onKey);
     T.stalls.setActive(true);
+    T.rooms.setActive(true);
     // Shared town: find the player's room meanwhile (townNet.js) — the town waits on it
     T.netMode = 'off';
     T.laidOut = false;
@@ -538,6 +539,7 @@ export function createTownMode(ctx) {
     markers.clear();
     tracker.render([]);
     T.stalls.setActive(false);
+    T.rooms.setActive(false);
     T.fishing = null;
     T.stopFishingRig();
     T.hideFishingHud();
@@ -553,13 +555,13 @@ export function createTownMode(ctx) {
       T.releaseBody(n);
     }
     T.npcs = [];
-    if (T.jail || T.inShop) { T.jail = null; ctx.setPositionConstraint(null); }
-    // (out of a shop's room first: it's off the island)
-    if (T.inShop) {
-      const s = T.layout.places.shops[T.inShop];
-      ctx.teleport(s.door.x, s.door.z, s.exitYaw);
+    if (T.jail || T.inRoom) { T.jail = null; ctx.setPositionConstraint(null); }
+    // (out of a house's room first: it's under the map)
+    if (T.inRoom) {
+      const r = T.layout.places.rooms[T.inRoom];
+      ctx.teleport(r.door.x, r.door.z, r.exitYaw);
     }
-    T.inShop = null;
+    T.inRoom = null;
     jailChip.classList.add('hidden');
     campChip.classList.add('hidden');
     Object.assign(campWatch, { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 });
@@ -612,7 +614,7 @@ export function createTownMode(ctx) {
     const occupied = T.jail || T.npcs.some((n) => n.alive && n.jailedUntil > T.simT);
     door.rotation.y = angleLerp(door.rotation.y, occupied ? 0 : -1.9, 1 - Math.exp(-4 * dt));
 
-    T.updateShop();
+    T.updateRooms();
     for (const n of T.npcs) T.updateNpc(n, dt);
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);
     T.updateFishing(dt);
@@ -638,9 +640,9 @@ export function createTownMode(ctx) {
   // townsperson it passes through (those fighting are EnemyPlayers — the stage code hits
   // them), or chops the tree it's in
   const trySwordHit = (tip, swingDir) => {
-    if (!T.active || !T.ready || T.sequence || T.inShop) return false;
+    if (!T.active || !T.ready || T.sequence || T.inRoom) return false;
     for (const n of T.npcs) {
-      if (!n.alive || !n.body || n.fighter || n.inside || n.dying || T.stalls.shopAt(n.x, n.z)) continue;
+      if (!n.alive || !n.body || n.fighter || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
       if (T.simT - n.lastHitAt < 0.7) continue;
       const cy = T.groundY(n) + 0.55 * heightScale(n.url);
       if (Math.hypot(tip.x - n.x, tip.y - cy, tip.z - n.z) > 0.7) continue;

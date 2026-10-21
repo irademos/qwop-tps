@@ -1,6 +1,7 @@
-// Town: the layout, built once from the map — the walkability grid (townNav.js), homes, the
-// shops (two of the houses), the campfire, the jail, fields, work spots, the patrol loop, the
-// bandit camp — and its props.
+// Town: the layout, built once from the map — the walkability grid (townNav.js), the shops (two
+// of the houses) and the homes (the rest; each house with a known door opens into a room —
+// townRooms.js), the campfire, the jail, fields, work spots, the patrol loop, the bandit camp —
+// and its props.
 
 import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
@@ -111,10 +112,13 @@ export function installTownLayout(T, ctx) {
       const exitYaw = dist2(door.x, door.z, C.x, C.z) > 0.1 ? Math.atan2(door.x - C.x, door.z - C.z) : 0;
       shopHouses.push({ building: null, door, exitYaw });
     }
+    // Every room a door opens into (townRooms.js): the shops, then the homes below
+    const rooms = {};
     const shops = {};
     ['goods', 'gear'].forEach((key, k) => {
       const { building, door, exitYaw } = shopHouses[k];
-      shops[key] = { key, building, door, exitYaw };
+      shops[key] = { key, kind: 'shop', building, door, exitYaw };
+      rooms[key] = shops[key];
     });
     const market = shops.goods.door;
     const fireCell = best(nav.cellsWhere((i) => {
@@ -151,7 +155,8 @@ export function installTownLayout(T, ctx) {
     nav.block(jailPos.x, jailPos.z, 1.7);
     nav.refresh();
 
-    // Homes: a walkable spot by each house (not the shops)
+    // Homes: a walkable spot by each house (not the shops); a house whose front door is known
+    // opens into a room of its own ('home<i>' — its townsfolk sleep in there)
     const homes = [];
     for (const b of buildings) {
       if (shopHouses.some((h) => h.building === b)) continue;
@@ -159,9 +164,16 @@ export function installTownLayout(T, ctx) {
       if (i < 0) continue;
       const d = dist2(nav.cellX(i), nav.cellZ(i), b.x, b.z);
       if (d > b.radius + 4) continue;
-      homes.push({ x: nav.cellX(i), z: nav.cellZ(i), building: b });
+      const home = { x: nav.cellX(i), z: nav.cellZ(i), building: b, room: null };
+      const door = doorOf(b);
+      if (door) {
+        home.room = `home${homes.length}`;
+        T.rooms.add(home.room, 'home');
+        rooms[home.room] = { key: home.room, kind: 'home', home: homes.length, building: b, ...door };
+      }
+      homes.push(home);
     }
-    if (!homes.length) homes.push({ ...fire });
+    if (!homes.length) homes.push({ ...fire, room: null });
 
     // Work spots
     const treeSpots = [];
@@ -222,7 +234,7 @@ export function installTownLayout(T, ctx) {
     // The fishing spot (one for now): the shore spot nearest the middle — the first fisher's too
     const fishSpot = shore[0] ?? null;
     const places = {
-      center: C, market, shops, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
+      center: C, market, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
       homes, treeSpots, fields, shore, fishSpot, patrol, entrance, camp, campFire, strongbox,
       // the player arrives between the goods shop and the fire
       spawn: (() => {
@@ -244,8 +256,9 @@ export function installTownLayout(T, ctx) {
   };
   const buildProps = (places) => {
     const group = new THREE.Group();
-    // The shops (townStalls.js; async GLBs): the rooms, far off the island; over each shop's
-    // door outside, its sign
+    // The rooms (townRooms.js; async GLBs), under the map: the homes', then the shops' with their
+    // counters (townStalls.js); over each shop's door outside, its sign
+    for (const key of Object.keys(places.rooms)) if (places.rooms[key].kind === 'home') T.rooms.build(group, key);
     for (const [key, label, sign] of [['goods', '🧺 Goods', '🧺 Goods Shop'], ['gear', '⚔️ Weapons', '⚔️ Weapon Shop']]) {
       T.stalls.build(group, { key, label, keeper: key === 'gear' });
       const { door, exitYaw } = places.shops[key];

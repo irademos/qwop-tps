@@ -13,8 +13,8 @@ export function installTownLaw(T, ctx) {
   // ── Fighting (a townsperson swapped for an EnemyPlayer) ──
   // (standoff: sword drawn, facing the player, not attacking until ctx.setFighterPassive(e, false))
   const promote = (n, { standoff = false } = {}) => {
-    // (no fighting in the shops: they're rooms off the island — townStalls.js)
-    if (n.fighter || !n.alive || T.stalls.shopAt(n.x, n.z) || !T.take(n)) return;
+    // (no fighting indoors: the rooms are under the map — townRooms.js)
+    if (n.fighter || !n.alive || T.rooms.roomAt(n.x, n.z) || !T.take(n)) return;
     T.releaseBody(n);
     n.inside = false;
     const e = ctx.spawnFighter({
@@ -170,6 +170,7 @@ export function installTownLaw(T, ctx) {
     // Home if it's away from the player, otherwise straight away from them
     const homeAway = dist2(n.home.x, n.home.z, p.x, p.z) > dist2(n.x, n.z, p.x, p.z) + 4;
     let to = n.home;
+    let hide = true;
     if (!homeAway) {
       const ax = n.x - p.x;
       const az = n.z - p.z;
@@ -178,8 +179,11 @@ export function installTownLaw(T, ctx) {
       const tz = n.z + (az / d) * 18;
       const i = T.layout.nav.nearestWalkable(tx, tz);
       to = i >= 0 ? { x: T.layout.nav.cellX(i), z: T.layout.nav.cellZ(i) } : n.home;
+      hide = to === n.home;
     }
-    T.setTask(n, { type: 'flee', to, dur: 0, run: true, hide: to === n.home });
+    // (hiding at home: in their room, if the house has one)
+    if (hide && n.home.room) to = T.rooms.somewhereIn(n.home.room);
+    T.setTask(n, { type: 'flee', to, dur: 0, run: true, hide });
   };
 
   // ── Crime and the law ──

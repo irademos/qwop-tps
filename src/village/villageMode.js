@@ -47,6 +47,7 @@ const LIFE_POTION_MODEL = '/assets/props/life_potion.glb';
 const MANA_POTION_MODEL = '/assets/props/mana_potion.glb';
 const TREASURE_CHEST_MODEL = '/assets/props/treasure_chest.glb';
 const SHOP_INTERIOR_MODEL = '/assets/props/shop.glb';
+const HOME_INTERIOR_MODEL = '/assets/props/home_interior.glb';
 // The stall / potion / chest numbers come from a game with ~1.8 m characters; ours are
 // 1 m tall, so the whole set is shrunk by this
 const VILLAGE_PROP_SCALE = 0.55;
@@ -397,6 +398,15 @@ export async function loadTreasureChest() {
 // = +Z, three counters — in its own units (metres), floor at its bottom; townStalls scales it
 export async function loadShopInterior() {
   const gltf = await loadProp(SHOP_INTERIOR_MODEL);
+  const room = markShared(gltf.scene.clone(true));
+  room.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
+  return room;
+}
+
+// …and its homes: the same room with the front wall (the doorway in it), a ceiling, windows
+// and a bed, no counters (src/town/townRooms.js)
+export async function loadHomeInterior() {
+  const gltf = await loadProp(HOME_INTERIOR_MODEL);
   const room = markShared(gltf.scene.clone(true));
   room.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
   return room;

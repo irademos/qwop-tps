@@ -76,15 +76,17 @@ export const MERCHANT_START_CASH = 60;      // coins the merchant starts out wit
 export const FIREWOOD_CHANCE = 0.35;        // a townsperson buying food takes some firewood home too
 export const MARKET_HOURS = [7, 20];
 export const TRADE_DIST = 3.4;              // m from a shop's back counter for its buttons (🧺 Goods / 💰 Sell, ⚔️ Weapons)
-// The shops (townStalls.js): two of the town's houses are the goods shop and the weapon shop;
-// walking in through the door puts the player inside — a room (shop.glb) far off the island, out of
-// sight, where every shop's floor is its own ground (world m: the middle of its floor)
-export const SHOP_INTERIORS = {
-  goods: { x: -250, y: 30, z: -45 },
-  gear: { x: -250, y: 30, z: -20 },
-};
-export const SHOP_DOOR_DIST = 0.4;          // m from a shop's door outside: stepped away from it after coming out
-export const SHOP_DOOR_ENTER_DIST = 0.2;    // m from a shop's door outside where walking toward the house goes in
+// The rooms (townRooms.js): two of the town's houses are the goods shop and the weapon shop, the
+// rest homes; walking in through a door puts you inside its room — the shops' shop.glb, the
+// homes' home_interior.glb — each far off the island and under the seabed, out of sight: a grid
+// from ROOMS_ORIGIN (world m: the middle of the first room's floor), ROOM_SPACING apart (further
+// than anyone sees across — WITNESS_DIST / LAW_SIGHT), every room's floor its own ground
+export const ROOMS_ORIGIN = { x: -250, y: -40, z: -40 };
+export const ROOM_SPACING = 32;
+export const ROOM_COLUMNS = 6;
+export const DOOR_DIST = 0.4;               // m from a door outside: stepped away from it after coming out
+export const DOOR_ENTER_DIST = 0.2;         // m from a door outside where walking toward the house goes in
+export const HOME_VISIT_CHANCE = 0.2;       // a stroll in the day: a while at home instead
 export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the weapon shop
 export const CHEST_PRICE = 30;              // the weapon shop's mystery chest
 export const CHOP_HITS = 3;                 // sword hits on a tree per 🪵

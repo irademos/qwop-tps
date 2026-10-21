@@ -8,7 +8,7 @@ import { makeTextSprite } from '../village/villageMode.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
   BODY_DIST, BODY_RELEASE_DIST, BUBBLE_S, CAMERA_CLEAR_DIST, LABEL_DIST, MERCHANT_START_CASH,
-  MUG_CHANCE, SHOP_BROWSE_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, heightScale, inHours, pickOf, rand,
+  HOME_VISIT_CHANCE, MUG_CHANCE, SHOP_BROWSE_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -108,13 +108,13 @@ export function installTownFolk(T, ctx) {
   };
 
   // ── Paths / tasks ──
-  // Through a shop's door: walking up to it outside, then stepping in (a jump to the room, far
-  // off the island — townStalls.js) and on inside; and back out the same way
+  // Through a house's door: walking up to it outside, then stepping in (a jump to its room,
+  // under the map — townRooms.js) and on inside; and back out the same way
   const planPath = (n, x, z) => {
-    const st = T.stalls;
+    const st = T.rooms;
     const P = T.layout.places;
-    const from = st.shopAt(n.x, n.z);
-    const to = st.shopAt(x, z);
+    const from = st.roomAt(n.x, n.z);
+    const to = st.roomAt(x, z);
     if (from && from === to) {
       n.path = st.roomPath(from, n.x, n.z, x, z);
       n.pathI = 0;
@@ -126,12 +126,12 @@ export function installTownFolk(T, ctx) {
     if (from) {
       const inDoor = st.doorInside(from);
       path.push(...st.roomPath(from, n.x, n.z, inDoor.x, inDoor.z));
-      const out = P.shops[from].door;
+      const out = P.rooms[from].door;
       path.push({ x: out.x, z: out.z, jump: true });
       sx = out.x;
       sz = out.z;
     }
-    const ex = to ? P.shops[to].door : { x, z };
+    const ex = to ? P.rooms[to].door : { x, z };
     const leg = T.layout.nav.findPath(sx, sz, ex.x, ex.z) ?? [];
     // The last few metres straight onto the spot (by a tree, the door…)
     const last = leg[leg.length - 1] ?? { x: sx, z: sz };
@@ -173,8 +173,8 @@ export function installTownFolk(T, ctx) {
     if (n.pathI >= p.length) { n.moving = false; return true; }
     return false;
   };
-  // Ground a townsperson can stand on: the town's walkable grid, or a shop's floor
-  const walkable = (x, z) => T.layout.nav.isWalkable(x, z) || T.stalls.isFree(x, z);
+  // Ground a townsperson can stand on: the town's walkable grid, or a room's floor
+  const walkable = (x, z) => T.layout.nav.isWalkable(x, z) || T.rooms.isFree(x, z);
   const faceToward = (n, x, z, dt) => {
     if (dist2(n.x, n.z, x, z) < 0.05) return;
     n.yaw = angleLerp(n.yaw, Math.atan2(x - n.x, z - n.z), 1 - Math.exp(-8 * dt));
@@ -186,8 +186,8 @@ export function installTownFolk(T, ctx) {
     return { x: fire.x + Math.sin(a) * 1.7, z: fire.z + Math.cos(a) * 1.7 };
   };
   const randomNear = (x, z, r) => {
-    const shop = T.stalls.shopAt(x, z);
-    if (shop) return T.stalls.spotNear(shop, x, z, r);
+    const room = T.rooms.roomAt(x, z);
+    if (room) return T.rooms.spotNear(room, x, z, r);
     for (let k = 0; k < 12; k++) {
       const a = Math.random() * Math.PI * 2;
       const d = Math.random() * r;
@@ -285,7 +285,11 @@ export function installTownFolk(T, ctx) {
       const seat = fireSlot(n);
       setTask(n, { type, to: seat, dur: rand(25, 45), face: P.fire });
     } else if (type === 'sleep') {
-      setTask(n, { type, to: n.home, dur: Infinity });
+      // (in their room, by the bed — else by the house)
+      setTask(n, { type, to: n.home.room ? T.rooms.bedside(n.home.room) : n.home, dur: Infinity });
+    } else if (n.home.room && !n.def.outlaw && !(T.hour() >= 21.5 || T.hour() < 6) && Math.random() < HOME_VISIT_CHANCE) {
+      // (a while at home)
+      setTask(n, { type: 'wander', to: T.rooms.somewhereIn(n.home.room), dur: rand(10, 25) });
     } else {
       const roadish = Math.random() < 0.7;
       // (the walkable area runs far out of town: a wanderer too far out heads back)
@@ -332,6 +336,8 @@ export function installTownFolk(T, ctx) {
     label.visible = false;
     inst.container.add(label);
     inst.container.visible = true;
+    // (yaw first: a sleeper lies down — rotation.x — facing whichever way that left them)
+    inst.container.rotation.order = 'YXZ';
     inst.character.revive();
     inst.character.setMoving(false);
     n.body = { ...inst, label };
@@ -345,7 +351,7 @@ export function installTownFolk(T, ctx) {
     n.bodyPending = true;
     createGLBCharacterInstance({ targetHeight: 1.0, url: n.url, armIK: false }).then((inst) => {
       n.bodyPending = false;
-      if (T.active && n.wantsBody && !n.body && (n.alive || n.dying) && !n.fighter && !n.inside) attachBody(n, inst);
+      if (T.active && n.wantsBody && !n.body && (n.alive || n.dying) && drawable(n, T.rooms.roomAt(T.playerPos().x, T.playerPos().z))) attachBody(n, inst);
       else toPool(n.url, inst);
     }).catch((e) => { n.bodyPending = false; console.warn('[Town] character load failed:', e); });
   };
@@ -366,11 +372,23 @@ export function installTownFolk(T, ctx) {
     n.body = null;
     toPool(n.url, { container, character });
   };
+  // Asleep at home (a room of their own): lying on the bed, a place each
+  const sleepPose = (n) => {
+    if (!n.inside || n.task?.type !== 'sleep' || !n.home?.room || T.rooms.roomAt(n.x, n.z) !== n.home.room) return null;
+    const k = T.npcs.filter((m) => m.inside && m.alive && m.homeIndex === n.homeIndex && m.task?.type === 'sleep' && m.id < n.id).length;
+    return T.rooms.sleepPose(n.home.room, k);
+  };
   const syncBody = (n, dt) => {
     const b = n.body;
     if (!b) return;
-    b.container.position.set(n.x, groundY(n), n.z);
-    b.container.rotation.y = n.yaw;
+    const lying = sleepPose(n);
+    if (lying) {
+      b.container.position.set(lying.x, lying.y, lying.z);
+      b.container.rotation.set(-Math.PI / 2, lying.yaw, 0);
+    } else {
+      b.container.position.set(n.x, groundY(n), n.z);
+      b.container.rotation.set(0, n.yaw, 0);
+    }
     if (!n.dying) b.character.setMoving(n.moving);
     b.character.animate(dt);
     b.character.stepFluff(dt);
@@ -385,9 +403,13 @@ export function installTownFolk(T, ctx) {
     if (n.bubble && T.simT > n.bubble.until) clearBubble(n);
     if (n.bubble) n.bubble.sprite.visible = !nearCamera;
   };
+  // Drawn at all: out and about where the player is — in town, or in the same room (where
+  // those at home are seen too: asleep on the bed, hiding)
+  const drawable = (n, room) => !n.fighter && T.rooms.roomAt(n.x, n.z) === room && (!n.inside || !!room);
   const updateLod = () => {
     const p = playerPos();
-    const list = T.npcs.filter((n) => (n.alive || n.dying) && !n.inside && !n.fighter)
+    const room = T.rooms.roomAt(p.x, p.z);
+    const list = T.npcs.filter((n) => (n.alive || n.dying) && drawable(n, room))
       .map((n) => ({ n, d: dist2(n.x, n.z, p.x, p.z) }))
       .sort((a, b) => a.d - b.d);
     list.forEach(({ n, d }, i) => {
@@ -396,7 +418,7 @@ export function installTownFolk(T, ctx) {
       else releaseBody(n);
     });
     for (const n of T.npcs) {
-      if ((n.inside || n.fighter) && n.body) { n.wantsBody = false; releaseBody(n); }
+      if (n.body && !drawable(n, room)) { n.wantsBody = false; releaseBody(n); }
     }
   };
 

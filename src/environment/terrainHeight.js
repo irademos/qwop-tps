@@ -2,6 +2,7 @@
 // downward raycast, see bootstrapGameApp.js), never below the active map's floor (flat ground
 // when none reports a height). The floor is 0 unless the map sets one (an island map: just
 // under its sea level, so characters wade in the shallows instead of sinking to the sea floor).
+// An override (Town's rooms, under the map) wins outright where it reports a height.
 let terrainFloor = 0;
 
 export function setTerrainFloor(y = 0) {
@@ -18,7 +19,21 @@ export function registerTerrainHeightResolver(resolver) {
   };
 }
 
+const heightOverrides = new Set();
+
+export function registerTerrainHeightOverride(override) {
+  if (typeof override !== "function") return () => {};
+  heightOverrides.add(override);
+  return () => {
+    heightOverrides.delete(override);
+  };
+}
+
 export function getTerrainHeight(x = 0, z = 0) {
+  for (const override of heightOverrides) {
+    const y = override(x, z);
+    if (Number.isFinite(y)) return y;
+  }
   let height = terrainFloor;
   for (const resolver of extraHeightResolvers) {
     const resolved = resolver(x, z, height);
