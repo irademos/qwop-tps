@@ -74,6 +74,21 @@ export async function findTownRoom(key, name) {
   throw new Error('no town room could be joined');
 }
 
+// A place in the room (members away too long are dropped on the way); false when it's full
+async function joinRoom(roomId, key, name) {
+  const now = Date.now();
+  const res = await runTransaction(ref(db, `townRoomMembers/${roomId}`), (cur) => {
+    const next = {};
+    for (const [k, m] of Object.entries(cur || {})) if (live(m, now)) next[k] = m;
+    if (!next[key] && Object.keys(next).length >= TOWN_ROOM_MAX) return undefined; // full: abort
+    next[key] = { name: name || '', seen: now };
+    return next;
+  });
+  if (!res.committed) return false;
+  await set(ref(db, `townHome/${key}`), roomId);
+  return true;
+}
+
 export const loadTownRoomState = async (roomId) => {
   try { return (await get(ref(db, `townRoomState/${roomId}`))).val(); } catch (_) { return null; }
 };
