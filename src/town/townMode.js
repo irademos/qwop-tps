@@ -200,8 +200,11 @@ export function createTownMode(ctx) {
     onSellGood: (g) => T.sellGood(g),
     onClose: () => T.closeMarket(),
   });
-  // A townsperson's job talk (townJobs.js), the quest tracker, the jailbreak lock
-  const jobTalk = createJobTalk(hud);
+  // The talk box with a townsperson (townJobs.js; townActs.js), the quest tracker, the jailbreak lock
+  const jobTalk = createJobTalk(hud, {
+    onEnd: () => T.endTalk(),
+    top: () => (T.talking?.npc ? T.relationRow(T.talking.npc) : null),
+  });
   const tracker = createQuestTracker(hud);
   const lockpick = createLockpick(hud);
 
@@ -596,7 +599,7 @@ export function createTownMode(ctx) {
     T.updateMarkers();
     if (T.simT > T.lodAt) { T.lodAt = T.simT + 0.4; T.updateLod(); }
     for (const n of T.npcs) if (n.body && !n.dying) T.syncBody(n, dt);
-    if (T.simT > T.actsAt) { T.actsAt = T.simT + 0.15; T.refreshActs(); T.updateRelation(); }
+    if (T.simT > T.actsAt) { T.actsAt = T.simT + 0.15; T.refreshActs(); }
     if (T.simT > T.saveAt) { T.saveAt = T.simT + SAVE_EVERY_S; save(); }
     // (the weapon stall's keeper is there in the market's hours)
     T.stalls.setKeeperVisible('gear', T.gearOpen());

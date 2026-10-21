@@ -4250,25 +4250,19 @@ body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-botto
   font-weight: 800;
   animation: village-act-in 0.2s var(--ease);
 }
-/* Who the player's talking to: their mood toward the player (townMemory.js) */
+/* Who the player's talking to: their mood toward the player — a row in the talk box (townMemory.js relationRow) */
 .town-relation {
-  position: absolute;
-  left: 50%;
-  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
-  min-width: 200px;
-  max-width: calc(100% - 32px);
-  padding: 8px 14px;
-  background: var(--surface-hud);
-  backdrop-filter: none;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
 }
-body.mobile-block-bar .town-relation { bottom: calc(156px + env(safe-area-inset-bottom, 0px)); }
-body.town-market-open .town-relation { display: none; }
-.town-relation-who { font-size: 14px; font-weight: 800; white-space: nowrap; }
+.town-relation-who { font-size: 12px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
 .town-relation-bar {
+  flex: 1 1 60px;
+  max-width: 120px;
   height: 6px;
-  margin: 6px 0 2px;
   border-radius: var(--radius-pill);
   background: var(--surface-hover);
   overflow: hidden;
@@ -4278,7 +4272,7 @@ body.town-market-open .town-relation { display: none; }
 .town-relation-fill[data-mood='low'] { background: var(--accent-lo); }
 .town-relation-fill[data-mood='mid'] { background: var(--accent); }
 .town-relation-fill[data-mood='good'] { background: var(--success); }
-.town-relation-note { margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+.town-relation-note { font-size: 11px; color: var(--text-dim); }
 @media (max-width: 520px) {
   .town-top { left: calc(50% + 34px); gap: 6px; padding: 6px 10px; font-size: 13px; }
   .town-top-rep-title { display: none; }

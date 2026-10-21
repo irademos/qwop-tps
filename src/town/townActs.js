@@ -1,4 +1,4 @@
-// Town: talking with townsfolk and the interact buttons (bottom centre, E / Enter, the phone's
+// Town: talking with townsfolk (the talk box) and the interact buttons (bottom centre, E / Enter, the phone's
 // Block bar).
 
 import { FOLLOW_LINES, fillLine, firstName, giftLine, talkLine } from './townPeople.js';
@@ -10,11 +10,52 @@ import {
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownActs(T, ctx) {
-  // ── Talking with the player ──
+  // ── Talking with the player: the talk box at the bottom (townJobs.js createJobTalk) with what
+  // they say and what the player can say back; speech bubbles are for townsfolk among themselves ──
+  const whoOf = (n) => `${n.def.emoji} ${firstName(n.name)}`;
+  // A line of small talk (something they remember the player did, now and then — townMemory.js)
+  const smallTalk = (n) => {
+    const taskType = n.task?.type === 'talk' ? n.task.prevType : n.task?.type;
+    const line = T.memoryLine(n) ?? talkLine(n, { playerName: ctx.getPlayerName(), taskType, market: marketTalk() });
+    if (T.simT - n.talkBonusAt > 60) {
+      n.talkBonusAt = T.simT;
+      n.attitude = Math.min(1, n.attitude + 0.04);
+    }
+    return line;
+  };
+  // Show what they said, with the player's answers
+  const chat = (n, text) => {
+    T.talking = { npc: n };
+    const choices = [];
+    if (n.fear > 0) {
+      choices.push({ label: '👋 Leave them be', primary: true });
+    } else {
+      choices.push({ label: '💬 Chat', primary: true, onClick: () => { if (n.alive) chat(n, smallTalk(n)); } });
+      if (n.following) {
+        choices.push({ label: '👋 Go home', onClick: () => {
+          const said = T.dismiss(n, undefined, { quiet: true });
+          if (said) farewell(n, said);
+        } });
+      } else if (T.canRecruit(n)) {
+        choices.push({ label: '🤝 Join me', onClick: () => {
+          const said = T.recruit(n, { quiet: true });
+          if (said) farewell(n, said, '👍 Let\'s go');
+        } });
+      }
+      choices.push({ label: `🪙 Give ${GIFT_COINS}`, onClick: () => gift(n) });
+      choices.push({ label: '👋 Goodbye' });
+    }
+    T.jobTalk.open({ who: whoOf(n), sub: n.def.label, text, choices });
+  };
+  // Their last word (joining the player / heading home), one button to close
+  const farewell = (n, text, label = '👋 Bye') => {
+    T.talking = { npc: n };
+    T.jobTalk.open({ who: whoOf(n), sub: n.def.label, text, choices: [{ label, primary: true }] });
+  };
   const talkTo = (n) => {
     if (!n.alive || !n.body) return;
-    if (n.fear > 0) { T.say(n, talkLine(n)); return; }
-    if (n.following) { T.say(n, fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() }), { big: true }); T.talking = { npc: n }; return; }
+    if (n.fear > 0) { chat(n, talkLine(n)); return; }
+    if (n.following) { chat(n, fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() })); return; }
     const taskType = n.task?.type === 'talk' ? n.task.prevType : n.task?.type;
     // (someone busy with another player — shared town — talks without stopping)
     if (n.task?.type !== 'talk') {
@@ -31,32 +72,31 @@ export function installTownActs(T, ctx) {
     if (T.introTalk(n)) return;
     const job = T.jobOf(n);
     if (job && n.attitude >= GRUDGE_ATTITUDE && !(job.shady && n.attitude <= -0.2)) { T.openJobTalk(n, job); return; }
-    // Something they remember the player did, now and then (townMemory.js)
-    const memory = T.memoryLine(n);
-    T.say(n, memory ?? talkLine(n, { playerName: ctx.getPlayerName(), taskType, market: marketTalk() }), { big: true });
-    if (T.simT - n.talkBonusAt > 60) {
-      n.talkBonusAt = T.simT;
-      n.attitude = Math.min(1, n.attitude + 0.04);
-    }
+    chat(n, smallTalk(n));
   };
   const gift = (n) => {
     if (!n.alive) return;
-    if (ctx.getCoins() < GIFT_COINS) { T.say(n, giftLine(n, ctx.getPlayerName(), true), { big: true }); return; }
+    if (ctx.getCoins() < GIFT_COINS) { chat(n, giftLine(n, ctx.getPlayerName(), true)); return; }
     ctx.addCoins(-GIFT_COINS);
     ctx.playSfx('coin');
     T.npcMoney(n, GIFT_COINS);
     n.attitude = Math.min(1, n.attitude + 0.25);
     T.remember(n, 'gift');
     if (n.task?.type === 'talk') n.task.t = 0;
-    T.say(n, giftLine(n, ctx.getPlayerName()), { big: true });
     if (n.attitude >= FRIEND_ATTITUDE && !n.friendNoted) {
       n.friendNoted = true;
       T.feedLine(`🤝 ${firstName(n.name)} is your friend now — they won't tell the guards on you.`);
     }
+    chat(n, giftLine(n, ctx.getPlayerName()));
   };
   const clearTalk = (n) => {
     if (T.talking?.npc === n) T.talking = null;
     if (n.task?.type === 'talk') n.task = null;
+  };
+  // (the talk box closed: they go back to what they were doing)
+  const endTalk = () => {
+    const n = T.talking?.npc;
+    if (n) clearTalk(n);
   };
   const clearAllTalk = () => {
     T.talking = null;
@@ -115,7 +155,7 @@ export function installTownActs(T, ctx) {
       out.push({ key: 'sleep', label: '😴 Sleep it off', onClick: T.sleepItOff });
       return out;
     }
-    if (T.jobTalk.isOpen()) return out; // (the talk box has its own buttons)
+    if (T.jobTalk.isOpen()) return out; // (the talk box has its own answers)
     if (T.law.stars > 0) {
       const p = T.playerPos();
       if (T.npcs.some((n) => n.fighter && n.def.law && dist2(n.x, n.z, p.x, p.z) < GIVE_UP_DIST)) {
@@ -157,11 +197,6 @@ export function installTownActs(T, ctx) {
       const icon = T.isIntroGuide(n) ? '❗' : j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : '💬';
       // (and how they feel about the player — townMemory.js)
       out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)} ${T.moodOf(n.attitude).emoji}`, onClick: () => talkTo(n) });
-      if (T.talking?.npc === n) {
-        if (n.following) out.push({ key: `dismiss:${n.id}`, label: '👋 Go home', onClick: () => T.dismiss(n) });
-        else if (T.canRecruit(n)) out.push({ key: `join:${n.id}`, label: '🤝 Join me', onClick: () => T.recruit(n) });
-        else out.push({ key: `gift:${n.id}`, label: `🪙 Give ${GIFT_COINS}`, onClick: () => gift(n) });
-      }
     }
     if (calm) {
       out.push(...T.cookActs());
@@ -206,6 +241,6 @@ export function installTownActs(T, ctx) {
   };
 
   Object.assign(T, {
-    clearAllTalk, clearTalk, interact, marketTalk, onKey, refreshActs,
+    clearAllTalk, clearTalk, endTalk, interact, marketTalk, onKey, refreshActs,
   });
 }
