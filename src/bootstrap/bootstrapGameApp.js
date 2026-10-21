@@ -8527,7 +8527,8 @@ async function initCore(runtimeContext) {
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
     // The phone controller's reel: radians cranked since the last call
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
-    isPhoneConnected: () => !!window.phoneSwordGyro?.connected,
+    // A phone controller (it shows its own reel) — not "Use This Device", which needs the on-screen one
+    isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
     // Phone buzz on a fishing cue (status → the phone vibrates when its fishCue changes)
     refreshPhone: () => _phoneSwordStatusNow?.(),
     grantItem: (kind, n) => grantTownItem(kind, n),
