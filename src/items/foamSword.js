@@ -3,6 +3,7 @@ import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { Weapon } from './weapon.js';
 import { loadAllSwordModelTemplates, createSwordModelInstance, swordVariantForCharacter } from './swordModel.js';
 import { createWandModel } from './magicWand.js';
+import { createFishingRodModel, ROD_HOLD_PITCH } from './fishingRod.js';
 import { characterHold } from '../models/glbCharacterModel.js';
 
 export const FOAM_SWORD_ITEM_ID = 'foamSword';
@@ -82,10 +83,19 @@ export class FoamSword extends Weapon {
       holdOffset: new THREE.Vector3(0, 0, 0),
     });
     this._groundOffset = 0.35;
-    this._variant = null; // sword model shown: 'default' (sword.glb), 'wii' (Mii holder) or 'wand'
+    this._variant = null; // sword model shown: 'default' (sword.glb), 'wii' (Mii holder), 'wand' or 'rod'
     // Sword Showdown magic wand: held exactly like the sword (same gyro hold), only the model
     // changes; the game casts spells instead of sword hits while it's out (bootstrapGameApp.js)
     this.wand = false;
+    // Town fishing rod: the same again — held and swung with the gyro like the sword, the game
+    // casts / hooks / reels with it instead of sword hits (townTrade.js)
+    this.rod = false;
+  }
+
+  /** The fishing rod model on the hand, or null. */
+  getRodModel() {
+    if (this._variant !== 'rod') return null;
+    return (this.heldMesh || this.mesh)?.children.find((c) => c.name === 'fishing-rod') || null;
   }
 
   /** The wand model on the hand (its orb glows while casting), or null. */
@@ -102,7 +112,10 @@ export class FoamSword extends Weapon {
     this._variant = variant;
     for (const group of new Set([this.mesh, this.heldMesh].filter(Boolean))) {
       group.clear();
-      const model = variant === 'wand' ? createWandModel() : createSwordModelInstance({ variant });
+      const model = variant === 'wand' ? createWandModel()
+        : variant === 'rod' ? createFishingRodModel()
+        : createSwordModelInstance({ variant });
+      if (variant === 'rod') model.rotation.x = ROD_HOLD_PITCH;
       if (model) group.add(model);
       else buildFoamSwordParts(group);
     }
@@ -133,7 +146,7 @@ export class FoamSword extends Weapon {
       const pm = this.holder.playerModel;
       pm.userData.foamSwordMode = true;
       // Mii characters hold the Wii sword (with their ball hands on the handle)
-      this._setVariant(this.wand ? 'wand' : swordVariantForCharacter(pm.userData.qwopRig?.characterUrl));
+      this._setVariant(this.rod ? 'rod' : this.wand ? 'wand' : swordVariantForCharacter(pm.userData.qwopRig?.characterUrl));
 
       // Derive where the blade points (+Z axis of sword in player-local space)
       _fsSwordDir.set(0, 0, 1).applyQuaternion(this._holdQuaternion);

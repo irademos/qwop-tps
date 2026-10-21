@@ -13,7 +13,8 @@ import { dist2, heightScale } from './townConfig.js';
 
 // guide: the role who gives it (null: no one — goal only); talk: what they say (talkOnly: the
 // talk is the goal); goal + n: what the player does (introNote kinds); at: where its 📍 is;
-// noTalk: carries straight on from the step before (same guide); coins: what it pays
+// noTalk: carries straight on from the step before (same guide); coins: what it pays;
+// gives: an item the guide hands over on accepting (ctx.grantItem — unless the player has one)
 const STEPS = [
   {
     id: 'welcome', guide: 'merchant', title: 'Say hello at the market', talkOnly: true, coins: 3, skippable: true,
@@ -22,10 +23,10 @@ const STEPS = [
     done: 'Go see {next} — they\'ll show you the ropes.',
   },
   {
-    id: 'fish', guide: 'fisher', title: 'Go fishing', goal: 'fish', n: 1, coins: 4, at: 'guideWork',
-    talk: 'Come fishing with me, {name}! Stand by the water and cast your line — 🎣 Fish. It takes a few goes. Catch one and it\'s yours.',
+    id: 'fish', guide: 'fisher', title: 'Go fishing', goal: 'fish', n: 1, coins: 4, at: 'fishSpot', gives: 'rod',
+    talk: 'Come fishing, {name}! Here — my old rod, it\'s yours. At the 🎣 fishing spot, swing it forward to cast. When the bobber goes under, pull the rod back sharp to hook it. Let it run, pull when it tires, then reel it in. Catch one and it\'s yours.',
     accept: '🎣 Let\'s fish',
-    progress: 'Catch a fish 🐟 by the water',
+    progress: 'Catch a fish 🐟 at the 🎣 fishing spot',
     done: 'Ha, a fine catch! Now cook it over the town fire — grilled fish fills you up far better.',
   },
   {
@@ -183,6 +184,7 @@ export function installTownIntro(T, ctx) {
       label: s.accept ?? '👍 Okay', primary: true,
       onClick: () => {
         if (T.intro?.step !== STEPS.indexOf(s)) return;
+        if (s.gives && !ctx.getItems()?.[s.gives] && ctx.grantItem(s.gives)) T.feedLine(`🎁 ${firstName(n.name)} gave you a ${s.gives === 'rod' ? 'fishing rod 🎣' : s.gives}.`);
         if (s.talkOnly) complete();
         else { T.intro.phase = 'do'; T.intro.count = 0; T.save(); }
       },
@@ -208,6 +210,7 @@ export function installTownIntro(T, ctx) {
     }
     if (s.at === 'guideWork' && g?.work) return { icon: '📍', x: g.work.x, z: g.work.z, h: 1.5 };
     if (s.at === 'fire') return { icon: '📍', ...P.fire, h: 1.9 };
+    if (s.at === 'fishSpot' && P.fishSpot) return { icon: '📍', x: P.fishSpot.x, z: P.fishSpot.z, h: 1.5 };
     if (s.at === 'market') return { icon: '📍', ...P.market, h: 2.6 };
     return null;
   };

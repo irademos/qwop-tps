@@ -174,9 +174,11 @@ export function installTownLayout(T, ctx) {
     nav.block(campFire.x, campFire.z, 0.8);
     nav.refresh();
 
+    // The fishing spot (one for now): the shore spot nearest the middle — the first fisher's too
+    const fishSpot = shore[0] ?? null;
     const places = {
       center: C, market, gearStall, gearSign, merchantSpot, customerSpot, stallYaw, fire, jail: jailPos, jailYaw, officeSpot,
-      homes, treeSpots, fields, shore, patrol, entrance, camp, campFire, strongbox,
+      homes, treeSpots, fields, shore, fishSpot, patrol, entrance, camp, campFire, strongbox,
       // the player arrives between the market and the fire
       spawn: { x: (market.x + fire.x) / 2 + fwd.z * 2.2, z: (market.z + fire.z) / 2 - fwd.x * 2.2 },
     };
@@ -283,6 +285,20 @@ export function installTownLayout(T, ctx) {
     strongbox.position.set(places.strongbox.x, groundAt(places.strongbox.x, places.strongbox.z), places.strongbox.z);
     strongbox.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     group.add(strongbox);
+    // The fishing spot: a signpost on the bank
+    if (places.fishSpot) {
+      const fs = places.fishSpot;
+      const away = Math.atan2(fs.x - fs.face.x, fs.z - fs.face.z); // (from the water, inland)
+      const px = fs.x + Math.sin(away) * 0.9;
+      const pz = fs.z + Math.cos(away) * 0.9;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.1), wood);
+      post.position.set(px, groundAt(px, pz) + 0.75, pz);
+      post.castShadow = true;
+      group.add(post);
+      const fishSign = makeTextSprite('🎣 Fishing spot', { height: 0.26 });
+      fishSign.position.set(px, groundAt(px, pz) + 1.75, pz);
+      group.add(fishSign);
+    }
     const campSign = makeTextSprite('💀 Bandit camp', { height: 0.28 });
     campSign.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 2.3, places.camp.z);
     group.add(campSign);

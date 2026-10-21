@@ -218,9 +218,72 @@
     #btn-jump   { background: rgba(99, 102, 241, 0.4); border-color: rgba(165, 180, 252, 0.6); }
     #btn-wand   { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
     #btn-wand.owned { display: block; }
-    /* Town: 🗡 Sword ↔ ✋ Hands (put everything away) */
+    /* Town: 🗡 Sword ↔ ✋ Hands (put everything away); the fishing rod once bought */
     #btn-sword { display: none; }
     #btn-sword.shown { display: block; }
+    #btn-rod { background: rgba(13, 148, 136, 0.42); border-color: rgba(153, 246, 228, 0.6); display: none; }
+    #btn-rod.owned { display: block; }
+    /* Town fishing with the line out: the bar is a reel — crank the handle round (clockwise)
+       to wind the line in; the ring shows the line's tension, the middle what to do */
+    #reel {
+      display: none;
+      position: relative;
+      justify-self: center;
+      width: clamp(150px, 44vw, 190px);
+      height: clamp(150px, 44vw, 190px);
+      border-radius: 50%;
+      background: radial-gradient(circle, #334155 0%, #1e293b 62%, #0f172a 100%);
+      border: 6px solid var(--tension, #22c55e);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 10px rgba(255, 255, 255, 0.04);
+      touch-action: none;
+      transition: border-color 0.15s;
+    }
+    body.reel-mode #reel { display: block; }
+    body.reel-mode #block-btn { display: none; }
+    #reel-handle {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    #reel-handle::before { /* the crank arm */
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 12%;
+      width: 10px;
+      height: 38%;
+      margin-left: -5px;
+      border-radius: 5px;
+      background: #94a3b8;
+    }
+    #reel-handle::after { /* the knob, where the thumb goes */
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 6%;
+      width: 40px;
+      height: 40px;
+      margin: -14px 0 0 -20px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #fde68a, #c89a62);
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+    }
+    #reel-text {
+      position: absolute;
+      left: 22%;
+      right: 22%;
+      top: 50%;
+      transform: translateY(-50%);
+      text-align: center;
+      font-size: 0.82rem;
+      font-weight: 800;
+      line-height: 1.2;
+      color: #fff;
+      pointer-events: none;
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+    }
+    #reel.cue-pull, #reel.cue-bite { animation: reel-cue 0.45s ease-in-out infinite; }
+    @keyframes reel-cue { 50% { box-shadow: 0 0 0 8px rgba(250, 204, 21, 0.7), 0 8px 32px rgba(0, 0, 0, 0.5); } }
     /* Block with a slot on either side */
     #block-row {
       width: min(100%, 380px);
@@ -374,6 +437,8 @@ Gun</button>
 Shield</button>
       <button class="ctl-btn row-btn" id="btn-wand" data-action="wand">🪄
 Wand</button>
+      <button class="ctl-btn row-btn" id="btn-rod" data-action="rod">🎣
+Rod</button>
       <button class="ctl-btn row-btn" id="btn-bomb" data-action="bomb">💣
 0</button>
       <button class="ctl-btn row-btn" id="btn-bubble" data-action="bubble">🫧
@@ -382,6 +447,7 @@ Wand</button>
     <div id="block-row">
       <div class="block-side" id="block-side-left"></div>
       <button id="block-btn">🛡️ BLOCK</button>
+      <div id="reel"><div id="reel-handle"></div><div id="reel-text"></div></div>
       <div class="block-side" id="block-side-right"></div>
     </div>
     <div id="joy-row">
@@ -460,6 +526,48 @@ Wand</button>
     blockBtn.addEventListener('pointercancel', releaseBar);
     blockBtn.addEventListener('pointerleave', releaseBar);
 
+    // ── Fishing reel (Town, the line out — reelMode in the game's status) ──
+    // Cranking the handle round clockwise winds the line in; the radians wound so far go out
+    // as a running total in every gyro packet (reelTotal), so a lost packet loses nothing.
+    const reelEl = document.getElementById('reel');
+    const reelHandle = document.getElementById('reel-handle');
+    const reelText = document.getElementById('reel-text');
+    let reelTotal = 0;
+    let reelAngle = 0;          // the handle's angle (drawn)
+    let reelPointer = null;     // { id, angle } while a finger turns it
+    let reelSinceTick = 0;
+    const reelAngleOf = (e) => {
+      const r = reelEl.getBoundingClientRect();
+      return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
+    };
+    reelEl.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      try { reelEl.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+      reelPointer = { id: e.pointerId, angle: reelAngleOf(e) };
+    });
+    reelEl.addEventListener('pointermove', (e) => {
+      if (!reelPointer || e.pointerId !== reelPointer.id) return;
+      const a = reelAngleOf(e);
+      let d = a - reelPointer.angle;
+      if (d > Math.PI) d -= Math.PI * 2;
+      if (d < -Math.PI) d += Math.PI * 2;
+      reelPointer.angle = a;
+      reelAngle += d;
+      reelHandle.style.transform = `rotate(${reelAngle}rad)`;
+      // (clockwise on screen winds in; a reel won't wind backwards)
+      if (d > 0) {
+        reelTotal += d;
+        reelSinceTick += d;
+        if (reelSinceTick > Math.PI && navigator.vibrate) { reelSinceTick = 0; navigator.vibrate(6); } // (the reel's click)
+      }
+    });
+    const endReel = (e) => { if (reelPointer && e.pointerId === reelPointer.id) reelPointer = null; };
+    reelEl.addEventListener('pointerup', endReel);
+    reelEl.addEventListener('pointercancel', endReel);
+    // A buzz for each fishing cue the game sends (a bite, the fish running, time to pull…)
+    const FISH_BUZZ = { bite: [70, 40, 70, 40, 140], run: [40], pull: [90], landed: [150, 60, 150], snap: [320], lost: [200] };
+    let fishCue = null;
+
     // ── Joystick (angle in radians, 0 = right, π/2 = up; force 0–1) ────────
     const joystickEl = document.getElementById('joystick');
     const joystickKnob = document.getElementById('joystick-knob');
@@ -527,7 +635,7 @@ Wand</button>
     const swipes = new Map(); // pointerId → { x, y, t }
     document.addEventListener('pointerdown', (e) => {
       if (!document.body.classList.contains('controller-mode') || document.body.classList.contains('block-only')) return;
-      if (e.target.closest?.('button, #joystick')) return;
+      if (e.target.closest?.('button, #joystick, #reel')) return;
       swipes.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() });
     });
     const endSwipe = (e) => {
@@ -552,16 +660,17 @@ Wand</button>
     const btnShield = document.getElementById('btn-shield');
     const btnWand = document.getElementById('btn-wand');
     const btnSword = document.getElementById('btn-sword');
+    const btnRod = document.getElementById('btn-rod');
     // The button row above Block holds up to ACTION_ROW_MAX of the buttons shown; any more go
     // in the slots beside Block (left, then right)
     const ACTION_ROW_MAX = 5;
     const actionRow = document.getElementById('action-grid');
     const blockSides = [document.getElementById('block-side-left'), document.getElementById('block-side-right')];
-    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnBomb, btnBubble];
+    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnRod, btnBomb, btnBubble];
     function layoutRowButtons() {
       let n = 0;
       rowButtons.forEach((b) => {
-        const shown = b === btnWand ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
+        const shown = b === btnWand || b === btnRod ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
         const parent = !shown || n < ACTION_ROW_MAX ? actionRow : blockSides[n - ACTION_ROW_MAX] ?? actionRow;
         if (shown) n += 1;
         parent.appendChild(b); // (re-appended in order, so the order holds)
@@ -586,6 +695,22 @@ Wand</button>
       btnWand.classList.toggle('owned', !!st.hasWand);
       btnWand.classList.toggle('equipped', st.equipped === 'magic_wand');
       btnWand.textContent = st.equipped === 'magic_wand' ? `${back.replace('\n', ' ')}\n🔮${st.mana ?? 0}` : `🪄 Wand\n🔮${st.mana ?? 0}`;
+      // Town's fishing rod (once bought): swaps with the sword / empty hands like the wand
+      btnRod.classList.toggle('owned', !!st.hasRod);
+      btnRod.classList.toggle('equipped', st.equipped === 'fishing_rod');
+      btnRod.textContent = st.equipped === 'fishing_rod' ? back : '🎣\nRod';
+      // The line out: the bar's a reel
+      const reeling = !!st.reelMode;
+      if (reeling && !document.body.classList.contains('reel-mode') && pressMode) releaseBar();
+      document.body.classList.toggle('reel-mode', reeling);
+      if (!reeling) reelPointer = null;
+      const cue = reeling ? st.fishCue || null : null;
+      if (cue !== fishCue && cue && FISH_BUZZ[cue] && navigator.vibrate) navigator.vibrate(FISH_BUZZ[cue]);
+      fishCue = cue;
+      reelText.textContent = reeling ? st.fishText || '' : '';
+      ['bite', 'pull'].forEach((c) => reelEl.classList.toggle(`cue-${c}`, cue === c));
+      const tension = Math.max(0, Math.min(1, Number(st.tension) || 0));
+      reelEl.style.setProperty('--tension', tension > 0.75 ? '#ef4444' : tension > 0.45 ? '#f59e0b' : '#22c55e');
       // Town: 🗡 Sword out / ✋ Hands (nothing in hand)
       btnSword.classList.toggle('shown', !!st.canUnequip);
       const unarmed = st.equipped === 'none';
@@ -685,6 +810,7 @@ Wand</button>
               blocking: isBlocking,
               joyAngle: joy.angle,
               joyForce: joy.force,
+              reel: reelTotal,
               ts: Date.now()
             });
           } catch (_) { /* ignore */ }

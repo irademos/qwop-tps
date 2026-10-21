@@ -67,13 +67,38 @@ export const TREE_REGROW_S = 40;            // …one per this many seconds
 export const CHOP_REACH = 0.85;             // m from the sword tip to the trunk
 export const CROP_REGROW_S = 70;            // s until a picked crop is back
 export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
-export const FISH_WATER_CELLS = 2;          // 🎣 Fish within this many nav cells of the water
-export const FISH_S = [3, 6];               // s per cast
-export const FISH_CHANCE = 0.6;
-export const FISH_CAST_DIST = 4;            // m — the bobber lands on the water nearest this far in front
-export const FISH_CAST_REACH = 6;           // m — no farther than this
-export const FISH_BITE_S = 1.2;             // s — the bobber shows the bite this long before the catch
-export const FISH_CANCEL_DIST = 0.8;        // m — walking off cancels the cast
+// Fishing (townFishing.js): the rod is bought at the weapon stall and held like the sword; swing
+// it forward to cast, wait for a bite, pull it back to hook the fish, then wear it out — pull
+// when it tires, ease off while it runs — and crank the reel to bring it in
+export const FISH_SPOT_RADIUS = 6;          // m — fish from this close to the fishing spot (one for now)
+export const FISH_CAST_DIST = [3, 9];       // m — the gentlest cast … the hardest
+export const FISH_CAST_REACH = 10;          // m — the water searched for where the bobber lands
+export const FISH_GESTURE_S = 0.25;         // s — a cast / pull is the rod tip's travel within this
+export const FISH_CAST_SWING = [0.7, 2];    // m forward: a cast … full power
+export const FISH_PULL_SWING = 0.55;        // m back / up: a pull
+export const FISH_SETTLE_S = 0.9;           // s after a cast (its follow-through) before a pull counts
+export const FISH_WAIT_S = [4, 11];         // s until a bite
+export const FISH_NIBBLE_CHANCE = 0.55;     // a nibble first (pulling on it scares the fish off)
+export const FISH_NIBBLE_S = 1.4;
+export const FISH_HOOK_S = 1.1;             // s to pull after the bobber goes under
+// How hard a hooked fish fights: pulls = good pulls to tire it out, n = fish it's worth
+export const FISH_SIZES = [
+  { label: 'a little one', pulls: 1, n: 1, w: 5 },
+  { label: 'a fine fish', pulls: 2, n: 1, w: 4 },
+  { label: 'a big one', pulls: 3, n: 2, w: 2 },
+];
+export const FISH_RUN_S = [1.3, 2.6];       // s it swims off, pulling line out…
+export const FISH_TIRED_S = 1.5;            // …then tires at the surface: the moment to pull
+export const FISH_RUN_SPEED = 1.1;          // m/s of line it takes while running
+export const FISH_PULL_KEEP = 0.6;          // a good pull brings it in to this share of the line out
+export const FISH_REEL_M = 0.7;             // m of line wound in per turn of the reel
+export const FISH_TENSION_PER_TURN = 0.4;   // reeling against a running fish strains the line…
+export const FISH_PULL_TENSION = 0.45;      // …so does pulling on it
+export const FISH_TENSION_DECAY = 0.3;      // per s
+export const FISH_LINE_MAX = 14;            // m — it takes all the line: gone
+export const FISH_LAND_DIST = 1.4;          // m — reeled in this close: landed
+export const FISH_KEY_REEL = 1.6;           // turns / s holding R (no phone)
+export const FISH_CANCEL_DIST = 1.2;        // m — walking off reels in
 
 // ── Reactions ──
 export const ATTITUDE_FADE = 0.004;         // per second, toward 0 (fondness fades at half the rate)
