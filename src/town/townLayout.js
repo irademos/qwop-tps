@@ -56,8 +56,8 @@ export function installTownLayout(T, ctx) {
       return false;
     };
 
-    // The shops: the two houses nearest the middle with an open spot by them (their door — the
-    // side facing the middle of town) are the goods shop and the weapon shop (nobody lives there);
+    // The shops: the house nearest the middle with an open spot by it (its door — the side
+    // facing the middle of town) is the goods shop, the nearest one like it the weapon shop (nobody lives there);
     // the campfire a little way off the goods shop; the jail by a road further out
     const offRoad = (i) => nav.kindAt(i) !== 2;
     const doorOf = (b) => {
@@ -67,12 +67,23 @@ export function installTownLayout(T, ctx) {
       const i = best(cells, (j) => -dist2(nav.cellX(j), nav.cellZ(j), b.x, b.z) - dC(j) * 0.35);
       return i >= 0 ? cellPos(i) : null;
     };
+    // (the weapon shop is the same kind of house as the goods shop when the town has another —
+    // the nearest one of that model; any other house otherwise)
     const shopHouses = [];
-    for (const b of [...buildings].sort((a, b2) => dist2(a.x, a.z, C.x, C.z) - dist2(b2.x, b2.z, C.x, C.z))) {
-      if (shopHouses.length >= 2 || buildings.length - shopHouses.length <= 1) break;
-      if (shopHouses.some((h) => dist2(h.building.x, h.building.z, b.x, b.z) < 6)) continue;
-      const door = doorOf(b);
-      if (door) shopHouses.push({ building: b, door });
+    const byMiddle = [...buildings].sort((a, b2) => dist2(a.x, a.z, C.x, C.z) - dist2(b2.x, b2.z, C.x, C.z));
+    const pickShopHouse = (want) => {
+      for (const b of byMiddle) {
+        if (buildings.length - shopHouses.length <= 1) return false;
+        if (want && !want(b)) continue;
+        if (shopHouses.some((h) => h.building === b || dist2(h.building.x, h.building.z, b.x, b.z) < 6)) continue;
+        const door = doorOf(b);
+        if (door) { shopHouses.push({ building: b, door }); return true; }
+      }
+      return false;
+    };
+    if (pickShopHouse()) {
+      const file = shopHouses[0].building.file;
+      if (!pickShopHouse((b) => b.file === file)) pickShopHouse();
     }
     // (no houses to spare: the doors stand on the most open spots off the road)
     while (shopHouses.length < 2) {

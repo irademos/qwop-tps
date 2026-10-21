@@ -70,8 +70,8 @@ export const SHOP_INTERIORS = {
   goods: { x: -250, y: 30, z: -45 },
   gear: { x: -250, y: 30, z: -20 },
 };
-export const SHOP_DOOR_DIST = 2.6;          // m from a shop's door outside: stepped away from it after coming out
-export const SHOP_DOOR_ENTER_DIST = 1.6;    // m from a shop's door outside where walking toward the house goes in
+export const SHOP_DOOR_DIST = 1.4;          // m from a shop's door outside: stepped away from it after coming out
+export const SHOP_DOOR_ENTER_DIST = 0.4;    // m from a shop's door outside where walking toward the house goes in
 export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the weapon shop
 export const CHEST_PRICE = 30;              // the weapon shop's mystery chest
 export const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
