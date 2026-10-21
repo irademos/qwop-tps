@@ -8,7 +8,7 @@
 // on the townsperson (n.mem, saved with the town; in a shared town with the player's own things).
 
 import { firstName } from './townPeople.js';
-import { FRIEND_ATTITUDE, GRUDGE_ATTITUDE, TALK_RANGE, el, pickOf } from './townConfig.js';
+import { FRIEND_ATTITUDE, GRUDGE_ATTITUDE, el, pickOf } from './townConfig.js';
 
 const MAX_MEMORIES = 6;
 const MEMORY_DAYS = 14;              // days a memory lasts (the dead are remembered for good)
@@ -115,16 +115,7 @@ export function installTownMemory(T, ctx) {
     repEl.title = 'What the town thinks of you';
   };
 
-  // ── Who the player's talking to: their mood toward the player ──
-  const relationEl = el('div', 'town-relation ui-panel hidden');
-  const relWho = el('div', 'town-relation-who');
-  const relBar = el('div', 'town-relation-bar');
-  const relFill = el('div', 'town-relation-fill');
-  relBar.append(relFill);
-  const relNote = el('div', 'town-relation-note');
-  relationEl.append(relWho, relBar, relNote);
-  T.hud.append(relationEl);
-  let relKey = '';
+  // ── Who the player's talking to: their mood toward the player (a row in the talk box) ──
   const relationNote = (n) => {
     if (n.vendetta) return 'Wants revenge';
     if (n.attitude <= GRUDGE_ATTITUDE) return 'Won\'t trade with you';
@@ -132,28 +123,24 @@ export function installTownMemory(T, ctx) {
     if (n.attitude >= FRIEND_ATTITUDE) return n.role === 'merchant' ? 'Won\'t tell the guards · gives you a discount' : 'Won\'t tell the guards on you';
     return '';
   };
-  const updateRelation = () => {
-    const n = T.talking?.npc;
-    const show = !!n && n.alive && !n.def.outlaw && !n.fighter && T.distToPlayer(n) < TALK_RANGE + 1.5 && !T.sequence;
-    relationEl.classList.toggle('hidden', !show);
-    if (!show) { relKey = ''; return; }
+  const relationRow = (n) => {
     const mood = moodOf(n.attitude);
-    const key = `${n.id}|${mood.label}|${Math.round(n.attitude * 20)}|${relationNote(n)}`;
-    if (key === relKey) return;
-    relKey = key;
-    relWho.textContent = `${mood.emoji} ${firstName(n.name)} · ${mood.label}`;
-    relFill.style.width = `${Math.round((n.attitude + 1) * 50)}%`;
-    relFill.dataset.mood = n.attitude <= GRUDGE_ATTITUDE ? 'bad' : n.attitude < -0.15 ? 'low' : n.attitude < FRIEND_ATTITUDE ? 'mid' : 'good';
-    relNote.textContent = relationNote(n);
-    relNote.classList.toggle('hidden', !relNote.textContent);
+    const row = el('div', 'town-relation');
+    const bar = el('div', 'town-relation-bar');
+    const fill = el('div', 'town-relation-fill');
+    fill.style.width = `${Math.round((n.attitude + 1) * 50)}%`;
+    fill.dataset.mood = n.attitude <= GRUDGE_ATTITUDE ? 'bad' : n.attitude < -0.15 ? 'low' : n.attitude < FRIEND_ATTITUDE ? 'mid' : 'good';
+    bar.append(fill);
+    const note = relationNote(n);
+    row.append(el('span', 'town-relation-who', `${mood.emoji} ${mood.label}`), bar);
+    if (note) row.append(el('span', 'town-relation-note', note));
+    return row;
   };
   const resetMemoryHud = () => {
     repTitle = null;
-    relKey = '';
-    relationEl.classList.add('hidden');
   };
 
   Object.assign(T, {
-    forget, memBiasOf: biasOf, memoryLine, moodOf, remember, reputation, resetMemoryHud, updateRelation, updateReputation,
+    forget, memBiasOf: biasOf, memoryLine, moodOf, relationRow, remember, reputation, resetMemoryHud, updateReputation,
   });
 }

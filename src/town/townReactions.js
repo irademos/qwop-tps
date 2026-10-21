@@ -170,20 +170,25 @@ export function installTownReactions(T, ctx) {
   // Followers: friends who come along
   const canRecruit = (n) => n.alive && !n.following && n.attitude >= FOLLOW_ATTITUDE && !n.def.law && !n.def.outlaw
     && !n.def.unhurt && n.role !== 'merchant' && followers().length < MAX_FOLLOWERS && T.law.stars < 2;
-  const recruit = (n) => {
-    if (!canRecruit(n) || !T.take(n)) return;
+  // (quiet: the line is returned for the talk box instead of said over their head)
+  const recruit = (n, { quiet = false } = {}) => {
+    if (!canRecruit(n) || !T.take(n)) return null;
     n.following = true;
     T.clearTalk(n);
     T.setTask(n, { type: 'follow', dur: Infinity });
-    T.say(n, fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() }), { big: true });
+    const said = fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() });
+    if (!quiet) T.say(n, said, { big: true });
     T.feedLine(`🤝 ${firstName(n.name)} is coming with you.`);
+    return said;
   };
-  const dismiss = (n, line = FOLLOW_LINES.leave) => {
-    if (!n.following) return;
+  const dismiss = (n, line = FOLLOW_LINES.leave, { quiet = false } = {}) => {
+    if (!n.following) return null;
     n.following = false;
     T.clearTalk(n);
-    T.say(n, fillLine(pickOf(line), { name: ctx.getPlayerName() }));
+    const said = fillLine(pickOf(line), { name: ctx.getPlayerName() });
+    if (!quiet) T.say(n, said);
     T.decide(n);
+    return said;
   };
   // Walk toward a moving spot (re-planned now and then)
   const chase = (n, x, z, dt, run) => {
