@@ -8,8 +8,8 @@
 //
 // Economy (townEconomy.js): woodcutters, farmers and fishers bring wood, veg and fish to the
 // market and are paid by the merchant; everyone buys their food (and firewood) there; prices
-// follow the stock. The player gathers too — chops trees with the sword, fishes from the shore,
-// picks veg (stealing, if anyone sees) — and trades at the market: two stalls side by side
+// follow the stock. The player gathers too — chops trees with the sword, fishes at the fishing
+// spot with a rod bought at the weapon stall (townFishing.js), picks veg (stealing, if anyone sees) — and trades at the market: two stalls side by side
 // (townStalls.js), shopped like the Showdown village's — the goods stall (wood / fish / veg,
 // the merchant behind it) and the weapon stall (the gear + a mystery chest); selling goods is
 // the market panel (townMarketPanel.js). In Town the player owns only what they bought here,
@@ -92,6 +92,7 @@ import { installTownLaw } from './townLaw.js';
 import { installTownReactions } from './townReactions.js';
 import { installTownBandits } from './townBandits.js';
 import { installTownTrade } from './townTrade.js';
+import { installTownFishing } from './townFishing.js';
 import { installTownLife } from './townLife.js';
 import { installTownMissions } from './townMissions.js';
 import { installTownActs } from './townActs.js';
@@ -134,7 +135,7 @@ export function createTownMode(ctx) {
   T.market = createMarket();   // the stall's stock (replaced by the saved one on enter)
   const goods = Object.fromEntries(GOOD_IDS.map((g) => [g, 0])); // what the player carries
   const soldOut = new Set();  // goods the market has run out of (for the feed)
-  T.fishing = null;           // { left, x, z } while the player's line is out
+  T.fishing = null;           // while the player's line is out (townFishing.js)
   T.cooking = null;           // { recipe, left, x, z } while something's on the fire (townCooking.js)
   T.intro = null;             // the first day's goals (townIntro.js), null once done
   T.jobs = [];                // posted + taken jobs (townJobs.js)
@@ -524,6 +525,7 @@ export function createTownMode(ctx) {
     T.stalls.setActive(false);
     T.fishing = null;
     T.stopFishingRig();
+    T.hideFishingHud();
     T.cooking = null;
     T.resetMemoryHud();
     T.active = false;
@@ -651,6 +653,7 @@ export function createTownMode(ctx) {
   installTownReactions(T, ctx);
   installTownBandits(T, ctx);
   installTownTrade(T, ctx);
+  installTownFishing(T, ctx);
   installTownLife(T, ctx);
   installTownMissions(T, ctx);
   installTownActs(T, ctx);
@@ -665,6 +668,8 @@ export function createTownMode(ctx) {
     exit,
     update,
     trySwordHit,
+    // Fishing, the line out: the phone's Block bar is a reel ({ reel, cue, text, tension }) — or null
+    fishingHud: () => (T.active && T.ready ? T.fishingHud() : null),
     getWeaponTargets: T.getWeaponTargets,
     getMagicTargets: T.getMagicTargets,
     onPlayerDown,

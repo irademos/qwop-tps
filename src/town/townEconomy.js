@@ -27,6 +27,7 @@ const SELL_SHARE = 0.6;    // what the merchant pays, as a share of the price
 // weapon that must be owned first
 export const SHOP_GEAR = [
   { id: 'sword',  kind: 'sword',  label: 'Sword',      emoji: '🗡️', price: 30,  desc: 'Swing it with the phone. Chops trees too.' },
+  { id: 'rod',    kind: 'rod',    label: 'Fishing Rod', emoji: '🎣', price: 25,  desc: 'Swing it forward to cast at the fishing spot, pull back to hook, reel it in.' },
   { id: 'shield', kind: 'shield', label: 'Shield',     emoji: '🛡️', price: 40,  desc: 'Stops swings, bullets and bombs from in front.' },
   { id: 'gun',    kind: 'gun',    label: 'Gun',        emoji: '🔫', price: 80,  desc: 'Comes with 12 bullets.' },
   { id: 'ammo',   kind: 'ammo',   label: '10 Bullets', emoji: '🔶', price: 15,  n: 10, needs: 'gun' },

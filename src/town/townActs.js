@@ -164,7 +164,7 @@ export function installTownActs(T, ctx) {
       }
     }
     if (T.fishing) {
-      out.push({ key: 'fishing', label: '🎣 Fishing… (reel in)', onClick: () => { T.fishing = null; } });
+      out.push(...T.fishingActs(false)); // (the reel / the rod do the rest; no gyro: ⬆ Pull)
       return out;
     }
     if (T.cooking) {
@@ -201,7 +201,7 @@ export function installTownActs(T, ctx) {
     if (calm) {
       out.push(...T.cookActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
-      if (T.nearWater()) out.push({ key: 'fish', label: '🎣 Fish', onClick: T.startFishing });
+      out.push(...T.fishingActs(true));
       const food = T.hurtFood();
       if (food) out.push({ key: `eat:${food}`, label: `🍽 Eat ${GOODS[food].emoji}`, onClick: () => T.eat(food) });
     }

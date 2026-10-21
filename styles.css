@@ -4250,6 +4250,89 @@ body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-botto
   font-weight: 800;
   animation: village-act-in 0.2s var(--ease);
 }
+/* Fishing (townFishing.js): what to do now + the line out / its strain, above the acts */
+.town-fishing {
+  position: absolute;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: min(320px, calc(100% - 32px));
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+body.mobile-block-bar .town-fishing { bottom: calc(160px + env(safe-area-inset-bottom, 0px)); }
+.town-fishing-cue { font: 800 16px var(--font-ui); text-align: center; color: var(--text); }
+.town-fishing[data-cue='bite'] .town-fishing-cue,
+.town-fishing[data-cue='pull'] .town-fishing-cue { color: var(--accent); animation: town-fish-cue 0.45s ease-in-out infinite; }
+.town-fishing[data-cue='snap'] .town-fishing-cue,
+.town-fishing[data-cue='lost'] .town-fishing-cue { color: var(--danger); }
+.town-fishing[data-cue='landed'] .town-fishing-cue { color: var(--success); }
+@keyframes town-fish-cue { 50% { transform: scale(1.08); } }
+.town-fishing-bars { display: flex; flex-direction: column; gap: 4px; }
+.town-fishing-bars:empty { display: none; }
+.town-fishing-row { display: flex; align-items: center; gap: 8px; }
+.town-fishing-label { width: 46px; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.town-fishing-track { flex: 1; height: 6px; border-radius: var(--radius-pill); background: var(--surface-hover); overflow: hidden; }
+.town-fishing-fill { height: 100%; width: 0; border-radius: inherit; background: var(--info); transition: width 0.15s linear; }
+.town-fishing-fill[data-level='low'] { background: var(--success); }
+.town-fishing-fill[data-level='mid'] { background: var(--accent); }
+.town-fishing-fill[data-level='high'] { background: var(--danger); }
+/* The on-screen reel (no phone connected — the phone has its own): crank it clockwise */
+.town-reel {
+  position: absolute;
+  right: calc(16px + env(safe-area-inset-right, 0px));
+  top: 50%;
+  width: 132px;
+  height: 132px;
+  margin-top: -66px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #334155 0%, #1e293b 62%, #0f172a 100%);
+  border: 4px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  touch-action: none;
+  cursor: grab;
+  pointer-events: auto;
+}
+.town-reel-handle { position: absolute; inset: 0; pointer-events: none; }
+.town-reel-handle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 12%;
+  width: 8px;
+  height: 38%;
+  margin-left: -4px;
+  border-radius: 4px;
+  background: #94a3b8;
+}
+.town-reel-handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 8%;
+  width: 30px;
+  height: 30px;
+  margin: -10px 0 0 -15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fde68a, #c89a62);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+}
+.town-reel-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+  font: 800 13px var(--font-ui);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+/* (the line out: no Block bar) */
+body.town-reeling .ps-block-btn { display: none !important; }
 /* Who the player's talking to: their mood toward the player — a row in the talk box (townMemory.js relationRow) */
 .town-relation {
   display: flex;

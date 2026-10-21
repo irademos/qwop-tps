@@ -97,7 +97,7 @@ export const loadTownRoomState = async (roomId) => {
 export const saveTownRoomState = (roomId, state) => set(ref(db, `townRoomState/${roomId}`), state).catch(() => {});
 
 // ctx: getMultiplayer(), startMultiplayer(roomId), stopMultiplayer(), profileKey(), memberKey(), getPlayerName(),
-//   scene, getRemoteModel(id), setRemoteCharacter(id, url), createSwordMesh(url), createWandMesh(),
+//   scene, getRemoteModel(id), setRemoteCharacter(id, url), createSwordMesh(url), createWandMesh(), createRodMesh(),
 //   getLocalWeapon() → 'sword' | 'gun' | 'shield' | 'wand' | null, getWeaponGear() (matchCtx's),
 //   getLocalPosition(), launchRemoteBomb(origin, target, fromId), spawnRemoteMagic({ …, caster }),
 //   getLocalSwordState(), getLocalCharacterUrl(), getStars(), applyPvpHit(dmg, dir, fromId),
@@ -180,7 +180,7 @@ export function createTownNet(ctx) {
   const dropPlayer = (pid) => {
     const p = players.get(pid);
     if (!p) return;
-    for (const m of [p.sword, p.wand, p.gunMesh, p.shieldMesh]) m?.parent?.remove(m);
+    for (const m of [p.sword, p.wand, p.rod, p.gunMesh, p.shieldMesh]) m?.parent?.remove(m);
     players.delete(pid);
   };
 
@@ -206,7 +206,7 @@ export function createTownNet(ctx) {
         } else p.swordTarget.has = false;
         if (isVec(data.h, 3)) p.hand.fromArray(data.h);
         p.blocking = !!data.b;
-        p.weapon = ['sword', 'gun', 'shield', 'wand'].includes(data.w) ? data.w : null;
+        p.weapon = ['sword', 'gun', 'shield', 'wand', 'rod'].includes(data.w) ? data.w : null;
         return;
       }
       case 'pvp': {
@@ -275,8 +275,9 @@ export function createTownNet(ctx) {
       // (hands on a weapon only while they hold one — otherwise their arms hang / walk as on their screen)
       model.userData.remoteArmed = !!grip || p.swordTarget.has;
       model.userData.remoteHandTarget = grip ?? p.hand;
-      // Sword (or the wand, held the same way) where their game says it is
+      // Sword (or the wand / fishing rod, held the same way) where their game says it is
       const wand = p.weapon === 'wand';
+      const rod = p.weapon === 'rod';
       if (!p.sword) {
         p.sword = ctx.createSwordMesh(p.url);
         if (p.sword) ctx.scene.add(p.sword);
@@ -285,10 +286,15 @@ export function createTownNet(ctx) {
         p.wand = ctx.createWandMesh();
         if (p.wand) ctx.scene.add(p.wand);
       }
+      if (rod && !p.rod) {
+        p.rod = ctx.createRodMesh?.() ?? null;
+        if (p.rod) ctx.scene.add(p.rod);
+      }
       const show = model.visible && p.swordTarget.has;
-      if (p.sword) p.sword.visible = show && !(wand && p.wand);
+      if (p.sword) p.sword.visible = show && !(wand && p.wand) && !(rod && p.rod);
       if (p.wand) p.wand.visible = show && wand;
-      const blade = p.wand?.visible ? p.wand : p.sword?.visible ? p.sword : null;
+      if (p.rod) p.rod.visible = show && rod;
+      const blade = p.wand?.visible ? p.wand : p.rod?.visible ? p.rod : p.sword?.visible ? p.sword : null;
       p.blade = blade;
       if (blade) {
         blade.position.copy(p.swordTarget.pos);
@@ -361,7 +367,7 @@ export function createTownNet(ctx) {
       c.center.copy(model.position);
       c.center.y += 0.8;
       const blade = p.blade;
-      c.hasBlade = !!blade?.visible;
+      c.hasBlade = !!blade?.visible && p.weapon !== 'rod'; // (a fishing rod blocks nothing)
       if (c.hasBlade) {
         bladeOffsets.forEach((o, i) => c.bladePoints[i].copy(o).applyQuaternion(blade.quaternion).add(blade.position));
         c.bladeDir.set(0, 0, 1).applyQuaternion(blade.quaternion);

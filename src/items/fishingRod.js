@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { characterHold } from '../models/glbCharacterModel.js';
 
 // Town fishing rod: a procedural rod built like the wand / swords — origin at the grip,
-// pointing along +Z — and the rig that uses it (createFishingRig): the player holds it in
-// both hands (the weapon grip targets, `foamSwordMode`), casts a bobber out onto the water,
-// the line sags between the rod tip and the bobber, a bite dunks the bobber and bends the
-// rod, and reeling in brings the bobber back (with a fish on the hook when one was caught).
-// The game decides when (townTrade.js); this only draws it.
+// pointing along +Z — so the game holds it as the sword weapon in rod form (FoamSword.rod,
+// gyro-driven like the sword), and the rig that fishes with it (createFishingRig): a bobber
+// cast out onto the water, the line between the rod tip and the bobber (slack while it floats,
+// taut with a fish on), a bite dunks it, a hooked fish drags it about and bends the rod,
+// reeling turns the crank, and reeling in brings the bobber back (with the fish on the hook
+// when one was landed). The game decides when (townTrade.js); this only draws it.
 
 const ROD_SEGMENTS = [ // the blank in three nested pieces, so it can bend
   { length: 0.63, r0: 0.014, r1: 0.01 },
@@ -24,33 +24,30 @@ const BOBBER_BOTTOM = 0xf4f1ea;
 const FISH_COLOR = 0x8fb3c9;
 const LINE_COLOR = 0xe8e8e8;
 
-// Hold + motion (player-local, before the character's grip scale)
-const HOLD = { x: 0.06, y: 0.95, z: 0.38, pitch: -0.6 }; // resting: tip up ~35°
-const WINDUP = { x: 0.1, y: 1.25, z: 0.12, pitch: -1.75 }; // rod back over the shoulder
-const FOLLOW = { x: 0.06, y: 0.9, z: 0.5, pitch: -0.3 };   // after the whip forward
-const CAST_WINDUP_S = 0.35;
-const CAST_WHIP_S = 0.2;
-const CAST_SETTLE_S = 0.4;
-const BOBBER_FLIGHT_S = 0.65;
-const BOBBER_ARC = 1.6;        // m above the straight line at the top of the cast
+// Held as the sword weapon, the rod leans forward of the sword's pose (rad about its grip's X):
+// with the phone held like a sword it rests tip-up out in front, and pulling the phone back
+// brings it up
+export const ROD_HOLD_PITCH = 0.75;
+
+const BOBBER_FLIGHT_S = [0.45, 0.9]; // s — a short cast … the longest
+const BOBBER_ARC = 0.3;        // m above the straight line at the top of the cast, per m cast
 const REEL_S = 0.55;
 const SHOW_CATCH_S = 1.3;      // the fish dangles this long before it's put away
 const LINE_POINTS = 18;
 const LINE_SAG = 0.12;         // slack sag per m of line
-const HAND_LERP = 18;          // matches the floating hands' own follow speed
 
 const along = (geometry) => geometry.rotateX(Math.PI / 2); // cylinder axis Y → Z
 const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05, ...extra });
 const ease = (t) => t * t * (3 - 2 * t);
-const lerpPose = (a, b, t, out) => {
-  out.x = a.x + (b.x - a.x) * t;
-  out.y = a.y + (b.y - a.y) * t;
-  out.z = a.z + (b.z - a.z) * t;
-  out.pitch = a.pitch + (b.pitch - a.pitch) * t;
-  return out;
-};
 
-/** A new fishing rod model; `userData.bends` = the blank's pieces, `userData.tip` = its tip. */
+// (found by name, not kept in userData: Object3D.clone copies userData through JSON)
+const rodParts = (rod) => ({
+  tip: rod.getObjectByName('rod-tip'),
+  crank: rod.getObjectByName('rod-crank'),
+  bends: ROD_SEGMENTS.map((_, i) => rod.getObjectByName(`rod-piece-${i}`)).filter(Boolean),
+});
+
+/** A new fishing rod model (its tip is the `rod-tip` object, the blank's pieces `rod-piece-<i>`). */
 export function createFishingRodModel() {
   const group = new THREE.Group();
   group.name = 'fishing-rod';
@@ -67,6 +64,7 @@ export function createFishingRodModel() {
   foot.position.y = 0.025;
   // The crank turns about the spool's axle while reeling in
   const crank = new THREE.Group();
+  crank.name = 'rod-crank';
   crank.position.x = 0.022;
   const arm = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.008, 0.045), std(REEL_COLOR, { metalness: 0.5, roughness: 0.4 }));
   arm.position.z = 0.012;
@@ -74,16 +72,14 @@ export function createFishingRodModel() {
   knob.position.set(0.008, 0, 0.032);
   crank.add(arm, knob);
   reel.add(spool, foot, crank);
-  reel.userData.crank = crank;
   group.add(cork, butt, reel);
 
   // The blank, each piece a child of the one before (bending one bends all after it)
-  const bends = [];
   let parent = group;
   let start = HANDLE_START;
-  let tip = null;
   ROD_SEGMENTS.forEach((s, i) => {
     const piece = new THREE.Group();
+    piece.name = `rod-piece-${i}`;
     piece.position.z = start;
     const blank = new THREE.Mesh(along(new THREE.CylinderGeometry(s.r1, s.r0, s.length, 8)), std(BLANK_COLOR, { roughness: 0.5 }));
     blank.position.z = s.length / 2;
@@ -95,11 +91,10 @@ export function createFishingRodModel() {
     wrap.position.z = s.length - 0.02;
     piece.add(ring, wrap);
     parent.add(piece);
-    bends.push(piece);
     parent = piece;
     start = s.length;
     if (i === ROD_SEGMENTS.length - 1) {
-      tip = new THREE.Object3D();
+      const tip = new THREE.Object3D();
       tip.name = 'rod-tip';
       tip.position.z = s.length;
       piece.add(tip);
@@ -107,9 +102,6 @@ export function createFishingRodModel() {
   });
 
   group.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-  group.userData.bends = bends;
-  group.userData.tip = tip;
-  group.userData.reel = reel;
   return group;
 }
 
@@ -153,13 +145,14 @@ function createSplash() {
 }
 
 /**
- * The rod + line + bobber for one fisher (the local player). `start(holder, target)` casts
- * at `target` (a world point on the water surface); `update(dt, { bite })` every frame
- * (`bite` 0…1 = how hard a fish is tugging); `reel(caught)` brings it in; `stop()` puts it
- * away at once.
+ * The line + bobber (+ the catch) for one fisher (the local player), on the rod they hold.
+ * `cast(rod, target)` flies the bobber from the rod tip to `target` (a world point on the
+ * water); `update(dt, { bite, load, fish, crank })` every frame — bite 0…1: a fish tugging at
+ * the floating bobber; load 0…1: how hard the rod bends; fish {x, z}: where the bobber is
+ * (reeled in a little, or a hooked fish dragging it under there); crank: radians the reel turned this frame; `reel(caught)` brings it in;
+ * `stop()` takes it all away at once (the rod itself is the game's).
  */
 export function createFishingRig(scene) {
-  const rod = createFishingRodModel();
   const bobber = createBobber();
   const fish = createFish();
   const splash = createSplash();
@@ -172,46 +165,34 @@ export function createFishingRig(scene) {
   fish.visible = false;
   for (const o of [bobber, splash, line]) { o.visible = false; scene.add(o); }
 
-  let holder = null;
-  let phase = 'idle';  // idle | cast | wait | reel | show
+  let rod = null;
+  let parts = null;
+  let phase = 'idle';  // idle | cast | wait | fight | reel | show
   let t = 0;
+  let flightS = BOBBER_FLIGHT_S[0];
   let caught = false;
   let splashT = 1;
   const target = new THREE.Vector3();
   const tipW = new THREE.Vector3();
   const from = new THREE.Vector3();
-  const pose = { ...HOLD };
-  const handPos = new THREE.Vector3();
   const _p = new THREE.Vector3();
 
+  const unbend = () => {
+    parts?.bends.forEach((b) => { b.rotation.x = 0; });
+    if (parts?.crank) parts.crank.rotation.x = 0;
+  };
   const hide = () => {
-    rod.parent?.remove(rod);
+    unbend();
     bobber.visible = line.visible = splash.visible = fish.visible = false;
-    holder = null;
+    rod = null;
+    parts = null;
     phase = 'idle';
   };
   const doSplash = (at, big = false) => {
-    splash.position.set(at.x, at.y + 0.01, at.z);
+    splash.position.set(at.x, target.y + 0.01, at.z);
     splash.userData.big = big;
     splash.visible = true;
     splashT = 0;
-  };
-
-  // The hold pose for this moment (player-local), the rod bend, where the bobber is
-  const poseNow = (bite) => {
-    if (phase === 'cast') {
-      if (t < CAST_WINDUP_S) return lerpPose(HOLD, WINDUP, ease(t / CAST_WINDUP_S), pose);
-      if (t < CAST_WINDUP_S + CAST_WHIP_S) return lerpPose(WINDUP, FOLLOW, ease((t - CAST_WINDUP_S) / CAST_WHIP_S), pose);
-      return lerpPose(FOLLOW, HOLD, ease(Math.min(1, (t - CAST_WINDUP_S - CAST_WHIP_S) / CAST_SETTLE_S)), pose);
-    }
-    if (phase === 'reel') return lerpPose(HOLD, WINDUP, ease(Math.min(1, t / REEL_S)) * 0.55, pose);
-    if (phase === 'show') return lerpPose(HOLD, WINDUP, 0.55, pose);
-    // waiting: a slow sway, a jerk when it bites
-    pose.x = HOLD.x;
-    pose.y = HOLD.y + Math.sin(t * 1.3) * 0.01;
-    pose.z = HOLD.z;
-    pose.pitch = HOLD.pitch + Math.sin(t * 0.9) * 0.025 + bite * 0.25;
-    return pose;
   };
 
   const updateLine = (sag) => {
@@ -231,23 +212,34 @@ export function createFishingRig(scene) {
   };
 
   return {
+    phase: () => phase,
     isBusy: () => phase !== 'idle',
-    isCasting: () => phase === 'cast' && t < CAST_WINDUP_S + CAST_WHIP_S + BOBBER_FLIGHT_S,
-    start(newHolder, at) {
+    // The bobber's in the water (a fish can bite / be on)
+    isOut: () => phase === 'wait' || phase === 'fight',
+    bobberPosition: () => bobber.position,
+    cast(holdRod, at) {
       hide();
-      holder = newHolder;
+      rod = holdRod;
+      parts = rodParts(rod);
+      if (!parts.tip) { hide(); return; }
       target.copy(at);
-      const hold = characterHold(holder.userData?.qwopRig?.characterUrl);
-      rod.scale.setScalar(hold.sword);
-      handPos.set(HOLD.x, HOLD.y, HOLD.z).multiplyScalar(hold.grip);
-      rod.position.copy(handPos);
-      holder.add(rod);
+      rod.updateWorldMatrix(true, true);
+      parts.tip.getWorldPosition(from);
+      const d = Math.hypot(at.x - from.x, at.z - from.z);
+      flightS = THREE.MathUtils.clamp(d / 10, 0, 1) * (BOBBER_FLIGHT_S[1] - BOBBER_FLIGHT_S[0]) + BOBBER_FLIGHT_S[0];
       phase = 'cast';
       t = 0;
       caught = false;
     },
+    // A fish took the hook: from here `fish` moves the bobber
+    hook() {
+      if (phase !== 'wait') return;
+      doSplash(bobber.position, true);
+      phase = 'fight';
+      t = 0;
+    },
     reel(gotOne) {
-      if (phase !== 'cast' && phase !== 'wait') return;
+      if (phase !== 'cast' && phase !== 'wait' && phase !== 'fight') return;
       caught = !!gotOne;
       from.copy(bobber.visible ? bobber.position : tipW);
       if (bobber.visible) doSplash(bobber.position, caught);
@@ -255,7 +247,7 @@ export function createFishingRig(scene) {
       t = 0;
     },
     stop: hide,
-    update(dt, { bite = 0 } = {}) {
+    update(dt, { bite = 0, load = 0, fish: fishAt = null, crank = 0 } = {}) {
       if (splash.visible) {
         splashT += dt;
         const k = Math.min(1, splashT / 0.8);
@@ -263,41 +255,27 @@ export function createFishingRig(scene) {
         splash.material.opacity = 0.6 * (1 - k);
         if (k >= 1) splash.visible = false;
       }
-      if (phase === 'idle' || !holder) return;
+      if (phase === 'idle' || !rod) return;
+      // (the rod put away / swapped: everything goes)
+      if (!rod.parent || !parts.tip) { hide(); return; }
       t += dt;
 
-      // Hands on the cork (the weapon grip targets — consumed by updateProceduralPlayerRig)
-      const p = poseNow(bite);
-      const hold = characterHold(holder.userData?.qwopRig?.characterUrl);
-      holder.userData.foamSwordMode = true;
-      const hand = holder.userData.foamSwordHandTarget ?? (holder.userData.foamSwordHandTarget = { x: 0, y: 0, z: 0 });
-      hand.x = p.x; hand.y = p.y; hand.z = p.z;
-      _p.set(p.x, p.y, p.z).multiplyScalar(hold.grip);
-      handPos.lerp(_p, 1 - Math.exp(-HAND_LERP * dt));
-      rod.position.copy(handPos);
-      rod.rotation.set(p.pitch, 0, 0);
-
-      // The blank bends toward the bobber under load (a bite, reeling in a fish)
-      const load = phase === 'wait' ? bite * 0.9
-        : phase === 'reel' ? (caught ? 0.7 : 0.25) * (1 - Math.min(1, t / REEL_S))
-        : phase === 'show' ? 0.35 : 0;
-      rod.userData.bends.forEach((b, i) => { b.rotation.x = load * (0.1 + i * 0.12); });
-      rod.userData.reel.userData.crank.rotation.x = phase === 'reel' ? t * 25 : 0;
+      // The blank bends toward the bobber under load; the crank turns as the reel does
+      const bend = phase === 'reel' ? (caught ? 0.7 : 0.25) * (1 - Math.min(1, t / REEL_S))
+        : phase === 'show' ? 0.35 : load;
+      parts.bends.forEach((b, i) => { b.rotation.x = bend * (0.1 + i * 0.12); });
+      if (parts.crank) parts.crank.rotation.x += phase === 'reel' ? dt * 25 : crank;
 
       rod.updateWorldMatrix(true, true);
-      rod.userData.tip.getWorldPosition(tipW);
+      parts.tip.getWorldPosition(tipW);
 
       let sag = LINE_SAG;
       if (phase === 'cast') {
-        // The bobber leaves the tip as the whip ends and arcs out to the target
-        const fly = (t - CAST_WINDUP_S - CAST_WHIP_S * 0.6) / BOBBER_FLIGHT_S;
-        if (fly <= 0) {
-          bobber.position.copy(tipW);
-          bobber.position.y -= 0.25;
-          if (t > CAST_WINDUP_S * 0.5) from.copy(bobber.position);
-        } else if (fly < 1) {
+        // The bobber flies from the tip out to where it lands
+        const fly = t / flightS;
+        if (fly < 1) {
           bobber.position.lerpVectors(from, target, fly);
-          bobber.position.y += BOBBER_ARC * 4 * fly * (1 - fly);
+          bobber.position.y += BOBBER_ARC * from.distanceTo(target) * 4 * fly * (1 - fly);
           sag = 0.02;
         } else {
           bobber.position.copy(target);
@@ -307,7 +285,9 @@ export function createFishingRig(scene) {
         }
         bobber.visible = line.visible = true;
       } else if (phase === 'wait') {
-        // Bobbing on the swell; a bite pulls it under and twitches it about
+        // Bobbing on the swell (reeled in a little: `fish` is where it is now); a bite pulls it
+        // under and twitches it about
+        if (fishAt) { target.x = fishAt.x; target.z = fishAt.z; }
         const twitch = bite > 0 ? Math.sin(t * 38) * 0.03 * bite : 0;
         bobber.position.set(
           target.x + twitch,
@@ -316,6 +296,16 @@ export function createFishingRig(scene) {
         );
         if (bite > 0.6 && Math.random() < dt * 4) doSplash(bobber.position);
         sag = LINE_SAG * (1 - bite);
+      } else if (phase === 'fight') {
+        // A hooked fish drags it about, half under; the harder it pulls, the more it splashes
+        if (fishAt) {
+          const k = 1 - Math.exp(-6 * dt);
+          bobber.position.x += (fishAt.x - bobber.position.x) * k;
+          bobber.position.z += (fishAt.z - bobber.position.z) * k;
+        }
+        bobber.position.y = target.y - 0.03 - load * 0.05 + Math.sin(t * 30) * 0.01 * load;
+        if (Math.random() < dt * (0.5 + load * 5)) doSplash(bobber.position, load > 0.7);
+        sag = 0;
       } else if (phase === 'reel') {
         // Line comes in fast: the bobber skims back and swings up to hang below the tip
         const k = Math.min(1, t / REEL_S);
@@ -344,7 +334,7 @@ export function createFishingRig(scene) {
     dispose() {
       hide();
       for (const o of [bobber, splash, line]) scene.remove(o);
-      for (const root of [rod, bobber, splash, line]) {
+      for (const root of [bobber, splash, line]) {
         root.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
       }
     },

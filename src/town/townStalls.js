@@ -1,7 +1,7 @@
 // Town mode: the market's two stalls, shopped the Showdown village's way — the things for
 // sale sit on the counters, tap one (or swipe / ‹ › / arrow keys) for its buy card.
 //   • the goods stall (wood / fish / veg — the merchant townsperson stands behind it)
-//   • the weapon stall (the village shop's gear + the mystery chest, a keeper behind it)
+//   • the weapon stall (the village shop's gear + a fishing rod + the mystery chest, a keeper behind it)
 // Walking up shows a button that frames the camera on the counter (focus); tapping a thing
 // on a counter does too. At a counter, tapping anywhere else, Esc, ⬅ Back or walking off goes
 // back. Selling stays in the market panel (townMarketPanel.js).
@@ -15,6 +15,7 @@ import {
   STALL_UNIT, COUNTER_SURFACE_Y,
 } from '../village/villageMode.js';
 import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
+import { createFishingRodModel } from '../items/fishingRod.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 
 // On the counters, left → right (also the swipe order). Positions in stall units.
@@ -24,6 +25,7 @@ const GEAR_ITEMS = [
   { id: 'ammo', at: [-24, COUNTER_SURFACE_Y + 1, 36], build: 'bullets' },
   { id: 'mana', potion: true },
   { id: 'bubble', at: [0, 160, 4], build: 'bubble', hang: true },
+  { id: 'rod', at: [-52, COUNTER_SURFACE_Y + 2, 14], build: 'rod' },
   { id: 'gun', at: [34, COUNTER_SURFACE_Y + 3, 32], build: 'gun' },
   { id: 'wand', at: [62, COUNTER_SURFACE_Y + 3, 42], build: 'wand' },
   { id: 'shield', at: [88, COUNTER_SURFACE_Y - 8, 12], build: 'shield' },
@@ -151,8 +153,11 @@ export function createTownStalls(ctx) {
           object.rotation.y = -0.25 * stall.chestSign;
           root.add(object);
         } else {
-          const mesh = d.build === 'bomb' && bombGltf ? createBombMesh(bombGltf) : buildItemMesh(d.build);
+          const mesh = d.build === 'bomb' && bombGltf ? createBombMesh(bombGltf)
+            : d.build === 'rod' ? createFishingRodModel() : buildItemMesh(d.build);
           if (d.build === 'bomb') { mesh.scale.multiplyScalar(0.8); mesh.position.y = 0.1; }
+          // (the rod lies along the back of the counter, tip to the right)
+          if (d.build === 'rod') { mesh.scale.setScalar(0.55); mesh.rotation.set(-0.08, Math.PI / 2, 0); mesh.position.y = 0.02; }
           object = new THREE.Group();
           object.add(mesh);
           object.position.set(d.at[0], d.at[1], d.at[2]).multiplyScalar(STALL_UNIT);

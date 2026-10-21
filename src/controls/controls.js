@@ -575,13 +575,16 @@ export class PlayerControls {
       this.refreshActionButtons();
       if (event) this.safePreventDefault(event);
     };
-    // (third slot: the magic wand once it's owned in Showdown; fourth: ✋ Hands in Town)
+    // (third slot: the magic wand once it's owned in Showdown; fourth / fifth: Town's fishing
+    // rod and ✋ Hands)
     this.psWeaponBtn3 = createButton('ps-weapon-btn-3', 'mobile-primary-action ps-weapon-btn', '');
     this.psWeaponBtn4 = createButton('ps-weapon-btn-4', 'mobile-primary-action ps-weapon-btn', '');
+    this.psWeaponBtn5 = createButton('ps-weapon-btn-5', 'mobile-primary-action ps-weapon-btn', '');
     bindPress(this.psWeaponBtn1, makePsWeaponHandler(this.psWeaponBtn1));
     bindPress(this.psWeaponBtn2, makePsWeaponHandler(this.psWeaponBtn2));
     bindPress(this.psWeaponBtn3, makePsWeaponHandler(this.psWeaponBtn3));
     bindPress(this.psWeaponBtn4, makePsWeaponHandler(this.psWeaponBtn4));
+    bindPress(this.psWeaponBtn5, makePsWeaponHandler(this.psWeaponBtn5));
 
     // Protective bubble (bought in the shop); label/count kept fresh by the game loop
     this.psBubbleBtn = createButton('ps-bubble-btn', 'mobile-primary-action ps-bubble-btn', `🫧 ${getAppState()?.getBubbleCount?.() ?? 0}`);
@@ -651,10 +654,12 @@ export class PlayerControls {
     this.refreshActionButtons();
   }
 
-  // Equipped right-hand item id; the magic wand is the sword weapon in wand form
+  // Equipped right-hand item id; the magic wand (and Town's fishing rod) is the sword weapon in
+  // another form
   getEquippedItemId() {
     const appState = appContext.uiState.appState ?? window.appState;
     if (appState?.isWandEquipped?.()) return 'magic_wand';
+    if (appState?.isRodEquipped?.()) return 'fishing_rod';
     // (Town lets the player put everything away: then nothing is in hand)
     return this.getEquippedWeapon('right')?.itemId ?? (appState?.isUnarmedAllowed?.() ? null : 'foamSword');
   }
@@ -690,6 +695,7 @@ export class PlayerControls {
     const hasGun = (inventory.pistol?.count ?? 0) > 0;
     const hasShield = (inventory.shield?.count ?? 0) > 0;
     const hasWand = !!appState?.isWandAllowed?.();
+    const hasRod = !!appState?.isRodAllowed?.();
     // (Town: the sword is bought like the rest, and ✋ Hands puts everything away)
     const unarmedAllowed = !!appState?.isUnarmedAllowed?.();
     const hasSword = appState?.ownsSword?.() ?? true;
@@ -698,12 +704,13 @@ export class PlayerControls {
       ...(hasWand ? [{ id: 'magic_wand', label: '🪄 Wand' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
+      ...(hasRod ? [{ id: 'fishing_rod', label: '🎣 Rod' }] : []),
     ];
     // Default to foamSword when nothing detected (unless nothing in hand is allowed)
     const equippedId = this.getEquippedItemId();
     const others = weapons.filter(w => w.id !== equippedId);
     if (unarmedAllowed && equippedId) others.push({ id: HANDS_ID, label: '✋ Hands' });
-    [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4].forEach((button, index) => {
+    [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5].forEach((button, index) => {
       const w = others[index];
       button.dataset.psWeaponId = w ? w.id : '';
       button.textContent = w ? w.label : '';
@@ -732,7 +739,7 @@ export class PlayerControls {
 
   // Block/fire button + two weapon switch buttons, bubble and bomb
   layoutMobileActionButtons() {
-    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psBubbleBtn, this.psBombBtn].forEach((button) => {
+    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBubbleBtn, this.psBombBtn].forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
@@ -752,6 +759,10 @@ export class PlayerControls {
     }
     if (this.psWeaponBtn4.dataset.psWeaponId) {
       this.applyMobileButtonPosition(this.psWeaponBtn4, { x: 2, y: 3 });
+    }
+    // (only Town has five: the last goes in the middle column, above the bomb)
+    if (this.psWeaponBtn5.dataset.psWeaponId) {
+      this.applyMobileButtonPosition(this.psWeaponBtn5, { x: 1, y: blockInGrid ? 3 : 2 });
     }
     // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
     this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: blockInGrid ? 1 : 0 });
