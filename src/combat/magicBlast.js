@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { raycastMapSegment } from '../environment/mapCollision.js';
-import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { getGroundBelow } from '../environment/terrainHeight.js';
 import { spawnExplosion } from './explosionEffect.js';
 
 // Sword Showdown magic: the wand's blasts and the ice they freeze people in.
@@ -111,7 +111,7 @@ export function createMagicBlasts({ scene }) {
   const burst = (pos, element, count = 18) => {
     for (let i = 0; i < count; i++) spawnSpark(pos, element, 4, 0.22);
     if (element === 'fire') {
-      const groundY = getTerrainHeight(pos.x, pos.z);
+      const groundY = getGroundBelow(pos.x, pos.z, pos.y);
       spawnExplosion(scene, pos, { scale: 0.4, groundY: Number.isFinite(groundY) ? Math.min(groundY, pos.y) : pos.y - 0.5 });
       window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.35, { cooldownKey: 'magic-fire-hit', cooldownMs: 80 });
     } else {

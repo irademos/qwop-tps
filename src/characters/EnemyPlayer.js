@@ -22,7 +22,7 @@ function nextDefaultEnemyCharacterUrl() {
   const urls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url, glbCharacterConfig.wizardUrl, glbCharacterConfig.treeCreatureUrl];
   return urls[_enemyModelIndex++ % urls.length];
 }
-import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { WALKER_TELEPORT_DIST, getWalkerGround } from '../environment/terrainHeight.js';
 import { createSwordModelInstance } from '../items/swordModel.js';
 import { createWandModel, setWandGlow, WAND_TIP_LOCAL } from '../items/magicWand.js';
 import { bladeBlocksBlast, createIceEncasing, setIceEncasingLevel, MAGIC_ELEMENTS, randomMagicElement } from '../combat/magicBlast.js';
@@ -759,7 +759,13 @@ export class EnemyPlayer {
     // ── Sync visual group from physics ──────────────────────────────────────
     const t = this.rigidBody.translation();
     const physY = t.y - (PHYS_HALF_HEIGHT + PHYS_RADIUS);
-    const terrainY = getTerrainHeight(t.x, t.z);
+    // (the ground under its feet: under a bridge, not the deck over it — getWalkerGround)
+    // (moved far since the last frame: put somewhere — the top surface, like a spawn)
+    const prev = this.group.position;
+    const terrainY = this._walkerY === undefined || Math.hypot(t.x - prev.x, t.z - prev.z) > WALKER_TELEPORT_DIST
+      ? getWalkerGround(t.x, NaN, t.z, t.x, t.z)
+      : getWalkerGround(prev.x, this._walkerY, prev.z, t.x, t.z);
+    this._walkerY = terrainY;
     const groupY = Number.isFinite(terrainY) ? Math.max(physY, terrainY) : physY;
     this.group.position.set(t.x, groupY, t.z);
 

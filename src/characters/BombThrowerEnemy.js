@@ -17,7 +17,7 @@ import { spawnBloodBurst } from '../combat/bloodEffect.js';
 import { spawnExplosion } from '../combat/explosionEffect.js';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { WALKER_TELEPORT_DIST, getGroundBelow, getWalkerGround } from '../environment/terrainHeight.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
@@ -147,7 +147,7 @@ export function disposeBombMesh(mesh) {
 
 /** Fireball / smoke / shockwave visual + boom on explosion. */
 export function spawnBombExplosion(scene, pos) {
-  const groundY = getTerrainHeight(pos.x, pos.z);
+  const groundY = getGroundBelow(pos.x, pos.z, pos.y + 0.3);
   spawnExplosion(scene, pos, { groundY: Number.isFinite(groundY) ? groundY : pos.y });
   window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.75, {
     cooldownKey: 'bomb-explode', cooldownMs: 50
@@ -394,7 +394,13 @@ export class BombThrowerEnemy {
     // ── Sync visual from physics ───────────────────────────────────────────
     const t = this.rigidBody.translation();
     const physY = t.y - (PHYS_HALF_HEIGHT + PHYS_RADIUS);
-    const terrainY = getTerrainHeight(t.x, t.z);
+    // (the ground under its feet: under a bridge, not the deck over it — getWalkerGround)
+    // (moved far since the last frame: put somewhere — the top surface, like a spawn)
+    const prev = this.group.position;
+    const terrainY = this._walkerY === undefined || Math.hypot(t.x - prev.x, t.z - prev.z) > WALKER_TELEPORT_DIST
+      ? getWalkerGround(t.x, NaN, t.z, t.x, t.z)
+      : getWalkerGround(prev.x, this._walkerY, prev.z, t.x, t.z);
+    this._walkerY = terrainY;
     const groupY = Number.isFinite(terrainY) ? Math.max(physY, terrainY) : physY;
     this.group.position.set(t.x, groupY, t.z);
 
@@ -504,7 +510,7 @@ export class BombThrowerEnemy {
           aimTarget.x += (targetControls.velocity.x ?? 0) * lead;
           aimTarget.z += (targetControls.velocity.z ?? 0) * lead;
         }
-        const aimGroundY = getTerrainHeight(aimTarget.x, aimTarget.z);
+        const aimGroundY = getGroundBelow(aimTarget.x, aimTarget.z, aimTarget.y + 0.5);
         if (Number.isFinite(aimGroundY)) aimTarget.y = aimGroundY;
         this._spawnBomb(this.aimAt?.() ?? aimTarget);
       }
@@ -569,7 +575,7 @@ export class BombThrowerEnemy {
       }
 
       // Ground contact
-      const groundY = getTerrainHeight(bomb.mesh.position.x, bomb.mesh.position.z);
+      const groundY = getGroundBelow(bomb.mesh.position.x, bomb.mesh.position.z, bomb.mesh.position.y);
       if (Number.isFinite(groundY) && bomb.mesh.position.y <= groundY + 0.15) {
         this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls, bomb.deflected);
         this._removeBomb(bomb);

@@ -8,7 +8,7 @@
  */
 
 import * as THREE from 'three';
-import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { getGroundBelow } from '../environment/terrainHeight.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
   BOMB_GRAVITY,
@@ -113,7 +113,7 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
           continue;
         }
 
-        const groundY = getTerrainHeight(p.x, p.z);
+        const groundY = getGroundBelow(p.x, p.z, p.y);
         if (now - bomb.spawnTime > BOMB_LIFETIME_MS ||
             (Number.isFinite(groundY) && p.y <= groundY + 0.15) ||
             touchesEnemy(bomb, p)) {

@@ -7,7 +7,7 @@ import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
 import { glbCharacterConfig, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
-import { getTerrainHeight, registerTerrainHeightResolver, setTerrainFloor } from '../environment/terrainHeight.js';
+import { getTerrainHeight, registerTerrainHeightResolver, registerWallProbe, setTerrainFloor } from '../environment/terrainHeight.js';
 import { registerMapMeshes } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
@@ -1937,21 +1937,52 @@ async function initCore(runtimeContext) {
   const _glbRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
 
   // Cache terrain height per entity to avoid re-raycasting every frame.
-  // Key: "x_z" snapped to 0.5-unit grid; value: resolved Y. Cleared when the map changes.
+  // Key: "x_z" snapped to 0.5-unit grid; value: every upward-facing surface's Y there, highest
+  // first (a bridge deck and the ground under it — getTerrainLayersAt), [] = none. Cleared
+  // when the map changes.
   const _glbHeightCache = new Map();
   const _CACHE_SNAP = 0.5;
-  const _glbResolveHeight = (x, z) => {
+  const _glbNormal = new THREE.Vector3();
+  const _NO_LAYERS = [];
+  const _glbLayers = (x, z) => {
     const sx = Math.round(x / _CACHE_SNAP) * _CACHE_SNAP;
     const sz = Math.round(z / _CACHE_SNAP) * _CACHE_SNAP;
     const key = `${sx}_${sz}`;
-    if (_glbHeightCache.has(key)) return _glbHeightCache.get(key);
+    let ys = _glbHeightCache.get(key);
+    if (ys) return ys;
     _glbRaycaster.ray.origin.set(sx, 500, sz);
-    const hits = _glbRaycaster.intersectObjects(_groundMeshes, false);
-    const y = hits.length > 0 ? hits[0].point.y : undefined;
-    _glbHeightCache.set(key, y);
-    return y;
+    ys = _NO_LAYERS;
+    for (const hit of _glbRaycaster.intersectObjects(_groundMeshes, false)) {
+      // (a double-sided ceiling's underside isn't ground; the top surface always counts)
+      if (ys.length && hit.face) {
+        _glbNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+        if (_glbNormal.y <= 0) continue;
+      }
+      // (one surface hit twice — touching meshes, a thin deck's two faces — counts once)
+      if (ys.length && ys[ys.length - 1] - hit.point.y < 0.05) continue;
+      if (ys === _NO_LAYERS) ys = [];
+      ys.push(hit.point.y);
+    }
+    _glbHeightCache.set(key, ys);
+    return ys;
   };
-  registerTerrainHeightResolver(_glbResolveHeight);
+  const _glbResolveHeight = (x, z) => _glbLayers(x, z)[0];
+  registerTerrainHeightResolver(_glbResolveHeight, { layers: _glbLayers });
+
+  // A wall of the active map's ground meshes on the level line between two spots
+  // (isMapWallBetween — the player walking under a bridge / an overhang vs into a wall)
+  const _wallRaycaster = new THREE.Raycaster();
+  _wallRaycaster.firstHitOnly = true;
+  const _wallFrom = new THREE.Vector3();
+  const _wallDir = new THREE.Vector3();
+  registerWallProbe((x0, y, z0, x1, z1) => {
+    _wallDir.set(x1 - x0, 0, z1 - z0);
+    const length = _wallDir.length();
+    if (length < 1e-4 || !_groundMeshes.length) return false;
+    _wallRaycaster.set(_wallFrom.set(x0, y, z0), _wallDir.divideScalar(length));
+    _wallRaycaster.far = length;
+    return _wallRaycaster.intersectObjects(_groundMeshes, false).length > 0;
+  });
 
   // Ground on the active map's floating props with a deck (MAPS `deckMaxY`): straight down
   // onto the highest upward-facing surface at most deckMaxY up the model. Not cached — the
@@ -9526,7 +9557,8 @@ async function initCore(runtimeContext) {
       const _psGroundAt = () => {
         const _gy = playerControls?.resolveGroundY?.(
           playerModel.position.x, playerModel.position.y + 0.6, playerModel.position.z,
-          { includeSolidHit: false }
+          // (lands on what's under the feet — a jump under a bridge doesn't land on its deck)
+          { includeSolidHit: false, reach: playerModel.position.y + 0.6 }
         )?.groundY;
         return Number.isFinite(_gy) ? _gy : (_psGroundY ?? playerModel.position.y);
       };

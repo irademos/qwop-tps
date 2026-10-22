@@ -1,7 +1,7 @@
 import { appContext } from '../core/appContext.js';
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { WALK_UNDER_CLEARANCE, getTerrainHeight, getTerrainLayersAt, isMapWallBetween } from '../environment/terrainHeight.js';
 import { getSpawnPosition } from '../map/spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../combat/knockback.js";
@@ -36,6 +36,15 @@ const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const LEDGE_FALL_MIN_DROP = 0.6;
 // Moved further than this (m) since the last frame → a teleport, snap to the ground
 const LEDGE_FALL_MAX_STEP = 1.5;
+// Walking under things: a surface higher than the feet can step (CLIMB_CONFIG.minRise) is
+// overhead — a bridge deck, a roof overhang — not a wall, where there's ground under it, the
+// body fits (WALK_UNDER_CLEARANCE m between the two) and nothing stands in the way at
+// WALL_PROBE_HEIGHT above the feet (a sideways map raycast — the wall under a roof is hit)
+const WALL_PROBE_HEIGHT = 1.0;
+// Third-person camera under something: kept this far below its underside (m), and at
+// least CAMERA_UNDER_MIN_HEIGHT above the feet
+const CAMERA_UNDER_GAP = 0.25;
+const CAMERA_UNDER_MIN_HEIGHT = 0.8;
 // Wall climbing: walking head on (forward — the way the player faces — within headOnDot) into a
 // wall (ground that rises more than minRise within probeDist ahead, and to either side of
 // that, sideProbeAngle off: the wall faces the player) starts a climb instead of popping onto
@@ -902,6 +911,7 @@ export class PlayerControls {
   resolveGroundY(x, y, z, options = {}) {
     const {
       includeSolidHit = true,
+      reach = NaN, // (set: only ground at or under this height — what's above it is overhead)
       maxRayDistance = 12,
       walkableSlopeDegrees = MAX_WALKABLE_SLOPE_DEGREES,
       fallbackGroundY = Number.isFinite(y) ? y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS) : 0,
@@ -916,7 +926,7 @@ export class PlayerControls {
 
     let terrainHeight = Number.isFinite(this.groundOverrideY) ? this.groundOverrideY : NaN;
     if (!Number.isFinite(terrainHeight)) {
-      terrainHeight = getTerrainHeight(x, z);
+      terrainHeight = Number.isFinite(reach) ? getTerrainLayersAt(x, z, reach).below : getTerrainHeight(x, z);
     }
     if (!Number.isFinite(terrainHeight)) {
       terrainHeight = fallbackGroundY;
@@ -1004,9 +1014,31 @@ export class PlayerControls {
     };
   }
 
-  // Height of the ground (map only) at x, z
+  // Height of the ground (map only) at x, z for the player: where they'd stand there, or the
+  // top of a wall in the way (higher than CLIMB_CONFIG.minRise over the feet). Something
+  // overhead they fit under (a bridge, a roof overhang — WALK_UNDER_CLEARANCE) isn't a wall.
   _groundHeightAt(x, z) {
-    return this.resolveGroundY(x, this.playerY + PLAYER_HALF_HEIGHT, z, { includeSolidHit: false }).groundY;
+    if (Number.isFinite(this.groundOverrideY)) return this.groundOverrideY;
+    const reach = this.playerY + CLIMB_CONFIG.minRise;
+    const { below, above, onSurface, aboveSolid } = getTerrainLayersAt(x, z, reach);
+    if (!Number.isFinite(above)) return below;
+    if (onSurface && !aboveSolid && above - below >= WALK_UNDER_CLEARANCE) {
+      const probeY = this.playerY + WALL_PROBE_HEIGHT;
+      if (!isMapWallBetween(this.playerX, probeY, this.playerZ, x, z)) return below;
+    }
+    return above;
+  }
+
+  // Third-person camera under a bridge / an overhang the player stands under: kept below it
+  _keepCameraUnder() {
+    const feet = this.playerY;
+    const reach = feet + CLIMB_CONFIG.minRise;
+    if (!Number.isFinite(getTerrainLayersAt(this.playerX, this.playerZ, reach).above)) return;
+    const cam = this.camera.position;
+    const ceiling = getTerrainLayersAt(cam.x, cam.z, reach).above;
+    if (!Number.isFinite(ceiling)) return;
+    const maxY = Math.max(feet + CAMERA_UNDER_MIN_HEIGHT, ceiling - CAMERA_UNDER_GAP);
+    if (cam.y > maxY) cam.y = maxY;
   }
 
   get isClimbing() {
@@ -1262,12 +1294,8 @@ export class PlayerControls {
       if (typeof this.positionConstraint === 'function') this.positionConstraint(this);
 
       if (!climbHandled && !window.phoneSwordAirborne) {
-        const { groundY } = this.resolveGroundY(
-          this.playerX,
-          this.playerY + PLAYER_HALF_HEIGHT,
-          this.playerZ,
-          { includeSolidHit: false }
-        );
+        // (under a bridge / an overhang: the ground under it, not the deck — _groundHeightAt)
+        const groundY = this._groundHeightAt(this.playerX, this.playerZ);
         // Walked off a ledge: fall with the jump gravity (onLedgeFall hook) instead of
         // snapping down. A big jump in position this frame is a teleport (respawn, stage
         // start…) and still snaps.
@@ -1426,6 +1454,7 @@ export class PlayerControls {
         lookPoint.y + verticalOffset,
         lookPoint.z - Math.cos(this.yaw) * horizontalDist
       );
+      this._keepCameraUnder();
       this.camera.lookAt(lookPoint);
     }
     if (this.playerModel) {
