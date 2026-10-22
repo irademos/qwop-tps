@@ -400,6 +400,9 @@ export async function loadTreasureChest() {
 // update(dt) each frame; with `closeAfter` (s) the lid shuts again (the clip backwards) that
 // long after it's fully open — opening again meanwhile keeps it open
 const CHEST_CLOSE_AFTER = 2.2;
+// A bought chest's prize rises out of it this long after the lid starts opening (it's about
+// half open by then — the clip is ~1.5 s)
+export const CHEST_PRIZE_DELAY_MS = 750;
 export function createChestLid(object, animations, { closeAfter = CHEST_CLOSE_AFTER } = {}) {
   const clip = THREE.AnimationClip.findByName(animations || [], 'Open');
   if (!clip) return { hasClip: false, open() {}, update() {} };
@@ -1630,10 +1633,11 @@ export function createVillage(ctx) {
   function openChestFx(entry, result) {
     entry.object.userData.lid?.open();
     const sprite = makeEmojiSprite(result.emoji || '✨', 0.45);
-    const start = itemCenter(entry, new THREE.Vector3()).add(_v.set(0, 0.3, 0));
+    const start = itemCenter(entry, new THREE.Vector3());
     sprite.position.copy(start);
+    sprite.visible = false;
     root.add(sprite);
-    prizeFx.push({ sprite, start, born: performance.now() });
+    prizeFx.push({ sprite, start, born: performance.now() + CHEST_PRIZE_DELAY_MS });
   }
 
   // ── Campfire: sit until night / morning ──
@@ -2434,6 +2438,9 @@ export function createVillage(ctx) {
     });
     prizeFx = prizeFx.filter((p) => {
       const age = (now - p.born) / 1800;
+      // (a chest's prize waits inside until the lid's open)
+      p.sprite.visible = age >= 0;
+      if (age < 0) return true;
       if (age >= 1) { p.sprite.parent?.remove(p.sprite); disposeOwned(p.sprite); return false; }
       p.sprite.position.copy(p.start).add(_v.set(0, age * 0.9, 0));
       p.sprite.material.opacity = age < 0.7 ? 1 : 1 - (age - 0.7) / 0.3;

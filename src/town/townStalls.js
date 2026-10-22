@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import {
-  makeTextSprite, buildItemMesh, loadStallManaPotion, loadTreasureChest, STALL_UNIT,
+  makeTextSprite, buildItemMesh, loadStallManaPotion, loadTreasureChest, STALL_UNIT, CHEST_PRIZE_DELAY_MS,
 } from '../village/villageMode.js';
 import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { createFishingRodModel } from '../items/fishingRod.js';
@@ -295,10 +295,13 @@ export function createTownStalls(ctx) {
       entry.object.userData.lid?.open();
       if (result.emoji) {
         const sprite = makeTextSprite(result.emoji, { height: 0.45, size: 96, bg: null, pad: 10 });
-        const start = itemCenter(entry, new THREE.Vector3()).add(_v.set(0, 0.3, 0));
+        // (a chest's prize rises out of it once the lid's open; anything else pops up over it)
+        const chest = !!entry.def.chest;
+        const start = itemCenter(entry, new THREE.Vector3()).add(_v.set(0, chest ? 0 : 0.3, 0));
         sprite.position.copy(start);
+        sprite.visible = !chest;
         stalls[focus].root.parent?.add(sprite);
-        prizeFx.push({ sprite, start, born: performance.now() });
+        prizeFx.push({ sprite, start, born: performance.now() + (chest ? CHEST_PRIZE_DELAY_MS : 0) });
       }
     } else {
       failedUntil = performance.now() + 1500;
@@ -441,6 +444,9 @@ export function createTownStalls(ctx) {
     }
     prizeFx = prizeFx.filter((p) => {
       const age = (now - p.born) / 1800;
+      // (a chest's prize waits inside until the lid's open)
+      p.sprite.visible = age >= 0;
+      if (age < 0) return true;
       if (age >= 1) {
         p.sprite.parent?.remove(p.sprite);
         p.sprite.material.map?.dispose();
