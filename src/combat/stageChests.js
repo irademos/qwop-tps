@@ -1,25 +1,28 @@
 /**
  * Sword Showdown hidden chests: one treasure chest tucked off each stage's path. Swiping
- * it with the sword opens it (a hop, a burst of gold glints, then it's gone) and the game
+ * it with the sword opens it (the lid swings up — the GLB's 'Open' clip — a burst of gold
+ * glints, then it shrinks away) and the game
  * hands out a random prize — the same draw as the village's mystery chest.
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { stylizeObject } from '../environment/artStyle.js';
+import { createChestLid, TREASURE_CHEST_MODEL } from '../village/villageMode.js';
 
-const CHEST_MODEL_URL = '/assets/props/treasure_chest.glb';
 const CHEST_WIDTH = 0.75;        // m — the model is fitted to this width
 const HIT_RADIUS = 0.6;          // m from the chest's middle — a blade point this close hits it
 const HIT_CENTER_Y = 0.3;        // m above the ground
-const OPEN_DURATION = 0.7;       // s — hop + shrink away
+const OPEN_DURATION = 2.1;       // s — the lid opens, then it shrinks away
+const SHRINK_FROM = 0.75;        // (fraction of OPEN_DURATION)
+const BURST_FADE = 0.9;          // s
 const GLINT_EVERY = 2.6;         // s between the little glints that give it away
 const BURST_COUNT = 14;
 
 let _gltfPromise = null;
 const loadChestModel = () => {
   if (!_gltfPromise) {
-    _gltfPromise = new GLTFLoader().loadAsync(CHEST_MODEL_URL)
+    _gltfPromise = new GLTFLoader().loadAsync(TREASURE_CHEST_MODEL)
       .then((gltf) => { stylizeObject(gltf.scene); return gltf; });
     _gltfPromise.catch(() => { _gltfPromise = null; });
   }
@@ -69,7 +72,7 @@ const _size = new THREE.Vector3();
 export function createStageChests({ scene, getGroundY }) {
   const chests = [];   // { group, model, glint, phase, opening, t, burst[] }
 
-  const fitModel = (chest, source) => {
+  const fitModel = (chest, source, animations) => {
     const model = source.clone(true);
     _box.setFromObject(model).getSize(_size);
     const s = CHEST_WIDTH / Math.max(0.001, _size.x, _size.z);
@@ -83,6 +86,7 @@ export function createStageChests({ scene, getGroundY }) {
     model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     if (chest.model) chest.group.remove(chest.model);
     chest.model = model;
+    chest.lid = createChestLid(model, animations, { closeAfter: null });
     chest.group.add(model);
   };
 
@@ -101,7 +105,7 @@ export function createStageChests({ scene, getGroundY }) {
     scene.add(group);
     chests.push(chest);
     loadChestModel()
-      .then((gltf) => { if (chests.includes(chest) && !chest.opening) fitModel(chest, gltf.scene); })
+      .then((gltf) => { if (chests.includes(chest) && !chest.opening) fitModel(chest, gltf.scene, gltf.animations); })
       .catch(() => {});
     return chest;
   };
@@ -120,6 +124,7 @@ export function createStageChests({ scene, getGroundY }) {
     chest.opening = true;
     chest.t = 0;
     chest.glint.visible = false;
+    chest.lid?.open();
     for (let i = 0; i < BURST_COUNT; i++) {
       const sprite = makeGlint();
       sprite.position.set(0, 0.45, 0);
@@ -162,17 +167,20 @@ export function createStageChests({ scene, getGroundY }) {
       }
       chest.t += dt;
       const u = Math.min(1, chest.t / OPEN_DURATION);
+      chest.lid?.update(dt);
       if (chest.model) {
         const { baseY, fitScale } = chest.model.userData;
-        chest.model.position.y = baseY + Math.sin(Math.min(1, u * 1.6) * Math.PI) * 0.35;
-        chest.model.rotation.y += dt * 6;
-        const s = u < 0.55 ? 1 : 1 - (u - 0.55) / 0.45;
+        // (no lid clip — the stand-in box: a hop instead)
+        if (!chest.lid?.hasClip) chest.model.position.y = baseY + Math.sin(Math.min(1, chest.t / 0.45) * Math.PI) * 0.35;
+        const s = u < SHRINK_FROM ? 1 : 1 - (u - SHRINK_FROM) / (1 - SHRINK_FROM);
         chest.model.scale.copy(fitScale).multiplyScalar(Math.max(0.001, s));
       }
+      const fade = Math.max(0, 1 - chest.t / BURST_FADE);
       for (const b of chest.burst) {
         b.vel.y -= 6 * dt;
         b.sprite.position.addScaledVector(b.vel, dt);
-        b.sprite.material.opacity = 1 - u;
+        b.sprite.material.opacity = fade;
+        b.sprite.visible = fade > 0;
       }
       if (u >= 1) remove(chest);
     }
