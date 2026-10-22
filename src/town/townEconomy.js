@@ -35,6 +35,7 @@ export const SHOP_GEAR = [
   { id: 'bubble', kind: 'bubble', label: 'Bubble',     emoji: '🫧', price: 20,  n: 1 },
   { id: 'wand',   kind: 'wand',   label: 'Magic Wand', emoji: '🪄', price: 150, desc: 'Swipe to cast fire / ice. Runs on mana.' },
   { id: 'mana',   kind: 'mana',   label: 'Mana',       emoji: '🧪', price: 20,  needs: 'wand' },
+  { id: 'lockpick', kind: 'lockpick', label: 'Lock-pick', emoji: '🔧', price: 15, desc: 'Opens one locked door, then it breaks. A break-in is a crime if anyone sees.' },
 ];
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

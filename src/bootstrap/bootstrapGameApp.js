@@ -61,6 +61,7 @@ import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
+import { WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
@@ -8239,6 +8240,31 @@ async function initCore(runtimeContext) {
   // (stats Town keeps its own of: Showdown's wait in _saveAside meanwhile)
   const TOWN_ASIDE_STATS = ['coins', 'health', 'maxHealthSegments', 'level', 'xp', 'strength', 'bombs', 'bubbles', 'mana'];
   const TOWN_START_COINS = 5;
+  // Town's wallet holds TOWN_WALLET_MAX coins (the rest stays on the ground, or in the chest at
+  // home — townHomes.js); room left in it (Infinity outside Town)
+  const _townWalletRoom = () => (_townLoadout ? Math.max(0, TOWN_WALLET_MAX - (Number.isFinite(statsState.coins) ? statsState.coins : 0)) : Infinity);
+  let _townWalletToastAt = 0;
+  const _townWalletFullToast = () => {
+    if (performance.now() - _townWalletToastAt < 4000) return;
+    _townWalletToastAt = performance.now();
+    showPickupToast('coins', 1, '', { text: `👛 Wallet full (${TOWN_WALLET_MAX}) — keep some in your chest at home` });
+  };
+  // Town's coins in: what fits in the wallet; the rest drops as coins at the player's feet
+  // (picked up once there's room)
+  const _townAddCoins = (delta) => {
+    if (!(delta > 0)) { appState.addCoins(delta); return; }
+    const fit = Math.min(delta, _townWalletRoom());
+    if (fit > 0) appState.addCoins(fit);
+    let rest = Math.floor(delta - fit);
+    if (rest <= 0) return;
+    _townWalletFullToast();
+    const piles = Math.min(6, rest);
+    for (let i = 0; i < piles; i++) {
+      const value = Math.ceil(rest / (piles - i));
+      rest -= value;
+      spawnCoinPickup(playerModel.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.6, 0, (Math.random() - 0.5) * 1.6)), { value });
+    }
+  };
   const TOWN_HEALTH_SEGMENTS = SHOWDOWN_BASE_HEALTH_SEGMENTS;
   const TOWN_GUN_AMMO = 12;        // bullets that come with a gun
   const TOWN_MANA_REFILL = 50;     // a mana purchase
@@ -8560,8 +8586,10 @@ async function initCore(runtimeContext) {
       }
     },
     getCoins: () => appState.getCoins(),
-    addCoins: (delta) => appState.addCoins(delta),
+    addCoins: (delta) => _townAddCoins(delta),
     profileKey: () => profileNameKey,
+    // (a shared town's key for this player — the house kept for them, townHomes.js)
+    memberKey: () => profileNameKey || `guest_${_guestDeviceId().replace(/[^a-z0-9-]/gi, '')}`,
     // The town's own gear (see the Town loadout above)
     startLoadout: (items) => startTownLoadout(items),
     endLoadout: () => endTownLoadout(),
@@ -8820,7 +8848,8 @@ async function initCore(runtimeContext) {
           pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
           // (a quest's pay: shows round the player first, then slides in from wherever it is)
           if (pickup.userData.holdUntil && performance.now() < pickup.userData.holdUntil) continue;
-          if (!playerDead && (pickup.userData.homing || playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius())) {
+          if (!playerDead && _townWalletRoom() >= (pickup.userData.value ?? COIN_PICKUP_GAIN)
+            && (pickup.userData.homing || playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius())) {
             attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
             // Follow the ground while drifting; otherwise the bob above resets y to the spawn height
             const groundY = getSpawnY(pickup.position.x, pickup.position.z, 0.6);
@@ -8828,6 +8857,8 @@ async function initCore(runtimeContext) {
           }
 
           if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+            // (Town: a full wallet leaves the coin where it is)
+            if (_townWalletRoom() < (pickup.userData.value ?? COIN_PICKUP_GAIN)) { _townWalletFullToast(); continue; }
             applyCoinPickupEffects(pickup.userData.value);
             disposePickup(pickup);
             coinPickups.splice(i, 1);

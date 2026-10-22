@@ -328,6 +328,7 @@ export function installTownLaw(T, ctx) {
           ctx.confiscate();
           T.feedLine('🗡️ The guards took your weapons.');
         }
+        if (T.lockpicks > 0) { T.lockpicks = 0; T.feedLine('🔧 …and your lock-picks.'); }
         if (!T.mp()) T.advanceClock(3 * 60); // (a shared town's clock is everyone's)
         startJail();
         fadeTo(false);

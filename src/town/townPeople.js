@@ -28,15 +28,15 @@ export const ROLES = {
 // The bandit camp's gang (outside the town's roster — they come back after a while)
 export const BANDIT_ROLES = ['banditBoss', 'bandit', 'bandit', 'bandit'];
 
-// Who lives here when the town is first founded (the roster is then saved; the dead are
-// replaced by newcomers of the same role)
+// Who lives here when the town is first founded, in the order the town needs them: one to a
+// house, so a town with fewer free houses takes the first ones, and a player moving into a full
+// town (townHomes.js) pushes out the last (never the first MIN_TOWNSFOLK). The roster is then
+// saved; the dead are replaced by newcomers of the same role when there's a house free.
 export const FOUNDING_ROLES = [
-  'merchant', 'guard', 'nightGuard', 'sheriff',
-  'woodcutter', 'woodcutter', 'farmer', 'farmer', 'farmer', 'fisher', 'fisher',
-  'townsfolk', 'townsfolk', 'townsfolk', 'townsfolk', 'townsfolk',
-  'kid', 'kid', 'drifter', 'townsfolk',
+  'merchant', 'sheriff', 'guard', 'farmer', 'woodcutter', 'fisher',
+  'nightGuard', 'farmer', 'fisher', 'kid', 'townsfolk', 'woodcutter',
+  'drifter', 'farmer', 'townsfolk', 'kid', 'townsfolk', 'fisher', 'townsfolk', 'townsfolk',
 ];
-
 const CIVILIAN_URLS = [
   glbCharacterConfig.villagerUrl,
   glbCharacterConfig.pumpkinUrl,

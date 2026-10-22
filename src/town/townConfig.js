@@ -61,8 +61,7 @@ export const NEEDS = { energyDrain: 1 / 420, sleepGain: 1 / 80, hungerRate: 1 / 
 export const WORK_PAY = 1;                  // coins a guard / the sheriff earns per stint of work
 export const GIFT_COINS = 5;                // 🪙 Give
 export const FRIEND_ATTITUDE = 0.55;        // friends don't tell the guards what they saw
-export const NEWCOMER_DELAY_S = [45, 100];  // s until someone moves in after a death
-export const FOUNDING_HOUSEHOLDS = 9;       // houses the founding townsfolk share (families)
+export const NEWCOMER_DELAY_S = [45, 100];  // s until someone moves in after a death (only into a free house)
 export const DEAD_BODY_S = 5;               // s a body lies there before it's taken away
 
 // ── Law ──
@@ -182,6 +181,20 @@ export const KID_FOUND_DIST = 2.5;          // m
 export const KID_HOME_DIST = 3;             // m from their door to count as home
 export const KID_WITH_PLAYER_DIST = 10;     // m — and the player with them (walked home, not gone home alone)
 export const RAID_HOUR = 22;                // a guarded field is raided at this hour
+
+// ── Homes (townHomes.js) ── one resident to a house: the townsfolk and the players together
+// fill the houses; each player has a house kept for them (bought before it's theirs)
+export const HOUSE_PRICE = 100;             // coins for the player's house
+export const MIN_TOWNSFOLK = 6;             // a player moving in never pushes the town below this (FOUNDING_ROLES' first ones)
+export const BAG_MAX = 15;                  // goods the player can carry (the rest stays in the chest at home)
+export const WALLET_MAX = 150;              // coins in the player's wallet (more stays on the ground / in the chest)
+export const LOCKPICK_MAX = 3;              // lock-picks carried (single use)
+export const KNOCK_S = 2.2;                 // s from a knock to an answer
+export const KNOCK_AGAIN_S = 20;            // s before the same door can be knocked on again
+export const INVITE_S = 90;                 // s an invitation in stands
+export const COME_OUT_S = 25;               // s a townsperson who came to the door stays out
+export const DOOR_ACT_DIST = 1.6;           // m from a locked door outside: its buttons (knock / pick / buy)
+export const CHEST_ACT_DIST = 1.7;          // m from the chest in the player's home: 📦 Chest
 
 export const SAVE_EVERY_S = 20;
 export const SAVE_PREFIX = 'town_';

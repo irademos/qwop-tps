@@ -198,6 +198,7 @@ export function installTownFishing(T, ctx) {
       if (T.simT - awayHintAt > 5) { awayHintAt = T.simT; say('🎣 Fish at the 🎣 Fishing spot by the water.'); }
       return false;
     }
+    if (T.bagRoom() <= 0) { T.bagFullNote(); return false; }
     const rod = ctx.getRodModel();
     const at = rod && castTarget(FISH_CAST_DIST[0] + (FISH_CAST_DIST[1] - FISH_CAST_DIST[0]) * power);
     if (!at) { say('🎣 No water in reach — face the water.'); return false; }
@@ -337,8 +338,8 @@ export function installTownFishing(T, ctx) {
         } else if (f.d <= FISH_LAND_DIST) {
           const n = fish.size.n;
           finish('landed', `🐟 Caught ${fish.size.label}!`, true);
-          T.gain('fish', n);
-          say(`🐟 Caught ${fish.size.label}! ${n > 1 ? `+${n} fish` : '+1 fish'} (${T.goods.fish})`);
+          const got = T.gain('fish', n);
+          say(`🐟 Caught ${fish.size.label}! ${got > 1 ? `+${got} fish` : '+1 fish'} (${T.goods.fish})${got < n ? ' — no room in your bag for the other' : ''}`);
           T.introNote('fish');
         }
       }

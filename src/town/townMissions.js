@@ -559,7 +559,7 @@ export function installTownMissions(T, ctx) {
   };
 
   Object.assign(T, {
-    activeJobs, jobActsFor, jobOf, npcById, onJobDeath, openJobTalk, restoreJobs, takeStrongbox,
+    activeJobs, dropJob, jobActsFor, jobOf, npcById, onJobDeath, openJobTalk, restoreJobs, takeStrongbox,
     updateJobs, updateMarkers,
   });
 }

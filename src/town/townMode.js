@@ -1,5 +1,6 @@
 // Town mode (start screen → Town): Brindlewick, the town of houses on the island's north-west,
-// as a living place. ~20 townsfolk with jobs, homes and needs go about their day on the town
+// as a living place. One resident to a house (townHomes.js — townsfolk and players together; the
+// player's own house is bought, other homes lock at night): townsfolk with jobs, homes and needs go about their day on the town
 // clock (work, the market, the campfire, bed), walking the roads (townNav.js); the player can
 // talk to them, give them coins — or hit them. Hurting someone is a crime if anyone sees it:
 // wanted stars, the guards come running and fight (as EnemyPlayers), and getting beaten or
@@ -67,7 +68,8 @@
 //   removeFighter(enemy), releaseFighterGear(enemy), carryPlayerOff({ carrierUrl, onDone }),
 //   cancelCarry(), isPlayerArmed()
 //   spawnBlood(position, groundY), playSfx('hit' | 'chop'), dropCoins(position, n)
-//   getCoins(), addCoins(delta), profileKey() → string | null, onLobby()
+//   getCoins(), addCoins(delta) (coins past the wallet's cap drop at the player's feet), profileKey() → string | null,
+//   memberKey() (the player's key in a shared town — their house), onLobby()
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
 //   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n)
 //   net (townNet.js, or null): start(), stop(), isOn(), ready(), isHost(), id(), hostId(),
@@ -83,8 +85,8 @@ import { createMarketPanel } from './townMarketPanel.js';
 import { isMiiCharacterUrl } from '../models/glbCharacterModel.js';
 import { updateCampfire } from '../village/villageMode.js';
 import {
-  BOUNTY_PER_STAR, FOUNDING_HOUSEHOLDS, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
-  LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, SAVE_EVERY_S, SAVE_PREFIX,
+  BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
+  BAG_MAX, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, SAVE_EVERY_S, SAVE_PREFIX,
   START_MINUTES, TALK_RANGE, _v2, angleLerp, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
@@ -101,6 +103,7 @@ import { installTownWire } from './townWire.js';
 import { installTownCooking } from './townCooking.js';
 import { installTownMemory } from './townMemory.js';
 import { installTownIntro } from './townIntro.js';
+import { installTownHomes } from './townHomes.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -183,6 +186,9 @@ export function createTownMode(ctx) {
   const fade = el('div', 'town-fade');
   // What the player carries; the food can be eaten (tap) for health
   const goodsEl = el('div', 'town-goods');
+  const bagEl = el('span', 'town-good town-bag');
+  bagEl.title = 'Your bag (the rest goes in the chest at home)';
+  goodsEl.append(bagEl);
   const goodEls = {};
   for (const g of GOOD_IDS) {
     const b = el('button', 'town-good');
@@ -196,6 +202,9 @@ export function createTownMode(ctx) {
   hud.append(top, stars, jailChip, campChip, lobbyBtn, feed, goodsEl, actsEl);
   document.body.append(hud, fade);
   const renderGoods = () => {
+    const carried = GOOD_IDS.reduce((s, g) => s + goods[g], 0);
+    bagEl.textContent = `🎒 ${carried}/${BAG_MAX}`;
+    bagEl.classList.toggle('town-bag-full', carried >= BAG_MAX);
     for (const g of GOOD_IDS) {
       goodEls[g].textContent = `${GOODS[g].emoji} ${goods[g]}`;
       // (cooked food only once there's some)
@@ -257,8 +266,10 @@ export function createTownMode(ctx) {
     departed: T.departed,
     nextId: T.nextId,
     market: T.market.snapshot(),
+    houses: T.houses,
     goods: { ...goods },
     items: ctx.getItems() ?? T.lastItems,
+    ...T.homesSnapshot(),
   });
   // Shared town: the world (the host keeps it in the room — townNet.js) and the player's own
   // things (saved per room on this device)
@@ -275,6 +286,7 @@ export function createTownMode(ctx) {
     departed: T.departed,
     nextId: T.nextId,
     market: T.market.snapshot(),
+    houses: T.houses,
     at: Date.now(),
   });
   const personalSnapshot = () => ({
@@ -290,6 +302,7 @@ export function createTownMode(ctx) {
     nextJobId: T.nextJobId,
     chainsDone: [...T.chainsDone],
     strongboxHeld: T.strongboxHeld,
+    ...T.homesSnapshot(),
   });
   const personalKey = () => {
     const k = ctx.profileKey();
@@ -351,19 +364,15 @@ export function createTownMode(ctx) {
 
   // ── Arrivals (newcomers take the place of the dead) ──
   const usedNames = () => new Set([...T.npcs.filter((n) => n.alive).map((n) => firstName(n.name)), ...T.departed]);
-  const homeForNewcomer = () => {
-    const counts = T.layout.places.homes.map(() => 0);
-    for (const n of T.npcs) if (n.alive) counts[n.homeIndex] = (counts[n.homeIndex] ?? 0) + 1;
-    let best = 0;
-    counts.forEach((c, i) => { if (c < counts[best]) best = i; });
-    return best;
-  };
   const updateArrivals = () => {
     for (let i = T.arrivals.length - 1; i >= 0; i--) {
       const a = T.arrivals[i];
       if (T.simT < a.at) continue;
       T.arrivals.splice(i, 1);
-      const n = T.makeNpc({ id: T.nextId++, name: randomName(a.role, usedNames()), role: a.role, url: characterForRole(a.role), home: homeForNewcomer() });
+      // (one to a house: no house free — a player took it — no newcomer)
+      const home = ROLES[a.role]?.outlaw ? -1 : T.freeHome();
+      if (home < 0 && !ROLES[a.role]?.outlaw) continue;
+      const n = T.makeNpc({ id: T.nextId++, name: randomName(a.role, usedNames()), role: a.role, url: characterForRole(a.role), home });
       if (n.def.outlaw) {
         // (a new face at the bandit camp)
         n.x = T.layout.places.camp.x;
@@ -428,6 +437,8 @@ export function createTownMode(ctx) {
     T.lastItems = own?.items ?? null;
     // In Town the player has only what they bought here (nothing, the first time)
     ctx.startLoadout(T.lastItems ?? {});
+    // (the houses — who owns which — and the player's chest, lock-picks: townHomes.js)
+    T.restoreHomes(state, own);
     T.nextId = state?.nextId ?? 1;
     if (state) {
       clock.day = state.day ?? 1;
@@ -447,15 +458,18 @@ export function createTownMode(ctx) {
       clock.day = 1;
       clock.minutes = START_MINUTES;
       const taken = new Set();
-      // Households of two or three (the kids land with the farmers); the other houses wait
-      // for newcomers
-      const households = Math.max(1, Math.min(T.layout.places.homes.length, FOUNDING_HOUSEHOLDS));
-      FOUNDING_ROLES.forEach((role, i) => {
+      // One to a house, the player's kept first; in the order the town needs them
+      // (FOUNDING_ROLES — more houses than that: more townsfolk)
+      T.reserveFirst();
+      for (let k = 0, home = T.freeHome(); home >= 0; k++, home = T.freeHome()) {
+        const role = FOUNDING_ROLES[k] ?? 'townsfolk';
         const name = randomName(role, taken);
         taken.add(firstName(name));
-        T.npcs.push(T.makeNpc({ id: T.nextId++, name, role, url: characterForRole(role), home: i % households }));
-      });
+        T.npcs.push(T.makeNpc({ id: T.nextId++, name, role, url: characterForRole(role), home }));
+      }
     }
+    // (one to a house — old saves had families sharing — and the player's house kept)
+    T.settleAfterSpawn();
     if (T.isHost()) T.ensureGang();
     T.assignWork();
     if (T.mp()) applyOwn(own);
@@ -532,6 +546,7 @@ export function createTownMode(ctx) {
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;
     T.closeMarket();
+    T.resetHomes();
     jobTalk.close();
     lockpick.stop();
     ctx.cancelCarry();
@@ -601,7 +616,7 @@ export function createTownMode(ctx) {
       T.renderJail();
       if (T.jail.left <= 0) T.endJail('🔓 Time served. You\'re free to go.');
     }
-    if (!T.jail && lockpick.isOpen()) lockpick.stop();
+    if (!T.jail && !T.doorPick && lockpick.isOpen()) lockpick.stop();
     lockpick.update(dt);
     if (jobTalk.isOpen()) {
       const n = T.talking?.npc;
@@ -615,6 +630,7 @@ export function createTownMode(ctx) {
     door.rotation.y = angleLerp(door.rotation.y, occupied ? 0 : -1.9, 1 - Math.exp(-4 * dt));
 
     T.updateRooms();
+    T.updateHomes();
     for (const n of T.npcs) T.updateNpc(n, dt);
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);
     T.updateFishing(dt);
@@ -687,6 +703,7 @@ export function createTownMode(ctx) {
   installTownCooking(T, ctx);
   installTownMemory(T, ctx);
   installTownIntro(T, ctx);
+  installTownHomes(T, ctx);
 
 
   return {
