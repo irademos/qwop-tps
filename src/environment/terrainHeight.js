@@ -50,13 +50,13 @@ export function getTerrainHeight(x = 0, z = 0) {
   return height;
 }
 
-const _layers = { below: 0, above: Infinity, onSurface: false };
+const _layers = { below: 0, above: Infinity, onSurface: false, aboveSolid: false };
 
 /**
  * The ground at x, z on either side of height y: { below: the highest surface at or under y
  * (never under the floor), above: the lowest one over y (Infinity: none — open sky),
- * onSurface: below is a real surface, not just the floor }. A resolver without layers (the
- * ship's deck) counts as one surface. The result is reused between calls.
+ * onSurface: below is a real surface, not just the floor, aboveSolid: above is from a resolver
+ * without layers — the ship's deck, nothing to walk under }. The result is reused between calls.
  */
 export function getTerrainLayersAt(x = 0, z = 0, y = 0) {
   const out = _layers;
@@ -66,28 +66,33 @@ export function getTerrainLayersAt(x = 0, z = 0, y = 0) {
       out.below = oy;
       out.above = Infinity;
       out.onSurface = true;
+      out.aboveSolid = false;
       return out;
     }
   }
   let below = -Infinity;
   let above = Infinity;
+  let aboveSolid = false;
   for (const resolver of extraHeightResolvers) {
     const layers = resolverLayers.get(resolver);
     if (layers) {
       for (const h of layers(x, z)) {
-        if (h > y) above = Math.min(above, h);
-        else { below = Math.max(below, h); break; } // (highest first)
+        if (h > y) {
+          if (h < above) { above = h; aboveSolid = false; }
+        } else { below = Math.max(below, h); break; } // (highest first)
       }
       continue;
     }
     const h = resolver(x, z, terrainFloor);
     if (!Number.isFinite(h)) continue;
-    if (h > y) above = Math.min(above, h);
-    else below = Math.max(below, h);
+    if (h > y) {
+      if (h < above) { above = h; aboveSolid = true; }
+    } else below = Math.max(below, h);
   }
   out.onSurface = below > -Infinity;
   out.below = Math.max(below, terrainFloor);
   out.above = above;
+  out.aboveSolid = aboveSolid;
   return out;
 }
 
@@ -105,4 +110,30 @@ export function registerWallProbe(probe) {
 // True when the map has a wall on the level line at height y from (x0, z0) to (x1, z1)
 export function isMapWallBetween(x0, y, z0, x1, z1) {
   return !!wallProbe && wallProbe(x0, y, z0, x1, z1);
+}
+
+// The ground under a point at height y (bombs, blasts, aiming): a bridge deck over it doesn't count
+export function getGroundBelow(x = 0, z = 0, y = 0) {
+  return getTerrainLayersAt(x, z, y).below;
+}
+
+// Room under something overhead (a bridge deck, a roof overhang) for a walker to go under it
+export const WALK_UNDER_CLEARANCE = 1.9;
+// How far up a walker's ground may rise from one frame to the next (a step, a slope)
+const WALKER_STEP = 0.9;
+// Moved further than this (m) in a frame: put there (a spawn, a respawn) — on the top surface
+export const WALKER_TELEPORT_DIST = 1.5;
+
+/**
+ * Ground for a walker (an enemy) that was at height y0 at (x0, z0) and is now at (x, z): the
+ * surface under its feet, so it follows the player under a bridge instead of popping onto the
+ * deck. Walking into a wall (isMapWallBetween at body height) it goes on top as before, and
+ * where there's no room under what's above, too.
+ */
+export function getWalkerGround(x0, y0, z0, x, z) {
+  if (!Number.isFinite(y0)) return getTerrainHeight(x, z);
+  const { below, above, onSurface, aboveSolid } = getTerrainLayersAt(x, z, y0 + WALKER_STEP);
+  if (!Number.isFinite(above)) return below;
+  if (onSurface && !aboveSolid && above - below >= WALK_UNDER_CLEARANCE && !isMapWallBetween(x0, y0 + 1, z0, x, z)) return below;
+  return getTerrainHeight(x, z);
 }

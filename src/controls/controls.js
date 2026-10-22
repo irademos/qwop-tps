@@ -1,7 +1,7 @@
 import { appContext } from '../core/appContext.js';
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { getTerrainHeight, getTerrainLayersAt, isMapWallBetween } from '../environment/terrainHeight.js';
+import { WALK_UNDER_CLEARANCE, getTerrainHeight, getTerrainLayersAt, isMapWallBetween } from '../environment/terrainHeight.js';
 import { getSpawnPosition } from '../map/spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../combat/knockback.js";
@@ -40,7 +40,6 @@ const LEDGE_FALL_MAX_STEP = 1.5;
 // overhead — a bridge deck, a roof overhang — not a wall, where there's ground under it, the
 // body fits (WALK_UNDER_CLEARANCE m between the two) and nothing stands in the way at
 // WALL_PROBE_HEIGHT above the feet (a sideways map raycast — the wall under a roof is hit)
-const WALK_UNDER_CLEARANCE = 1.9;
 const WALL_PROBE_HEIGHT = 1.0;
 // Third-person camera under something: kept this far below its underside (m), and at
 // least CAMERA_UNDER_MIN_HEIGHT above the feet
@@ -1021,9 +1020,9 @@ export class PlayerControls {
   _groundHeightAt(x, z) {
     if (Number.isFinite(this.groundOverrideY)) return this.groundOverrideY;
     const reach = this.playerY + CLIMB_CONFIG.minRise;
-    const { below, above, onSurface } = getTerrainLayersAt(x, z, reach);
+    const { below, above, onSurface, aboveSolid } = getTerrainLayersAt(x, z, reach);
     if (!Number.isFinite(above)) return below;
-    if (onSurface && above - below >= WALK_UNDER_CLEARANCE) {
+    if (onSurface && !aboveSolid && above - below >= WALK_UNDER_CLEARANCE) {
       const probeY = this.playerY + WALL_PROBE_HEIGHT;
       if (!isMapWallBetween(this.playerX, probeY, this.playerZ, x, z)) return below;
     }
