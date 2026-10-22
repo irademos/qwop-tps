@@ -7267,7 +7267,8 @@ async function initCore(runtimeContext) {
     root?.traverse((obj) => {
       const mat = obj.isMesh ? obj.material : null;
       const image = mat?.map?.image;
-      if (!mat || !image || !('emissive' in mat)) return;
+      if (!mat || !image || !('emissive' in mat) || mat.userData.roadLightGlow) return;
+      mat.userData.roadLightGlow = true; // (once: the map's lamps share their materials)
       try {
         const w = image.width;
         const h = image.height;
@@ -8384,6 +8385,23 @@ async function initCore(runtimeContext) {
 
   // ── Town mode (start screen → Town): the town of houses as a living place (src/town/townMode.js) ──
   const _townMapObjectBox = new THREE.Box3();
+  // The active map's placed road lamps (townLights.js lights them at night)
+  const ROAD_LAMP_FILE_RE = /road_light/i;
+  let _roadLampsOf = null;
+  let _roadLamps = [];
+  let _roadLampsGlowing = false;
+  const _mapRoadLamps = () => {
+    if (_roadLampsOf === _activeMap) return _roadLamps;
+    _roadLampsOf = _activeMap;
+    _roadLamps = [];
+    _roadLampsGlowing = false;
+    const visit = (o) => {
+      if (ROAD_LAMP_FILE_RE.test(o.userData?.mapObject?.modelFile ?? '')) { _roadLamps.push(o); return; }
+      o.children.forEach(visit);
+    };
+    if (_activeMap) visit(_activeMap.group);
+    return _roadLamps;
+  };
   // A town fighter in a standoff (bandits at their camp): stands its ground facing the player,
   // sword drawn, and doesn't attack (nor use its gear) until let go
   const _townSetFighterPassive = (enemy, on) => {
@@ -8501,6 +8519,25 @@ async function initCore(runtimeContext) {
       };
       if (_activeMap) visit(_activeMap.group);
       return out;
+    },
+    // Each placed road lamp's head: its light goes just under the top, like the night road
+    // lights' (ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset of the 1-unit-tall model)
+    getRoadLamps: () => _mapRoadLamps().map((o) => {
+      _townMapObjectBox.setFromObject(o);
+      const b = _townMapObjectBox;
+      const c = b.getCenter(new THREE.Vector3());
+      c.y = b.min.y + (b.max.y - b.min.y) * ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset;
+      return c;
+    }),
+    // The lamps' glass glows (the emissive map is made the first time; off = intensity 0)
+    setRoadLampsLit: (on) => {
+      const lamps = _mapRoadLamps();
+      if (on && !_roadLampsGlowing) { lamps.forEach(_addRoadLightGlow); _roadLampsGlowing = true; }
+      for (const o of lamps) {
+        o.traverse((m) => {
+          if (m.isMesh && m.material?.userData.roadLightGlow) m.material.emissiveIntensity = on ? ROAD_LIGHT_GLOW.intensity : 0;
+        });
+      }
     },
     teleport: (x, z, yaw) => _teleportPlayer(x, z, yaw),
     // (moved and turned by dYaw — camera and body alike: through a shop door, keeping the way

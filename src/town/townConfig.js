@@ -46,6 +46,15 @@ export const NIGHT_TO_H = 5.5;
 // house (m, past its edge), and puts it away again back within LANTERN_PUT_AWAY_DIST
 export const LANTERN_DIST = 12;
 export const LANTERN_PUT_AWAY_DIST = 9;
+// Town's lights (townLights.js): the map's road lamps glow at night, and the nearest of them
+// and the campfires get one of TOWN_LIGHT_SLOTS real point lights (each costs every lit
+// material per pixel, so not one a lamp); the fires' are lit by day too, dimmer
+export const TOWN_LIGHT_SLOTS = 4;
+export const TOWN_LIGHT_MAX_DIST = 70;      // m from the player: no light for a spot further than this
+export const TOWN_LIGHT_FADE_S = 0.6;       // s a slot takes to fade in / out when it moves to another spot
+export const TOWN_LAMP_LIGHT = Object.freeze({ color: 0xfff1c1, intensity: 2.6, distance: 26, decay: 0.6 });
+export const TOWN_FIRE_LIGHT = Object.freeze({ color: 0xff9440, intensity: 3.2, distance: 18, decay: 0.7, y: 0.6, day: 0.3 });
+export const TOWN_FIRE_GLOW_NIGHT = 2.6;    // × the campfire's ground glow at night
 // ── People ──
 export const TOWN_MAX_BODIES = 12;   // townsfolk drawn at once (the nearest)
 export const BODY_DIST = 42;                // m — drawn within this…
