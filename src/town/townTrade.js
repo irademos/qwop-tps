@@ -10,7 +10,7 @@ import { createTownStalls } from './townStalls.js';
 import { createTownRooms } from './townRooms.js';
 import {
   CHEST_PRICE, CHOP_HITS, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
-  DOOR_DIST, DOOR_ENTER_DIST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
+  DOOR_DIST, DOOR_ENTER_HALF_WIDTH, DOOR_ENTER_PAST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
 
@@ -167,14 +167,32 @@ export function installTownTrade(T, ctx) {
     T.doorLast = null;
     T.actsAt = 0;
   };
+  // Where walking toward a door goes in: within `enterDist` of the door spot outside, or (most
+  // houses) across the line DOOR_ENTER_PAST out from it, between it and the house
+  const atDoorway = (r, p) => {
+    if (r.enterDist != null) return dist2(p.x, p.z, r.door.x, r.door.z) < r.enterDist;
+    const nx = Math.sin(r.exitYaw);
+    const nz = Math.cos(r.exitYaw);
+    const dx = p.x - r.door.x;
+    const dz = p.z - r.door.z;
+    const along = dx * nx + dz * nz;
+    return along < DOOR_ENTER_PAST && along > -(r.out + 0.3) && Math.abs(dx * nz - dz * nx) < DOOR_ENTER_HALF_WIDTH;
+  };
+  const doorAt = (p) => {
+    if (playerRoom()) return null;
+    for (const [key, r] of Object.entries(T.layout.places.rooms)) if (atDoorway(r, p)) return key;
+    return null;
+  };
   // Outside: walking into a house's door (close to it, heading for the house) goes in — no button
   const walkInDoor = () => {
     const p = T.playerPos();
     const last = T.doorLast;
     T.doorLast = { x: p.x, z: p.z };
     if (T.doorRearm) {
-      const d = T.layout.places.rooms[T.doorRearm].door;
-      if (dist2(p.x, p.z, d.x, d.z) < DOOR_DIST) return;
+      const r = T.layout.places.rooms[T.doorRearm];
+      // (out of where walking in starts, so coming out doesn't go straight back in)
+      const d = dist2(p.x, p.z, r.door.x, r.door.z);
+      if (r.enterDist != null ? d < Math.max(DOOR_DIST, r.enterDist + 0.2) : d < DOOR_DIST && atDoorway(r, p)) return;
       T.doorRearm = null;
     }
     if (!last) return;
@@ -182,7 +200,7 @@ export function installTownTrade(T, ctx) {
     const mz = p.z - last.z;
     const step = Math.hypot(mx, mz);
     if (step < 0.005 || step > 1) return; // (standing still, or a teleport)
-    const key = nearDoor(DOOR_ENTER_DIST);
+    const key = doorAt(p);
     if (!key || !canEnterRoom()) return;
     // (in = toward the house: against the way out)
     const yaw = T.layout.places.rooms[key].exitYaw;

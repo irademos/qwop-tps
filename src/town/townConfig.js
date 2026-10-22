@@ -18,15 +18,24 @@ export const TREE_RE = /tree/i;
 // ('+x' / '-x' / '+z' / '-z'), how far along that wall from its middle (`at`, -1 … 1 of the
 // half width: x along a ±z wall, z along a ±x wall) and how far the door sits in from the
 // model's bounds on that side (`inset`, of the half depth: steps, a porch, overhangs stick out
-// past it — measured by a ray at door height). The shops are entered there.
+// past it — measured by a ray at door height). A door in an angled wall gives its spot (`point`,
+// [x, z] of the half width / depth from the middle) and the way out (`normal`, [x, z]) instead.
+// The shops are entered there. Walking in: across a line DOOR_ENTER_PAST out from the door spot
+// outside (`out` m from the door, past a roof overhang — see HOUSE_DOOR_MAX_OUT), or with `enter`
+// within that many m of the spot.
 export const HOUSE_DOORS = {
   'medieval_building_002.glb': { side: '-x', at: 0.35, inset: 0.65 },
   'medieval_building_004.glb': { side: '+z', at: 0.45, inset: 0.38 },
   'medieval_building_005.glb': { side: '+x', at: 0.36, inset: 0.55 },
-  'fantasy_house.glb': { side: '+z', at: 0.3, inset: 0.63 },
-  'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48 },
+  // (the door in the back corner wall — the front one's up a flight of stairs)
+  'fantasy_house.glb': { point: [0.53, -0.5], normal: [1, -1] },
+  'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48, out: 0.3, enter: 0.2 },
 };
-export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)
+export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)…
+export const HOUSE_DOOR_MAX_OUT = 3.5;      // …or further out (up to this), past a roof overhang the height ray lands on
+export const HOUSE_DOOR_STEP = 0.5;         // m above the lowest ground in front of the door the spot may stand (porch steps)
+export const DOOR_ENTER_PAST = 0.1;         // m out past the door spot: the line where walking toward the house goes in…
+export const DOOR_ENTER_HALF_WIDTH = 0.6;   // …this far to either side of the door
 export const TREE_TRUNK_RADIUS = 0.6;
 // ── Clock ── (an hour = 20 s, a day = 8 min)
 export const MINUTES_PER_SEC = 3;
@@ -85,7 +94,7 @@ export const ROOMS_ORIGIN = { x: -250, y: -40, z: -40 };
 export const ROOM_SPACING = 32;
 export const ROOM_COLUMNS = 6;
 export const DOOR_DIST = 0.4;               // m from a door outside: stepped away from it after coming out
-export const DOOR_ENTER_DIST = 0.2;         // m from a door outside where walking toward the house goes in
+export const DOOR_ENTER_DIST = 0.2;         // m from a door with no house (an open spot) where walking toward it goes in
 export const HOME_VISIT_CHANCE = 0.2;       // a stroll in the day: a while at home instead
 export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the weapon shop
 export const CHEST_PRICE = 30;              // the weapon shop's mystery chest

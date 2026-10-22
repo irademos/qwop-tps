@@ -7,7 +7,7 @@ import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import {
-  BUILDING_RE, CAMP_DIST, HOUSE_DOORS, HOUSE_DOOR_OUT, NAV_BOUNDS, NAV_CELL, NAV_START, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, TREE_WOOD, dist2,
 } from './townConfig.js';
 
@@ -71,20 +71,39 @@ export function installTownLayout(T, ctx) {
       const mz = (min.z + max.z) / 2;
       const hx = (max.x - min.x) / 2;
       const hz = (max.z - min.z) / 2;
-      const axisX = spec.side.endsWith('x');
-      const sign = spec.side[0] === '-' ? -1 : 1;
-      const inset = 1 - (spec.inset ?? 0);
-      const wall = axisX
-        ? new THREE.Vector3(mx + sign * hx * inset, 0, mz + spec.at * hz)
-        : new THREE.Vector3(mx + spec.at * hx, 0, mz + sign * hz * inset);
-      const normal = axisX ? new THREE.Vector3(sign, 0, 0) : new THREE.Vector3(0, 0, sign);
+      let wall;
+      let normal;
+      if (spec.point) {
+        wall = new THREE.Vector3(mx + spec.point[0] * hx, 0, mz + spec.point[1] * hz);
+        normal = new THREE.Vector3(spec.normal[0], 0, spec.normal[1]).normalize();
+      } else {
+        const axisX = spec.side.endsWith('x');
+        const sign = spec.side[0] === '-' ? -1 : 1;
+        const inset = 1 - (spec.inset ?? 0);
+        wall = axisX
+          ? new THREE.Vector3(mx + sign * hx * inset, 0, mz + spec.at * hz)
+          : new THREE.Vector3(mx + spec.at * hx, 0, mz + sign * hz * inset);
+        normal = axisX ? new THREE.Vector3(sign, 0, 0) : new THREE.Vector3(0, 0, sign);
+      }
       wall.applyMatrix4(b.matrix);
       normal.transformDirection(b.matrix).setY(0).normalize();
-      const door = { x: wall.x + normal.x * HOUSE_DOOR_OUT, z: wall.z + normal.z * HOUSE_DOOR_OUT };
+      // (the ground straight out from the door: the height ray lands on a roof overhang there,
+      // so the spot is the first one out on the ground — a porch step or two up at most)
+      const out = [];
+      const first = spec.out ?? HOUSE_DOOR_OUT;
+      for (let d = first; d <= Math.max(first, HOUSE_DOOR_MAX_OUT) + 1e-6; d += 0.1) {
+        out.push({ d, y: groundAt(wall.x + normal.x * d, wall.z + normal.z * d, NaN) });
+      }
+      const low = Math.min(...out.map((o) => o.y).filter(Number.isFinite));
+      const spot = Number.isFinite(low) ? out.find((o) => o.y <= low + HOUSE_DOOR_STEP) : null;
+      const d = spot?.d ?? first;
+      const door = { x: wall.x + normal.x * d, z: wall.z + normal.z * d };
       // (townsfolk walk the last bit onto it from the grid)
       const i = nav.nearestWalkable(door.x, door.z);
       if (i < 0 || dist2(nav.cellX(i), nav.cellZ(i), door.x, door.z) > 2) return null;
-      return { door, exitYaw: Math.atan2(normal.x, normal.z) };
+      // (doorway: the door itself, in the wall — where its marker stands)
+      const doorway = { x: wall.x + normal.x * 0.08, z: wall.z + normal.z * 0.08 };
+      return { door, doorway, out: d, exitYaw: Math.atan2(normal.x, normal.z), enterDist: spec.enter ?? null };
     };
     const shopHouses = [];
     const byMiddle = [...buildings].sort((a, b2) => dist2(a.x, a.z, C.x, C.z) - dist2(b2.x, b2.z, C.x, C.z));
@@ -116,8 +135,9 @@ export function installTownLayout(T, ctx) {
     const rooms = {};
     const shops = {};
     ['goods', 'gear'].forEach((key, k) => {
-      const { building, door, exitYaw } = shopHouses[k];
-      shops[key] = { key, kind: 'shop', building, door, exitYaw };
+      // (a door on an open spot: walked into within DOOR_ENTER_DIST of it)
+      const { building, door, doorway, out = 0, exitYaw, enterDist = DOOR_ENTER_DIST } = shopHouses[k];
+      shops[key] = { key, kind: 'shop', building, door, doorway, out, exitYaw, enterDist };
       rooms[key] = shops[key];
     });
     const market = shops.goods.door;
@@ -266,6 +286,20 @@ export function installTownLayout(T, ctx) {
       const signSprite = makeTextSprite(sign, { height: 0.34 });
       signSprite.position.set(door.x + Math.sin(exitYaw) * 0.3, groundAt(door.x, door.z) + 2.5, door.z + Math.cos(exitYaw) * 0.3);
       group.add(signSprite);
+    }
+    // A faint gold pane standing in each house's doorway (shops and homes): where to walk in
+    const paneGeo = new THREE.PlaneGeometry(0.9, 1.8).translate(0, 0.9, 0);
+    const paneMat = new THREE.MeshBasicMaterial({
+      color: 0xffd36b, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide,
+    });
+    for (const r of Object.values(places.rooms)) {
+      if (!r.building || !r.doorway) continue;
+      const pane = new THREE.Mesh(paneGeo, paneMat);
+      // (standing on the ground at the door spot — the ray at the doorway itself hits the roof)
+      pane.position.set(r.doorway.x, groundAt(r.door.x, r.door.z), r.doorway.z);
+      pane.rotation.y = r.exitYaw;
+      pane.renderOrder = 1;
+      group.add(pane);
     }
     // Campfire
     const fire = makeCampfire();
