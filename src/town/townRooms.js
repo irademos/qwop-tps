@@ -31,6 +31,10 @@ const BEHIND_Z = -3.95;              // behind the back counter (the shopkeeper)
 const SIDE_GAP_X = -2.72;            // the way round the back counter (left end)
 // The home's bed (from home_interior.glb), along x, its head by the left wall
 const BED = { x0: -2.80, x1: -0.49, z0: -3.81, z1: -1.97, top: 0.55 };
+// The chest in the back right corner (built here — a wooden box): what doesn't fit in the
+// player's bag / wallet stays in there (townHomes.js); CHEST_FRONT = where to stand to open it
+const CHEST = { x0: 1.85, x1: 2.85, z0: -4.4, z1: -3.7, top: 0.62 };
+const CHEST_FRONT = { x: 2.35, z: -3.15 };
 export const ROOM_TYPES = {
   shop: {
     load: loadShopInterior,
@@ -52,7 +56,8 @@ export const ROOM_TYPES = {
     halfW: 3.175, halfD: 4.613, height: 5.95,
     door: { x: 0.22, halfW: 0.86, h: 1.8, back: 0.03 },
     frontWall: false,
-    blocks: [BED],
+    blocks: [BED, CHEST],
+    chest: CHEST,
     route: (from, to) => [to],
     // home_interior.glb's own dark plane behind the doorway (ours is lit day / night) and its
     // window panes, a sky behind each (node names as GLTFLoader leaves them: 'Plane.001' → 'Plane001')
@@ -106,6 +111,27 @@ const clampLocal = (type, x, z) => {
   return { x, z };
 };
 const doorInsideLocal = (type) => ({ x: type.door.x, z: type.halfD - 0.9 });   // where you stand on coming in
+// A wooden chest filling box c (room-local): body, lid, iron bands
+const makeChest = (c) => {
+  const g = new THREE.Group();
+  const w = c.x1 - c.x0;
+  const d = c.z1 - c.z0;
+  const wood = new THREE.MeshStandardMaterial({ color: 0x7a4f2a, roughness: 1, metalness: 0 });
+  const iron = new THREE.MeshStandardMaterial({ color: 0x3a3a40, roughness: 0.8, metalness: 0.3 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, c.top * 0.72, d), wood);
+  body.position.y = c.top * 0.36;
+  const lid = new THREE.Mesh(new THREE.BoxGeometry(w + 0.04, c.top * 0.28, d + 0.04), wood);
+  lid.position.y = c.top * 0.86;
+  g.add(body, lid);
+  for (const fx of [-0.3, 0.3]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.06, c.top + 0.02, d + 0.06), iron);
+    band.position.set(fx * w, c.top / 2, 0);
+    g.add(band);
+  }
+  g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  g.position.set((c.x0 + c.x1) / 2, 0, (c.z0 + c.z1) / 2);
+  return g;
+};
 const DOOR_EXIT_IN = 0.5;            // m from the front wall: walking this far into the doorway = out
 
 // Front wall (the doorway in it) + ceiling: boxes with the walls' material, its UVs stretched
@@ -212,6 +238,8 @@ export function createTownRooms(ctx) {
     const w = toWorld(key, s);
     return { x: w.x, y: get(key).origin.y + s.y, z: w.z, yaw: SLEEP_YAW };
   };
+  // In front of a home's chest (world), or null (a shop)
+  const chestSpot = (key) => (get(key)?.type.chest ? toWorld(key, CHEST_FRONT) : null);
   // The player controls' positionConstraint while inside: on the floor, off the counters / bed
   // (the room they're in — setInside: a long frame's step may land past its walls; a teleport
   // far away — knocked out, the game's own — isn't pulled back)
@@ -265,6 +293,8 @@ export function createTownRooms(ctx) {
     doorway.rotation.y = Math.PI;
     root.add(doorway);
     room.doorway = doorway;
+
+    if (type.chest) root.add(makeChest(type.chest));
 
     type.load().then((model) => {
       const shell = new THREE.Group();
@@ -374,7 +404,7 @@ export function createTownRooms(ctx) {
 
   return {
     add, build, get, toWorld, toLocal,
-    roomAt, kindAt, isFree, doorInside, roomPath, spotNear, bedside, somewhereIn, sleepPose,
+    roomAt, kindAt, isFree, doorInside, roomPath, spotNear, bedside, somewhereIn, sleepPose, chestSpot,
     constrainPlayer, leftThroughDoor, clampCamera,
     setInside, setNight, setActive,
     inside: () => insideKey,

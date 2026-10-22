@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
 import { createTownRooms } from './townRooms.js';
 import {
-  CHEST_PRICE, CHOP_HITS, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
+  CHEST_PRICE, CHOP_HITS, LOCKPICK_MAX, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
   DOOR_DIST, DOOR_ENTER_HALF_WIDTH, DOOR_ENTER_PAST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
@@ -17,9 +17,13 @@ import {
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownTrade(T, ctx) {
   // ── The player's goods, gathering and trade ──
+  // (what fits in the bag — BAG_MAX, townHomes.js); → how many went in
   const gain = (g, n = 1) => {
-    T.goods[g] += n;
+    const got = Math.min(n, T.bagRoom());
+    if (got < n) T.bagFullNote();
+    T.goods[g] += got;
     T.renderGoods();
+    return got;
   };
   // Food for health (the goods pill / 🍽 Eat)
   const eat = (g) => {
@@ -47,6 +51,7 @@ export function installTownTrade(T, ctx) {
       if (T.simT - t.hitAt < 0.45) return true;
       t.hitAt = T.simT;
       ctx.playSfx('chop');
+      if (T.bagRoom() <= 0) { T.bagFullNote(); return true; }
       if (t.wood <= 0) {
         T.feedLine('🌳 This tree needs time to grow back.');
         return true;
@@ -75,6 +80,7 @@ export function installTownTrade(T, ctx) {
   const pickCrop = () => {
     const found = ripeCropNear();
     if (!found) return;
+    if (T.bagRoom() <= 0) { T.bagFullNote(); return; }
     const { field, crop } = found;
     crop.ripe = false;
     crop.growAt = T.simT + CROP_REGROW_S;
@@ -125,6 +131,8 @@ export function installTownTrade(T, ctx) {
   // Whose home it is (for the feed)
   const homeLine = (key) => {
     const home = T.layout.places.rooms[key].home;
+    const house = T.houses[home];
+    if (house) return T.doorAccess(key).mine ? '🏠 Home. Your chest is in the corner.' : `🏠 ${house.n || 'Another player'}'s home.`;
     const names = T.npcs.filter((n) => n.alive && n.homeIndex === home && !n.def.outlaw).map((n) => firstName(n.name));
     if (!names.length) return '🏠 An empty house — nobody lives here yet.';
     const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
@@ -132,11 +140,14 @@ export function installTownTrade(T, ctx) {
   };
   // In through the door (weapons away: no fighting indoors); out again by walking back through
   // it or 🚪 Leave
-  const enterRoom = (key) => {
+  // (forced: the lock picked — townHomes.js; otherwise a locked door says why)
+  const enterRoom = (key, { forced = false } = {}) => {
     if (!canEnterRoom()) {
       if (T.law.stars > 0) T.feedLine('🚪 Not with the guards after you!');
       return;
     }
+    const access = T.doorAccess(key);
+    if (!access.open && !forced) { T.lockedNote(key, access); return; }
     T.fishing = null;
     T.stopFishingRig?.();
     ctx.putWeaponsAway?.();
@@ -239,6 +250,7 @@ export function installTownTrade(T, ctx) {
     if (id === 'gun') return items.gun;
     if (id === 'wand') return items.wand;
     if (id === 'mana') return items.mana >= ctx.maxMana;
+    if (id === 'lockpick') return T.lockpicks >= LOCKPICK_MAX;
     return false;
   };
   const gearHave = (id, items) => {
@@ -249,6 +261,7 @@ export function installTownTrade(T, ctx) {
     if (id === 'bomb') return `You have ${items.bombs}`;
     if (id === 'bubble') return `You have ${items.bubbles}`;
     if (id === 'mana') return items.wand ? `Mana ${items.mana} / ${ctx.maxMana}` : '';
+    if (id === 'lockpick') return T.lockpicks ? `You have ${T.lockpicks}` : '';
     return '';
   };
   // The buy card's contents for a thing on a counter
@@ -264,7 +277,8 @@ export function installTownTrade(T, ctx) {
         price: buyPrice(id),
         blocked: !merchant ? 'The merchant isn’t here'
           : merchant.attitude < GRUDGE_ATTITUDE ? `${firstName(merchant.name)} won’t sell to you`
-          : T.market.stock[id] <= 0 ? 'Sold out' : null,
+          : T.market.stock[id] <= 0 ? 'Sold out'
+          : T.bagRoom() <= 0 ? 'Your bag is full' : null,
       };
     }
     if (id === 'chest') {
@@ -282,7 +296,7 @@ export function installTownTrade(T, ctx) {
       owned: gearHave(id, items),
       price: item.price,
       blocked: !gearOpen() ? 'Closed'
-        : gearOwned(id, items) ? (id === 'mana' ? 'Mana is full' : id === 'shield' ? 'Shield is full' : 'Owned')
+        : gearOwned(id, items) ? (id === 'mana' ? 'Mana is full' : id === 'shield' ? 'Shield is full' : id === 'lockpick' ? `You can carry ${LOCKPICK_MAX}` : 'Owned')
         : missing ? `Needs a ${SHOP_GEAR.find((x) => x.id === item.needs)?.label}` : null,
     };
   };
@@ -350,7 +364,7 @@ export function installTownTrade(T, ctx) {
   const buyGood = (g) => {
     const merchant = workingMerchant();
     const price = buyPrice(g);
-    if (!merchant || merchantShunsPlayer() || ctx.getCoins() < price || !T.market.take(g)) return false;
+    if (!merchant || merchantShunsPlayer() || ctx.getCoins() < price || T.bagRoom() <= 0 || !T.market.take(g)) return false;
     ctx.addCoins(-price);
     merchant.money += price;
     if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'trade', g, d: -1, cash: price });
@@ -375,7 +389,11 @@ export function installTownTrade(T, ctx) {
   const buyGear = (id) => {
     const item = SHOP_GEAR.find((x) => x.id === id);
     if (!item || ctx.getCoins() < item.price) return false;
-    if (!ctx.grantItem(item.kind, item.n ?? 1)) return false;
+    // (a lock-pick is the town's own: single use — townHomes.js)
+    if (item.kind === 'lockpick') {
+      if (T.lockpicks >= LOCKPICK_MAX) return false;
+      T.lockpicks += 1;
+    } else if (!ctx.grantItem(item.kind, item.n ?? 1)) return false;
     ctx.addCoins(-item.price);
     T.feedLine(`${item.emoji} Bought: ${item.label}`);
     return true;
@@ -389,7 +407,7 @@ export function installTownTrade(T, ctx) {
       { w: 24, emoji: '🪙', give: () => { const n = 10 + 5 * Math.floor(Math.random() * 7); ctx.addCoins(n); return `${n} coins`; } },
       { w: 16, emoji: '💣', give: () => (ctx.grantItem('bomb', 2) ? '2 bombs' : null) },
       { w: 12, emoji: '🫧', give: () => (ctx.grantItem('bubble', 1) ? 'a bubble' : null) },
-      { w: 14, emoji: GOODS[good].emoji, give: () => { gain(good, 3); return `3 ${GOODS[good].label.toLowerCase()}`; } },
+      { w: 14, emoji: GOODS[good].emoji, give: () => { const n = gain(good, 3); return n ? `${n} ${GOODS[good].label.toLowerCase()}` : null; } },
       { w: items.shield >= ctx.shieldMax ? 0 : 10, emoji: '🛡️', give: () => (ctx.grantItem('shield') ? 'a shield' : null) },
       { w: items.gun ? 10 : 0, emoji: '🔶', give: () => (ctx.grantItem('ammo', 6) ? '6 bullets' : null) },
       { w: items.gun ? 0 : 4, emoji: '🔫', give: () => (ctx.grantItem('gun') ? 'a gun!' : null) },

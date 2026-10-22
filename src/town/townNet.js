@@ -23,7 +23,9 @@ import * as THREE from 'three';
 import { ref, get, set, update, remove, runTransaction } from 'firebase/database';
 import { db } from '../core/firebase-init.js';
 
-export const TOWN_ROOM_MAX = 15;
+// (every player has a house of their own and the town has ~19 homes: kept low enough that some
+// townsfolk always live there too — MIN_TOWNSFOLK in townConfig.js)
+export const TOWN_ROOM_MAX = 12;
 const MEMBER_STALE_MS = 21 * 24 * 3600 * 1000; // 3 weeks away: the place goes to someone else
 const FIND_TIMEOUT_MS = 10000;
 const PL_SEND_MS = 100;

@@ -42,6 +42,7 @@ const GEAR_ITEMS = [
   { id: 'shield', counter: 'back', along: 1.3, lift: -0.06, build: 'shield' },
   { id: 'mana', counter: 'right', along: 0.1, lift: 0.06, potion: true },
   { id: 'bubble', counter: 'right', along: 1.3, lift: 0.35, build: 'bubble', hang: true },
+  { id: 'lockpick', counter: 'right', along: 2.5, lift: 0.01, build: 'lockpick' },
   { id: 'chest', chest: true },
 ];
 const GOODS_ITEMS = [
@@ -75,6 +76,22 @@ const _q = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 const _ray = new THREE.Raycaster();
 const _ndc = new THREE.Vector2();
+
+// A lock-pick (single use, for locked doors — townHomes.js): a ring handle and a bent pin, flat
+const makeLockpickMesh = () => {
+  const g = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0xb8bcc4, roughness: 0.35, metalness: 0.8 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.009, 8, 20), steel);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(0, 0.01, -0.09);
+  const pin = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.008, 0.16), steel);
+  pin.position.set(0, 0.01, 0.025);
+  const hook = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.008, 0.012), steel);
+  hook.position.set(0.01, 0.01, 0.105);
+  g.add(ring, pin, hook);
+  g.scale.setScalar(1.6);
+  return g;
+};
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -152,7 +169,7 @@ export function createTownStalls(ctx) {
   };
   const makeItemMesh = (build, bombGltf) => {
     const mesh = build === 'bomb' && bombGltf ? createBombMesh(bombGltf)
-      : build === 'rod' ? createFishingRodModel() : buildItemMesh(build);
+      : build === 'rod' ? createFishingRodModel() : build === 'lockpick' ? makeLockpickMesh() : buildItemMesh(build);
     if (build === 'bomb') { mesh.scale.multiplyScalar(0.8); mesh.position.y = 0.1; }
     // (the rod lies along the counter, tip toward the back of the shop)
     if (build === 'rod') { mesh.scale.setScalar(0.55); mesh.rotation.set(-0.08, Math.PI / 2, 0); mesh.position.y = 0.02; }

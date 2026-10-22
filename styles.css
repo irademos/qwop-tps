@@ -4402,6 +4402,9 @@ body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
 }
 .town-good:disabled { cursor: default; color: var(--text); opacity: 1; }
 .town-good:not(:disabled):hover { background: var(--surface-hover); }
+/* (how full the bag is — BAG_MAX, townHomes.js; red when full) */
+.town-bag { display: inline-flex; align-items: center; cursor: default; color: var(--text-muted); }
+.town-bag.town-bag-full { color: var(--danger); }
 /* The market's sell panel: goods sold to the merchant at the going price */
 .town-market,
 .town-lockpick {
@@ -4436,6 +4439,8 @@ body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
 .town-market-emoji { font-size: 18px; }
 .town-market-info { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .town-market-btn { min-height: 36px; padding: 0 12px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+/* The chest at home (townStoragePanel.js): store / take side by side */
+.town-storage-btns { display: flex; gap: 6px; }
 /* (the panel covers the bottom of the screen: the touch controls step aside meanwhile) */
 body.town-market-open #joystick-container,
 body.town-market-open #jump-button,

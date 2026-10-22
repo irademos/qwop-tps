@@ -135,6 +135,10 @@ export function installTownActs(T, ctx) {
       out.push({ key: 'close', label: '✖ Close market', onClick: T.closeMarket });
       return out;
     }
+    if (T.storage.isOpen()) {
+      out.push({ key: 'closechest', label: '✖ Close chest', onClick: () => T.storage.close() });
+      return out;
+    }
     if (T.stalls.focused()) {
       // At a counter: buy what's picked, the next thing, back
       const buy = T.stalls.buyLabel();
@@ -184,7 +188,10 @@ export function installTownActs(T, ctx) {
       const p = T.playerPos();
       const d = T.rooms.doorInside(T.inRoom);
       if (dist2(p.x, p.z, d.x, d.z) < 1.8) out.push({ key: 'leave', label: '🚪 Leave', onClick: T.leaveRoom });
+      out.push(...T.chestActs());
     }
+    // A locked door (townHomes.js): buy the player's house, knock, pick the lock
+    if (calm) out.push(...T.doorActs());
     const stall = calm ? T.nearestStall() : null;
     if (stall === 'gear' && T.gearOpen()) out.push({ key: 'gear', label: '⚔️ Weapons', onClick: () => T.focusStall('gear') });
     if (stall === 'goods' && T.marketOpen()) {
@@ -239,6 +246,7 @@ export function installTownActs(T, ctx) {
     if (e.target?.closest?.('input, textarea, select')) return;
     if (document.body.classList.contains('settings-open')) return;
     if (e.key === 'Escape' && T.marketPanel.isOpen()) { T.closeMarket(); e.preventDefault(); return; }
+    if (e.key === 'Escape' && T.storage.isOpen()) { T.storage.close(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.stalls.focused()) { T.stalls.unfocus(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.jobTalk.isOpen()) { T.jobTalk.close(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.lockpick.isOpen()) { T.lockpick.stop(); e.preventDefault(); return; }
