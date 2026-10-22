@@ -61,7 +61,8 @@
 //   scene, camera, domElement, getPlayerPosition() → Vector3, setPlayerHidden(hidden),
 //   getPlayerName(), isPlayerDead()
 //   getGroundY(x, z), isOverWater(x, z), pathAt(x, z) → 'road' | 'trail' | null
-//   getMapObjects(bounds) → [{ file, x, z, radius }]
+//   getMapObjects(bounds) → [{ file, x, z, radius }], getRoadLamps() → [{ x, y, z }] (lamp heads),
+//   setRoadLampsLit(on)
 //   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null)
 //   setTimeOfDay('day' | 'night'), showBanner(title, sub, ms)
 //   spawnFighter({ x, z, yaw, url, hearts, swingChance, gear, name }) → EnemyPlayer,
@@ -104,6 +105,7 @@ import { installTownCooking } from './townCooking.js';
 import { installTownMemory } from './townMemory.js';
 import { installTownIntro } from './townIntro.js';
 import { installTownHomes } from './townHomes.js';
+import { installTownLights } from './townLights.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -531,6 +533,7 @@ export function createTownMode(ctx) {
       }
       ctx.scene.add(root);
       root.add(T.layout.props.group);
+      T.addLights(root);
       const P = T.layout.places;
       ctx.teleport(P.spawn.x, P.spawn.z, Math.atan2(P.market.x - P.spawn.x, P.market.z - P.spawn.z));
       T.laidOut = true;
@@ -588,6 +591,7 @@ export function createTownMode(ctx) {
     actsEl.replaceChildren();
     actsEl.classList.add('hidden');
     feed.replaceChildren();
+    T.resetLights();
     root.parent?.remove(root);
     hud.classList.add('hidden');
     document.body.classList.remove('town-mode');
@@ -624,6 +628,7 @@ export function createTownMode(ctx) {
       else if (n.task?.type === 'talk') n.task.t = 0;
     }
     updateCampfire(T.layout.props.campFire, T.simT + 3);
+    T.updateLights(dt);
     // The jail door: shut while the player (or a townsperson) is inside, open otherwise
     const door = T.layout.props.door;
     const occupied = T.jail || T.npcs.some((n) => n.alive && n.jailedUntil > T.simT);
@@ -704,6 +709,7 @@ export function createTownMode(ctx) {
   installTownMemory(T, ctx);
   installTownIntro(T, ctx);
   installTownHomes(T, ctx);
+  installTownLights(T, ctx);
 
 
   return {
