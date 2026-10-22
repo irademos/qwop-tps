@@ -45,7 +45,8 @@ import { createWandModel } from '../items/magicWand.js';
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
 const LIFE_POTION_MODEL = '/assets/props/life_potion.glb';
 const MANA_POTION_MODEL = '/assets/props/mana_potion.glb';
-const TREASURE_CHEST_MODEL = '/assets/props/treasure_chest.glb';
+// (?v= busts browser caches — vercel.json marks .glb immutable; bump it when the GLB changes)
+export const TREASURE_CHEST_MODEL = '/assets/props/treasure_chest.glb?v=2';
 const SHOP_INTERIOR_MODEL = '/assets/props/shop.glb';
 const HOME_INTERIOR_MODEL = '/assets/props/home_interior.glb';
 // The stall / potion / chest numbers come from a game with ~1.8 m characters; ours are
@@ -391,7 +392,46 @@ export async function loadTreasureChest() {
   const chest = markShared(gltf.scene.clone(true));
   chest.scale.setScalar(TREASURE_CHEST_SCALE * VILLAGE_PROP_SCALE);
   chest.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  chest.userData.lid = createChestLid(chest, gltf.animations);
   return chest;
+}
+
+// The chest GLB's 'Open' clip (the lid swings up) on one chest instance: open() plays it,
+// update(dt) each frame; with `closeAfter` (s) the lid shuts again (the clip backwards) that
+// long after it's fully open — opening again meanwhile keeps it open
+const CHEST_CLOSE_AFTER = 2.2;
+// A bought chest's prize rises out of it this long after the lid starts opening (it's about
+// half open by then — the clip is ~1.5 s)
+export const CHEST_PRIZE_DELAY_MS = 750;
+export function createChestLid(object, animations, { closeAfter = CHEST_CLOSE_AFTER } = {}) {
+  const clip = THREE.AnimationClip.findByName(animations || [], 'Open');
+  if (!clip) return { hasClip: false, open() {}, update() {} };
+  const mixer = new THREE.AnimationMixer(object);
+  const action = mixer.clipAction(clip);
+  action.setLoop(THREE.LoopOnce, 1);
+  action.clampWhenFinished = true;
+  let holdLeft = Infinity;   // s left open before it shuts (while fully open)
+  return {
+    hasClip: true,
+    open() {
+      if (!action.isScheduled() && !action.paused) action.reset();
+      action.paused = false;
+      action.timeScale = 1;
+      action.play();
+      holdLeft = closeAfter ?? Infinity;
+    },
+    update(dt) {
+      if (action.timeScale > 0 && action.paused && Number.isFinite(holdLeft)) {
+        holdLeft -= dt;
+        if (holdLeft <= 0) {
+          holdLeft = Infinity;
+          action.paused = false;
+          action.timeScale = -1;
+        }
+      }
+      mixer.update(dt);
+    },
+  };
 }
 
 // Town mode's shops (src/town/townStalls.js): the room — walls on three sides, the open front
@@ -725,7 +765,6 @@ export function createVillage(ctx) {
   let campfire = null;      // makeCampfire() result
   let sitting = false;      // sitting by the fire (screen fade) — input ignored meanwhile
   let sitTimers = [];
-  let chestFx = null;
   let prizeFx = [];
   let cardRefreshedAt = 0;
   let overviewLabels = [];  // station names: only shown in the overview (huge in close-ups)
@@ -974,6 +1013,7 @@ export function createVillage(ctx) {
           const cp = _v2.copy(stallRoot.position).addScaledVector(side, chestSign * LAYOUT.chestSide).addScaledVector(facing, 0.35);
           placeOnGround(object, cp, 0);
           object.rotation.y = stallRoot.rotation.y - 0.25;
+          object.userData.lid = createChestLid(object, chestGltf.animations);
           root.add(object);
         } else {
           object = def.build === 'bomb' && bombGltf ? createBombMesh(bombGltf) : buildItemMesh(def.build);
@@ -1591,12 +1631,13 @@ export function createVillage(ctx) {
     }
   }
   function openChestFx(entry, result) {
-    chestFx = { entry, start: performance.now() };
+    entry.object.userData.lid?.open();
     const sprite = makeEmojiSprite(result.emoji || '✨', 0.45);
-    const start = itemCenter(entry, new THREE.Vector3()).add(_v.set(0, 0.3, 0));
+    const start = itemCenter(entry, new THREE.Vector3());
     sprite.position.copy(start);
+    sprite.visible = false;
     root.add(sprite);
-    prizeFx.push({ sprite, start, born: performance.now() });
+    prizeFx.push({ sprite, start, born: performance.now() + CHEST_PRIZE_DELAY_MS });
   }
 
   // ── Campfire: sit until night / morning ──
@@ -2109,7 +2150,6 @@ export function createVillage(ctx) {
     campfire = null;
     overviewLabels = [];
     prizeFx = [];
-    chestFx = null;
     stations = {};
   }
 
@@ -2381,10 +2421,8 @@ export function createVillage(ctx) {
       const o = entry.object;
       const sel = focus === 'shop' && i === selectedItem;
       if (entry.def.chest) {
-        // Hop when opened
-        const fx = chestFx?.entry === entry ? (now - chestFx.start) / 600 : 1;
-        o.position.y = entry.baseY + (fx < 1 ? Math.sin(fx * Math.PI) * 0.18 : 0);
-        o.rotation.z = fx < 1 ? Math.sin(fx * Math.PI * 4) * 0.06 : 0;
+        // The lid opens when bought (and shuts again a little later)
+        o.userData.lid?.update(dt);
         return;
       }
       if (entry.def.potion) {
@@ -2400,6 +2438,9 @@ export function createVillage(ctx) {
     });
     prizeFx = prizeFx.filter((p) => {
       const age = (now - p.born) / 1800;
+      // (a chest's prize waits inside until the lid's open)
+      p.sprite.visible = age >= 0;
+      if (age < 0) return true;
       if (age >= 1) { p.sprite.parent?.remove(p.sprite); disposeOwned(p.sprite); return false; }
       p.sprite.position.copy(p.start).add(_v.set(0, age * 0.9, 0));
       p.sprite.material.opacity = age < 0.7 ? 1 : 1 - (age - 0.7) / 0.3;
