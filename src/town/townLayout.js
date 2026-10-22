@@ -71,31 +71,39 @@ export function installTownLayout(T, ctx) {
       const mz = (min.z + max.z) / 2;
       const hx = (max.x - min.x) / 2;
       const hz = (max.z - min.z) / 2;
-      const axisX = spec.side.endsWith('x');
-      const sign = spec.side[0] === '-' ? -1 : 1;
-      const inset = 1 - (spec.inset ?? 0);
-      const wall = axisX
-        ? new THREE.Vector3(mx + sign * hx * inset, 0, mz + spec.at * hz)
-        : new THREE.Vector3(mx + spec.at * hx, 0, mz + sign * hz * inset);
-      const normal = axisX ? new THREE.Vector3(sign, 0, 0) : new THREE.Vector3(0, 0, sign);
+      let wall;
+      let normal;
+      if (spec.point) {
+        wall = new THREE.Vector3(mx + spec.point[0] * hx, 0, mz + spec.point[1] * hz);
+        normal = new THREE.Vector3(spec.normal[0], 0, spec.normal[1]).normalize();
+      } else {
+        const axisX = spec.side.endsWith('x');
+        const sign = spec.side[0] === '-' ? -1 : 1;
+        const inset = 1 - (spec.inset ?? 0);
+        wall = axisX
+          ? new THREE.Vector3(mx + sign * hx * inset, 0, mz + spec.at * hz)
+          : new THREE.Vector3(mx + spec.at * hx, 0, mz + sign * hz * inset);
+        normal = axisX ? new THREE.Vector3(sign, 0, 0) : new THREE.Vector3(0, 0, sign);
+      }
       wall.applyMatrix4(b.matrix);
       normal.transformDirection(b.matrix).setY(0).normalize();
       // (the ground straight out from the door: the height ray lands on a roof overhang there,
       // so the spot is the first one out on the ground — a porch step or two up at most)
       const out = [];
-      for (let d = HOUSE_DOOR_OUT; d <= HOUSE_DOOR_MAX_OUT + 1e-6; d += 0.1) {
+      const first = spec.out ?? HOUSE_DOOR_OUT;
+      for (let d = first; d <= Math.max(first, HOUSE_DOOR_MAX_OUT) + 1e-6; d += 0.1) {
         out.push({ d, y: groundAt(wall.x + normal.x * d, wall.z + normal.z * d, NaN) });
       }
       const low = Math.min(...out.map((o) => o.y).filter(Number.isFinite));
       const spot = Number.isFinite(low) ? out.find((o) => o.y <= low + HOUSE_DOOR_STEP) : null;
-      const d = spot?.d ?? HOUSE_DOOR_OUT;
+      const d = spot?.d ?? first;
       const door = { x: wall.x + normal.x * d, z: wall.z + normal.z * d };
       // (townsfolk walk the last bit onto it from the grid)
       const i = nav.nearestWalkable(door.x, door.z);
       if (i < 0 || dist2(nav.cellX(i), nav.cellZ(i), door.x, door.z) > 2) return null;
       // (doorway: the door itself, in the wall — where its marker stands)
       const doorway = { x: wall.x + normal.x * 0.08, z: wall.z + normal.z * 0.08 };
-      return { door, doorway, exitYaw: Math.atan2(normal.x, normal.z), enterDist: spec.enter ?? DOOR_ENTER_DIST };
+      return { door, doorway, out: d, exitYaw: Math.atan2(normal.x, normal.z), enterDist: spec.enter ?? null };
     };
     const shopHouses = [];
     const byMiddle = [...buildings].sort((a, b2) => dist2(a.x, a.z, C.x, C.z) - dist2(b2.x, b2.z, C.x, C.z));
@@ -127,8 +135,9 @@ export function installTownLayout(T, ctx) {
     const rooms = {};
     const shops = {};
     ['goods', 'gear'].forEach((key, k) => {
-      const { building, door, doorway, exitYaw, enterDist = DOOR_ENTER_DIST } = shopHouses[k];
-      shops[key] = { key, kind: 'shop', building, door, doorway, exitYaw, enterDist };
+      // (a door on an open spot: walked into within DOOR_ENTER_DIST of it)
+      const { building, door, doorway, out = 0, exitYaw, enterDist = DOOR_ENTER_DIST } = shopHouses[k];
+      shops[key] = { key, kind: 'shop', building, door, doorway, out, exitYaw, enterDist };
       rooms[key] = shops[key];
     });
     const market = shops.goods.door;
