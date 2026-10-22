@@ -7,6 +7,7 @@ const TAB_KEY = 'settings:lastTab';
 const TABS = [
   { id: 'profile', label: 'Profile' },
   { id: 'multiplayer', label: 'Multiplayer' },
+  { id: 'town', label: 'Town' },
   { id: 'display', label: 'Display' },
   { id: 'swordgyro', label: 'Sword Gyro' },
   { id: 'about', label: 'About' },
@@ -324,6 +325,128 @@ function buildMultiplayerPanel() {
   elements.connectionError = errorText;
 
   return panelEl;
+}
+
+// Settings → Town: everyone in town (townsfolk, bandits, you, the other players of a shared
+// town) with their coins and a few stats — appState.getTownRoster() (townMode.js roster). The
+// richest wears the crown. Refreshed every TOWN_REFRESH_MS while the tab is showing.
+const TOWN_FILTERS = [
+  { id: 'all', label: 'Everyone', keep: () => true },
+  { id: 'folk', label: 'Townsfolk', keep: (p) => p.kind === 'townsfolk' },
+  { id: 'players', label: 'Players', keep: (p) => p.kind === 'you' || p.kind === 'player' },
+  { id: 'outlaws', label: 'Bandits', keep: (p) => p.kind === 'outlaw' },
+];
+const TOWN_REFRESH_MS = 1000;
+let townFilter = 'all';
+let townRefreshTimer = null;
+
+function buildTownPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-town';
+  panelEl.dataset.panel = 'town';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-town');
+
+  const offlineHint = createElement('div', 'settings-muted',
+    'Pick Town on the start screen: everyone who lives there shows up here, with their coins.');
+  const summary = createElement('div', 'settings-stats-grid');
+  const summaryFields = {};
+  [['people', 'People'], ['players', 'Players'], ['coins', 'Coins in town'], ['day', 'Day']].forEach(([key, label]) => {
+    const stat = createElement('div', 'settings-stat');
+    const value = createElement('span', 'settings-stat-value', '—');
+    stat.append(createElement('span', 'settings-stat-label', label), value);
+    summary.appendChild(stat);
+    summaryFields[key] = value;
+  });
+  const filters = createElement('div', 'town-roster-filters');
+  const filterButtons = {};
+  TOWN_FILTERS.forEach(({ id, label }) => {
+    const chip = createElement('button', 'ui-chip', label);
+    chip.type = 'button';
+    chip.dataset.action = 'town-filter';
+    chip.dataset.filter = id;
+    filters.appendChild(chip);
+    filterButtons[id] = chip;
+  });
+  const list = createElement('ol', 'town-roster');
+
+  panelEl.append(offlineHint, summary, filters, list);
+  elements.town = { offlineHint, summary, summaryFields, filters, filterButtons, list };
+  return panelEl;
+}
+
+function renderTownRoster() {
+  const ui = elements.town;
+  if (!ui) return;
+  const roster = context.appState?.getTownRoster?.() ?? null;
+  ui.offlineHint.hidden = !!roster;
+  ui.summary.hidden = !roster;
+  ui.filters.hidden = !roster;
+  ui.list.hidden = !roster;
+  if (!roster) return;
+
+  const people = roster.people ?? [];
+  const known = (p) => Number.isFinite(p.coins);
+  const top = people.reduce((m, p) => (known(p) ? Math.max(m, p.coins) : m), 0);
+  ui.summaryFields.people.textContent = String(people.filter((p) => p.kind === 'townsfolk' || p.kind === 'outlaw').length);
+  ui.summaryFields.players.textContent = String(people.filter((p) => p.kind === 'you' || p.kind === 'player').length);
+  ui.summaryFields.coins.textContent = `🪙 ${people.reduce((sum, p) => sum + (known(p) ? p.coins : 0), 0)}`;
+  ui.summaryFields.day.textContent = String(roster.day ?? '—');
+  Object.entries(ui.filterButtons).forEach(([id, chip]) => {
+    chip.classList.toggle('is-active', id === townFilter);
+    chip.hidden = id === 'outlaws' && !people.some((p) => p.kind === 'outlaw');
+  });
+
+  const keep = (TOWN_FILTERS.find((f) => f.id === townFilter) ?? TOWN_FILTERS[0]).keep;
+  const shown = people.filter(keep).sort((a, b) => (known(b) ? b.coins : -1) - (known(a) ? a.coins : -1) || a.name.localeCompare(b.name));
+  ui.list.innerHTML = '';
+  if (!shown.length) {
+    ui.list.appendChild(createElement('li', 'settings-muted', 'Nobody here.'));
+    return;
+  }
+  shown.forEach((p) => {
+    const crowned = top > 0 && known(p) && p.coins === top;
+    const row = createElement('li', `town-roster-row${p.kind === 'you' ? ' is-you' : ''}${crowned ? ' is-richest' : ''}`);
+    const who = createElement('div', 'town-roster-who');
+    const name = createElement('div', 'town-roster-name');
+    if (crowned) name.appendChild(createElement('span', 'town-roster-crown', '👑'));
+    name.appendChild(createElement('span', null, `${p.emoji ?? ''} ${p.name}${p.kind === 'you' ? ' (you)' : ''}`.trim()));
+    const meta = [p.role, p.status].filter(Boolean).join(' · ');
+    who.append(name, createElement('div', 'town-roster-meta', meta));
+
+    const stats = createElement('div', 'town-roster-stats');
+    if (Number.isFinite(p.hp)) {
+      stats.appendChild(createElement('span', null, `❤️ ${p.hp}${Number.isFinite(p.maxHp) ? `/${p.maxHp}` : ''}`));
+    }
+    if (p.mood) {
+      const mood = createElement('span', null, p.mood.emoji);
+      mood.title = p.mood.label;
+      stats.appendChild(mood);
+    }
+    if (p.stars > 0) stats.appendChild(createElement('span', 'town-roster-stars', '★'.repeat(p.stars)));
+    if (p.bounty > 0) stats.appendChild(createElement('span', null, `💰 ${p.bounty} bounty`));
+    if (p.kind === 'you') {
+      stats.appendChild(createElement('span', null, `🎒 ${p.goods ?? 0}`));
+      if (p.chest > 0) stats.appendChild(createElement('span', null, `📦 🪙 ${p.chest}`));
+    }
+    who.appendChild(stats);
+
+    const coins = createElement('div', 'town-roster-coins', known(p) ? `🪙 ${p.coins}` : '🪙 ?');
+    row.append(who, coins);
+    ui.list.appendChild(row);
+  });
+}
+
+// (only while the settings are open on the Town tab)
+function syncTownRefresh() {
+  const showing = overlay?.getAttribute('aria-hidden') === 'false' && elements.panels?.town && !elements.panels.town.hidden;
+  if (showing && !townRefreshTimer) {
+    renderTownRoster();
+    townRefreshTimer = setInterval(renderTownRoster, TOWN_REFRESH_MS);
+  } else if (!showing && townRefreshTimer) {
+    clearInterval(townRefreshTimer);
+    townRefreshTimer = null;
+  }
 }
 
 function buildDisplayPanel() {
@@ -802,6 +925,7 @@ function buildPanels() {
   elements.panels = {
     profile: buildProfilePanel(),
     multiplayer: buildMultiplayerPanel(),
+    town: buildTownPanel(),
     display: buildDisplayPanel(),
     swordgyro: buildSwordGyroPanel(),
     about: buildAboutPanel(),
@@ -988,6 +1112,7 @@ function setActiveTab(tabId) {
     const isActive = id === tabId;
     panelEl.hidden = !isActive;
   });
+  syncTownRefresh();
 
   if (isMobileView) {
     setListView(false);
@@ -1012,6 +1137,7 @@ function openOverlay() {
   syncCameraFields();
   syncDevFields();
   updateUI();
+  syncTownRefresh();
 }
 
 function flashButton(button, text) {
@@ -1026,6 +1152,7 @@ function closeOverlay() {
   overlay.style.display = 'none';
   overlay.setAttribute('aria-hidden', 'true');
   syncOverlayBodyState();
+  syncTownRefresh();
   if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
     lastFocusedElement.focus();
   }
@@ -1049,6 +1176,9 @@ async function handleAction(target) {
     if (isMobileView) {
       setListView(true);
     }
+  } else if (action === 'town-filter') {
+    townFilter = target.dataset.filter || 'all';
+    renderTownRoster();
   } else if (action === 'open-leaderboard') {
     await openLeaderboardOverlay(target.dataset.leaderboard || 'kills');
   } else if (action === 'dev-roam') {

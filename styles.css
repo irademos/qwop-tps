@@ -134,6 +134,7 @@ textarea {
 .duel-lobby-row,
 .match-team-card,
 .settings-stat,
+.town-roster-row,
 .leaderboard-row,
 .inventory-details,
 .settings-confirmation,
@@ -1377,6 +1378,85 @@ body.settings-open #inventory-button {
 .settings-list-item {
   font-size: 13px;
   color: var(--text);
+}
+
+/* Settings → Town: who lives in town and their coins (the richest wears the crown) */
+.town-roster-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.town-roster {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.town-roster-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.town-roster-row.is-you {
+  border-color: var(--accent-ring);
+}
+
+.town-roster-row.is-richest {
+  background: var(--accent-soft);
+}
+
+.town-roster-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.town-roster-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.town-roster-crown {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.town-roster-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.town-roster-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.town-roster-stars {
+  color: var(--accent);
+}
+
+.town-roster-coins {
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-muted {

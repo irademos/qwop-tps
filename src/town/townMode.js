@@ -101,7 +101,7 @@ import { installTownMissions } from './townMissions.js';
 import { installTownActs } from './townActs.js';
 import { installTownWire } from './townWire.js';
 import { installTownCooking } from './townCooking.js';
-import { installTownMemory } from './townMemory.js';
+import { installTownMemory, moodOf } from './townMemory.js';
 import { installTownIntro } from './townIntro.js';
 import { installTownHomes } from './townHomes.js';
 
@@ -705,10 +705,60 @@ export function createTownMode(ctx) {
   installTownIntro(T, ctx);
   installTownHomes(T, ctx);
 
+  // ── Settings → Town (settingsPanel.js): everyone in town, their coins and a few stats ──
+  const TASK_STATUS = {
+    work: 'Working', eat: 'Eating', deliver: 'Selling goods', browse: 'Shopping', social: 'By the fire',
+    sleep: 'Sleeping', wander: 'Out and about', chat: 'Chatting', talk: 'Talking', follow: 'Following you',
+    jailed: 'In jail', lost: 'Lost', flee: 'Running away', hide: 'Hiding', fight: 'Fighting', brawl: 'Brawling',
+    mug: 'Up to no good', raid: 'Raiding', raidHome: 'Raiding', camp: 'At camp', respond: 'On duty',
+    search: 'On duty', arrest: 'On duty',
+  };
+  const npcStatus = (n) => {
+    if (n.fighter) return 'Fighting';
+    if (n.jailedUntil > T.simT) return 'In jail';
+    return TASK_STATUS[n.task?.type] ?? (n.inside ? 'Indoors' : 'Out and about');
+  };
+  const roster = () => {
+    if (!T.active || !T.ready) return null;
+    const people = T.npcs.filter((n) => n.alive).map((n) => ({
+      kind: n.def.outlaw ? 'outlaw' : 'townsfolk',
+      name: n.name,
+      role: n.def.label,
+      emoji: n.def.emoji,
+      coins: Math.max(0, Math.round(n.money)),
+      hp: n.hp,
+      maxHp: n.maxHp,
+      mood: moodOf(n.attitude),
+      bounty: n.def.bounty ?? 0,
+      status: npcStatus(n),
+    }));
+    const { health, max } = ctx.getHealth();
+    people.push({
+      kind: 'you',
+      name: ctx.getPlayerName(),
+      role: 'You',
+      emoji: '🧍',
+      coins: Math.max(0, Math.round(ctx.getCoins())),
+      hp: health,
+      maxHp: max,
+      stars: law.stars,
+      goods: GOOD_IDS.reduce((sum, g) => sum + (goods[g] || 0), 0),
+      chest: T.store?.coins ?? 0,
+      status: T.jail ? 'In jail' : T.inRoom ? 'Indoors' : 'Out and about',
+    });
+    for (const p of net?.players?.() ?? []) {
+      people.push({
+        kind: 'player', name: p.name, role: 'Player', emoji: '🧍', coins: p.coins, hp: p.hp, maxHp: p.maxHp,
+        stars: p.stars, status: p.stars > 0 ? 'Wanted' : 'Out and about',
+      });
+    }
+    return { town: TOWN_NAME, day: clock.day, shared: T.netMode === 'host' || T.netMode === 'client', people };
+  };
 
   return {
     enter,
     exit,
+    roster,
     update,
     trySwordHit,
     // Fishing, the line out: the phone's Block bar is a reel ({ reel, cue, text, tension }) — or null

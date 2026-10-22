@@ -63,7 +63,8 @@ export const CLIMB_CONFIG = {
   upMaxAngleDeg: 100,   // input within this of the wall direction climbs; the rest jumps off
   wallLead: 0.15,       // m ahead of a step where a wall stops walking (not climbing)
   topStep: 0.15,        // extra m past the probe point the player steps onto at the top
-  jumpOffSpeed: 3,      // m/s backward drift while falling after jumping off
+  jumpOffSpeed: 3,      // m/s backward drift while falling after jumping off…
+  jumpOffDriftS: 1.2,   // …for at most this long (stopped by a wall, ended by landing)
   maxAnchorDrift: 0.3   // m — moved off the wall by something else (knockback, teleport) → stop climbing
 };
 // Weapon button id for "put everything away" (Town: nothing in hand)
@@ -1089,6 +1090,13 @@ export class PlayerControls {
 
   cancelClimb() {
     this._climb = null;
+    this._climbFall = null;
+  }
+
+  // The jump code (bootstrapGameApp.js) put the player back on the ground: the drift off a
+  // wall is over
+  landed() {
+    this._climbFall = null;
   }
 
   // Ground ahead of the feet that rises more than CLIMB_CONFIG.minRise: a wall
@@ -1098,24 +1106,26 @@ export class PlayerControls {
   }
 
   // A walking step that isn't a climb: stops at a wall (sliding along it on the free axis)
-  // instead of popping on top of it
+  // instead of popping on top of it. In the air too (a wall is ground more than minRise over
+  // the feet as they are now, so a jump still lands on a ledge it clears): drifting through a
+  // wall in the air left the player inside a building, standing on nothing to be seen.
+  // Returns false when the wall stopped the step altogether.
   _walkStep(stepX, stepZ) {
     const len = Math.hypot(stepX, stepZ);
-    if (len < 1e-6) return;
-    if (!window.phoneSwordAirborne) {
-      const lead = CLIMB_CONFIG.wallLead;
-      const blocked = (dx, dz) => {
-        const l = Math.hypot(dx, dz);
-        return l > 1e-6 && this._isWallAt(this.playerX + dx + (dx / l) * lead, this.playerZ + dz + (dz / l) * lead);
-      };
-      if (blocked(stepX, stepZ)) {
-        if (!blocked(stepX, 0)) stepZ = 0;
-        else if (!blocked(0, stepZ)) stepX = 0;
-        else return;
-      }
+    if (len < 1e-6) return true;
+    const lead = CLIMB_CONFIG.wallLead;
+    const blocked = (dx, dz) => {
+      const l = Math.hypot(dx, dz);
+      return l > 1e-6 && this._isWallAt(this.playerX + dx + (dx / l) * lead, this.playerZ + dz + (dz / l) * lead);
+    };
+    if (blocked(stepX, stepZ)) {
+      if (!blocked(stepX, 0)) stepZ = 0;
+      else if (!blocked(0, stepZ)) stepX = 0;
+      else return false;
     }
     this.playerX += stepX;
     this.playerZ += stepZ;
+    return true;
   }
 
   // Wall climbing (CLIMB_CONFIG). Returns true when it owns this frame's movement.
@@ -1180,7 +1190,7 @@ export class PlayerControls {
     } else if (mag > cfg.inputThreshold) {
       // Jump off backward (falls with the game's jump gravity, no climbing back down)
       this._climb = null;
-      this._climbFall = { x: -climb.dirX * cfg.jumpOffSpeed, z: -climb.dirZ * cfg.jumpOffSpeed };
+      this._climbFall = { x: -climb.dirX * cfg.jumpOffSpeed, z: -climb.dirZ * cfg.jumpOffSpeed, left: cfg.jumpOffDriftS };
       if (typeof this.onClimbJumpOff === 'function') {
         this.onClimbJumpOff();
       } else {
@@ -1312,14 +1322,14 @@ export class PlayerControls {
       this._lastStepX = this.playerX;
       this._lastStepZ = this.playerZ;
 
-      if (this._climbFall) {
-        // Jumped off a wall: drift backward until landing
-        if (window.phoneSwordAirborne) {
-          this.playerX += this._climbFall.x * deltaSeconds;
-          this.playerZ += this._climbFall.z * deltaSeconds;
-        } else {
-          this._climbFall = null;
-        }
+      const fall = this._climbFall;
+      if (fall) {
+        // Jumped off a wall: drift backward until landing (or a wall, or jumpOffDriftS — it
+        // never carries the player on and on)
+        fall.left -= deltaSeconds;
+        const stopped = !window.phoneSwordAirborne || !(fall.left > 0) ||
+          !this._walkStep(fall.x * deltaSeconds, fall.z * deltaSeconds);
+        if (stopped) this._climbFall = null;
       }
 
       const newX = this.playerX;

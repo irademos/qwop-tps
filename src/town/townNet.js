@@ -102,7 +102,8 @@ export const saveTownRoomState = (roomId, state) => set(ref(db, `townRoomState/$
 //   scene, getRemoteModel(id), setRemoteCharacter(id, url), createSwordMesh(url), createWandMesh(), createRodMesh(),
 //   getLocalWeapon() → 'sword' | 'gun' | 'shield' | 'wand' | null, getWeaponGear() (matchCtx's),
 //   getLocalPosition(), launchRemoteBomb(origin, target, fromId), spawnRemoteMagic({ …, caster }),
-//   getLocalSwordState(), getLocalCharacterUrl(), getStars(), applyPvpHit(dmg, dir, fromId),
+//   getLocalSwordState(), getLocalCharacterUrl(), getStars(), getStatus() → { coins, hp, maxHp } (for
+//   Settings → Town), applyPvpHit(dmg, dir, fromId),
 //   onSwingBlocked(), onAttackPlayer(info), onBounty(fromName, coins), onWorldMessage(from, data)
 export function createTownNet(ctx) {
   let on = false;
@@ -111,7 +112,7 @@ export function createTownNet(ctx) {
   let plSentAt = 0;
   let hostSeen = { id: null, since: 0 };
   let lastError = null;       // why there's no shared town (shown in the town's HUD)
-  const players = new Map(); // peer id → { name, url, stars, swordTarget, hand, blocking, sword, lastAt, combat }
+  const players = new Map(); // peer id → { name, url, stars, coins, hp, maxHp, swordTarget, hand, blocking, sword, lastAt, combat }
 
   const mp = () => (on ? ctx.getMultiplayer() : null);
   const id = () => mp()?.getId?.() ?? null;
@@ -157,7 +158,7 @@ export function createTownNet(ctx) {
     let p = players.get(pid);
     if (!p) {
       p = {
-        id: pid, name: 'Player', url: null, stars: 0, lastAt: Date.now(), blocking: false, sword: null,
+        id: pid, name: 'Player', url: null, stars: 0, coins: null, hp: null, maxHp: null, lastAt: Date.now(), blocking: false, sword: null,
         swordTarget: { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), has: false },
         hand: new THREE.Vector3(),
       };
@@ -195,6 +196,11 @@ export function createTownNet(ctx) {
         p.lastAt = Date.now();
         if (typeof data.n === 'string') p.name = data.n.slice(0, 24);
         p.stars = Math.max(0, Math.min(3, Math.floor(Number(data.st) || 0)));
+        // (coins / health: Settings → Town)
+        const num = (v) => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : null);
+        p.coins = num(data.co);
+        p.hp = num(data.hp);
+        p.maxHp = num(data.mh);
         if (typeof data.c === 'string' && data.c !== p.url) {
           p.url = data.c;
           ctx.setRemoteCharacter(from, p.url);
@@ -260,9 +266,11 @@ export function createTownNet(ctx) {
     if (now - plSentAt >= PL_SEND_MS && peers.size) {
       plSentAt = now;
       const st = ctx.getLocalSwordState() || {};
+      const me = ctx.getStatus?.() ?? {};
       broadcast({
         op: 'pl', n: ctx.getPlayerName(), c: ctx.getLocalCharacterUrl(), st: ctx.getStars(),
         s: st.sword ?? null, h: st.hand ?? null, b: st.blocking ? 1 : 0, w: ctx.getLocalWeapon(),
+        co: me.coins, hp: me.hp, mh: me.maxHp,
       });
     }
     for (const p of players.values()) {
@@ -406,6 +414,8 @@ export function createTownNet(ctx) {
     // ★★ after a wanted player's name
     nameSuffix: (pid) => { const s = players.get(pid)?.stars ?? 0; return s > 0 ? ` ${'★'.repeat(s)}` : ''; },
     playerName: (pid) => players.get(pid)?.name ?? null,
+    // The other players here, as they last told us (Settings → Town)
+    players: () => [...players.values()].map(({ id, name, stars, coins, hp, maxHp }) => ({ id, name, stars, coins, hp, maxHp })),
     playerCount: () => (on ? peerIds().length + 1 : 1),
     sendBounty: (to, coins) => send(to, { op: 'bounty', coins }),
     // Our bomb / spell — everyone draws it and checks it against themselves
