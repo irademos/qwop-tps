@@ -4113,6 +4113,10 @@ async function initCore(runtimeContext) {
   const PS_JUMP_FORCE = 8.5; // initial upward speed m/s
   const PS_GRAVITY = 20;     // gravity m/s²
   const CLIMB_JUMP_OFF_UP = 3; // m/s upward pop when pulling back off a wall (PlayerControls climbing)
+  // Safety net: nothing keeps the player in the air this long (a jump is under a second) —
+  // past it they're put on the ground under them
+  const PS_AIRBORNE_MAX_S = 4;
+  let _psAirborneS = 0;
   // Pulling back while climbing a wall: a small hop, then fall with the jump gravity
   // (PlayerControls drifts the player backward until they land)
   playerControls.onClimbJumpOff = () => {
@@ -6763,6 +6767,8 @@ async function initCore(runtimeContext) {
     getMultiplayerLeaderboards: (limit = 10) => loadMultiplayerLeaderboards(limit),
     getPhoneSwordStats: () => ({ ..._psStats }),
     // Everything Settings → Profile shows (Showdown / Classic stage stats, upgrades, characters)
+    // Settings → Town: the town's people + players with their coins (townMode.js roster), null outside Town
+    getTownRoster: () => town?.roster?.() ?? null,
     getProfileStats: () => ({
       // (in Town: Showdown's, set aside — _saveAside)
       level: _saveAside?.stats.level ?? statsState.level,
@@ -8435,6 +8441,7 @@ async function initCore(runtimeContext) {
     },
     getLocalCharacterUrl: () => playerModel.userData.qwopRig?.characterUrl ?? null,
     getStars: () => town?.getStars() ?? 0,
+    getStatus: () => ({ coins: appState.getCoins(), hp: statsState.health, maxHp: effectiveMaxHealthSegments() }),
     applyPvpHit: (dmg, dir, fromId, ranged) => {
       if (!town?.isActive() || playerDead) return;
       town.onPvpHurt(fromId);
@@ -9593,6 +9600,16 @@ async function initCore(runtimeContext) {
         )?.groundY;
         return Number.isFinite(_gy) ? _gy : (_psGroundY ?? playerModel.position.y);
       };
+      // (a broken position: back on the ground)
+      if (!Number.isFinite(playerModel.position.y)) {
+        const _gy = getTerrainHeight(playerModel.position.x, playerModel.position.z);
+        playerModel.position.y = Number.isFinite(_gy) ? _gy : (_psGroundY ?? 0);
+        playerControls.playerY = playerModel.position.y;
+        _psJumpVelY = window.phoneSwordAirborne ? -0.01 : 0;
+      }
+      // (in the air with no fall going on: fall)
+      if (window.phoneSwordAirborne && (_psJumpVelY === 0 || !Number.isFinite(_psJumpVelY))) _psJumpVelY = -0.01;
+      _psAirborneS = window.phoneSwordAirborne ? _psAirborneS + frameDelta : 0;
       if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
@@ -9613,12 +9630,17 @@ async function initCore(runtimeContext) {
           });
         }
         _psGroundY = _psGroundAt();
+        // (stuck in the air: down on the ground under them — PlayerControls lifts them back on
+        // top if that's under the map)
+        if (_psAirborneS > PS_AIRBORNE_MAX_S) playerModel.position.y = Math.min(playerModel.position.y, _psGroundY);
         if (playerModel.position.y <= _psGroundY) {
           playerModel.position.y = _psGroundY;
           playerControls.playerY = _psGroundY;
           _psJumpVelY = 0;
+          _psAirborneS = 0;
           window.phoneSwordAirborne = false;
           playerControls.canJump = true;
+          playerControls.landed?.();
         }
       }
     }
