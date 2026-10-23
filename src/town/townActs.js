@@ -213,6 +213,8 @@ export function installTownActs(T, ctx) {
       // (and how they feel about the player — townMemory.js)
       out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)} ${T.moodOf(n.attitude).emoji}`, onClick: () => talkTo(n) });
     }
+    // (the first day: walk the player to the goal again — townIntro.js)
+    if (calm) out.push(...T.introActs());
     if (calm) {
       out.push(...T.cookActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });

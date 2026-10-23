@@ -63,7 +63,8 @@
 //   getGroundY(x, z), isOverWater(x, z), pathAt(x, z) → 'road' | 'trail' | null
 //   getMapObjects(bounds) → [{ file, x, z, radius }], getRoadLamps() → [{ x, y, z }] (lamp heads),
 //   setRoadLampsLit(on)
-//   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null)
+//   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null),
+//   autoWalk(dirX, dirZ, step, dt) (the first day's guide walking the player), isSteering()
 //   setTimeOfDay('day' | 'night'), showBanner(title, sub, ms)
 //   spawnFighter({ x, z, yaw, url, hearts, swingChance, gear, name }) → EnemyPlayer,
 //   removeFighter(enemy), releaseFighterGear(enemy), carryPlayerOff({ carrierUrl, onDone }),
@@ -87,7 +88,7 @@ import { isMiiCharacterUrl } from '../models/glbCharacterModel.js';
 import { updateCampfire } from '../village/villageMode.js';
 import {
   BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
-  BAG_MAX, FEED_LOG_MAX, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, SAVE_EVERY_S, SAVE_PREFIX,
+  BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, SAVE_EVERY_S, SAVE_PREFIX,
   START_MINUTES, TALK_RANGE, WALLET_MAX, _v2, angleLerp, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
@@ -267,12 +268,29 @@ export function createTownMode(ctx) {
   const tracker = createQuestTracker(hud);
   const lockpick = createLockpick(hud);
 
+  // On screen FEED_MAX_SHOWN at a time; the rest wait their turn (sooner gone with a queue behind)
+  const feedQueue = [];
+  let feedShown = 0;
+  let feedGen = 0;
+  const showFeed = () => {
+    while (feedShown < FEED_MAX_SHOWN && feedQueue.length) {
+      const line = el('div', 'town-feed-line', feedQueue.shift());
+      feed.prepend(line);
+      feedShown += 1;
+      const gen = feedGen;
+      const ms = feedQueue.length > 2 ? FEED_SHOW_MS * 0.6 : FEED_SHOW_MS;
+      setTimeout(() => { line.classList.add('town-feed-out'); }, ms);
+      setTimeout(() => {
+        line.remove();
+        if (gen !== feedGen) return;
+        feedShown -= 1;
+        showFeed();
+      }, ms + 800);
+    }
+  };
   const feedLine = (text) => {
-    const line = el('div', 'town-feed-line', text);
-    feed.prepend(line);
-    while (feed.children.length > 4) feed.lastChild.remove();
-    setTimeout(() => { line.classList.add('town-feed-out'); }, FEED_SHOW_MS);
-    setTimeout(() => { line.remove(); }, FEED_SHOW_MS + 800);
+    feedQueue.push(text);
+    showFeed();
     feedLog.unshift({ text, when: clockText().replace(/ [☀️🌙]+$/u, '') });
     if (feedLog.length > FEED_LOG_MAX) feedLog.length = FEED_LOG_MAX;
     if (logPanel.classList.contains('hidden')) { unread += 1; renderBadge(); } else renderLog();
@@ -636,6 +654,9 @@ export function createTownMode(ctx) {
     actsEl.replaceChildren();
     actsEl.classList.add('hidden');
     feed.replaceChildren();
+    feedQueue.length = 0;
+    feedShown = 0;
+    feedGen += 1;
     feedLog.length = 0;
     unread = 0;
     renderBadge();
@@ -688,6 +709,7 @@ export function createTownMode(ctx) {
     for (const n of T.npcs) T.updateNpc(n, dt);
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);
     T.updateFishing(dt);
+    T.updateIntroWalk(dt);
     T.updateCooking(dt);
     if (T.simT > T.growAt) { T.growAt = T.simT + 1; T.updateRegrowth(); }
     // (the market panel shuts when the merchant leaves the counter or the player walks off)

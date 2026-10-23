@@ -22,8 +22,8 @@ import { RUN_SPEED, dist2, heightScale, pickOf } from './townConfig.js';
 // talk is the goal); goal + n: what the player does (introNote kinds); at: where its 📍 is;
 // noTalk: carries straight on from the step before (same guide); coins: what it pays;
 // gives: an item the guide hands over on accepting (ctx.grantItem — unless the player has one);
-// lead: false — the guide stays put for the goal (the merchant, at the counter); tips: what
-// they say on the way / when asked
+// lead: false — the guide stays put for the goal; tips: what they say on the way / when asked;
+// next: what the guide says is next when the same guide carries on (a talk box — debrief)
 const STEPS = [
   {
     id: 'welcome', guide: 'merchant', title: 'Say hello at the market', talkOnly: true, coins: 3, skippable: true,
@@ -36,7 +36,8 @@ const STEPS = [
     talk: 'Come fishing, {name}! Here — my old rod, it\'s yours. At the 🎣 fishing spot, swing it forward to cast. When the bobber goes under, pull the rod back sharp to hook it. Let it run, pull when it tires, then reel it in. Catch one and it\'s yours.',
     accept: '🎣 Let\'s fish',
     progress: 'Catch a fish 🐟 at the 🎣 fishing spot',
-    done: 'Ha, a fine catch! Now cook it over the town fire — grilled fish fills you up far better. Come on, I\'ll show you.',
+    done: 'Ha, a fine catch! You\'re a natural, {name}.',
+    next: 'Now let\'s cook it. Raw fish won\'t do you much good — grilled over the town campfire it heals far more, and sells for more too. Follow me to the fire, then press 🍳 by the pot and stay close while it grills.',
     tips: [
       'Swing the rod forward to cast — the harder the swing, the further it goes.',
       'Watch the bobber. When it goes right under, pull the rod back sharp — a little nibble first is just teasing.',
@@ -59,19 +60,21 @@ const STEPS = [
     talk: 'Give me a hand with the harvest, {name}? Pick 3 veg from my field — 🌾 Pick — and keep them, they\'re yours. Just don\'t go picking anyone\'s field without asking: that\'s stealing.',
     accept: '🌾 Happy to help',
     progress: 'Pick 3 veg 🥕 from {guide}\'s field',
-    done: 'Good hands! Take those to the market and sell them.',
+    done: 'Good hands! That\'s the harvest in.',
+    next: 'Those veg are yours to keep — so let\'s turn them into coin. I\'ll walk you to the goods shop: go in through the door, up to the merchant\'s counter, and press 💰 Sell.',
     tips: [
       'Walk in among the crops and press 🌾 Pick.',
       'It grows back in a while. Only pick a field with the farmer\'s say-so, mind.',
     ],
   },
   {
-    id: 'sell', guide: 'merchant', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'market',
-    progress: 'Sell something at the goods shop (💰 Sell)', lead: false,
-    done: 'Pleasure doing business! The less I have of something, the more I pay for it.',
+    id: 'sell', guide: 'farmer', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'market',
+    progress: 'Sell your veg at the goods shop: in through the door, to the counter, 💰 Sell',
+    done: 'There — coins in your pocket! The less the merchant has of something, the more he pays for it.',
     tips: [
-      'Walk in through the goods shop\'s door and come to my counter — then 💰 Sell.',
+      'In through the door, up to the counter at the back, then 💰 Sell.',
       'Cooked food fetches more than raw.',
+      'The merchant\'s only there in the day — no selling at night.',
     ],
   },
   {
@@ -90,6 +93,7 @@ const GUIDE_STOP = 1.9;     // m from the player a guide stops to talk
 const LEAD_WAIT = 7;        // m — leading the way: further behind than this, they wait for the player
 const LEAD_LOST = 26;       // m — further than this, they come back for them
 const LEAD_SPEED = 2.6;     // m/s — a brisk walk while leading
+const AUTO_WALK_SPEED = 3.2; // m/s the player is walked along at
 const GUIDE_SNOOZE_S = 90;  // s a guide leaves the player be after 'Later'
 const CALL_EVERY_S = 8;     // s between "This way!"s
 const TIP_EVERY_S = [22, 34];
@@ -174,13 +178,17 @@ export function installTownIntro(T, ctx) {
     const g = s.guide ? T.npcById(T.intro.guideId) : null;
     pay(s, g);
     const line = s.done ? fill(s.done, s, g) : null;
-    if (line && g?.body && T.distToPlayer(g) < GUIDE_REACH) T.say(g, line, { big: true });
+    const next = T.intro.step + 1;
+    const carriesOn = !!g && !!s.next && STEPS[next]?.guide === s.guide;
+    // (the same guide carrying on: they come over and say what's next in the talk box)
+    if (carriesOn) { /* (said in the debrief) */ }
+    else if (line && g?.body && T.distToPlayer(g) < GUIDE_REACH) T.say(g, line, { big: true });
     else if (line) T.feedLine(`${g ? `${g.def.emoji} ${firstName(g.name)}: ` : ''}${line}`);
     T.feedLine(`🌱 ${s.title} ✔${s.coins ? ` · +${s.coins} 🪙` : ''}`);
-    const next = T.intro.step + 1;
     // (the next step's guide picked fresh, unless it's the same one carrying on)
     if (STEPS[next]?.guide !== s.guide) T.intro.guideId = null;
     begin(next);
+    if (carriesOn && T.intro) T.intro.debrief = `${line ? `${line} ` : ''}${fill(s.next, s, g)}`;
     T.save();
   };
   const finish = () => {
@@ -220,6 +228,20 @@ export function installTownIntro(T, ctx) {
   const introTalk = (n) => {
     const s = step();
     if (!s || T.intro.guideId !== n.id) return false;
+    if (T.intro.phase === 'do' && T.intro.debrief) {
+      // (a goal just done: what's next — and off they go, the player walked along)
+      const text = T.intro.debrief;
+      T.intro.debrief = null;
+      T.jobTalk.open({
+        who: `${n.def.emoji} ${firstName(n.name)}`, sub: `🌱 First day: ${s.title}`, text,
+        reward: s.coins ? `Next: ${fill(s.progress ?? s.title, s, n)} · 🪙 ${s.coins}` : null,
+        choices: [
+          { label: '👍 Lead the way', primary: true, onClick: () => { if (T.intro) T.intro.autoWalk = true; } },
+          { label: 'I\'ll find my own way', primary: false, onClick: () => { if (T.intro) T.intro.autoWalk = false; } },
+        ],
+      });
+      return true;
+    }
     if (T.intro.phase === 'do') {
       if (T.jobOf(n)) return false;
       const tips = s.tips ?? [];
@@ -243,7 +265,7 @@ export function installTownIntro(T, ctx) {
         if (T.intro?.step !== STEPS.indexOf(s)) return;
         if (s.gives && !ctx.getItems()?.[s.gives] && ctx.grantItem(s.gives)) T.feedLine(`🎁 ${firstName(n.name)} gave you a ${s.gives === 'rod' ? 'fishing rod 🎣' : s.gives}.`);
         if (s.talkOnly) complete();
-        else { T.intro.phase = 'do'; T.intro.count = 0; T.save(); }
+        else { T.intro.phase = 'do'; T.intro.count = 0; T.intro.autoWalk = true; T.save(); }
       },
     }];
     if (s.skippable) choices.push({ label: 'I know my way around', primary: false, onClick: skip });
@@ -294,6 +316,7 @@ export function installTownIntro(T, ctx) {
   let snoozeUntil = -1e9;
   let leadAt = null;          // { step, guideId, x, z } — where the guide takes the player
   let greetedStep = -1;       // (the talk opens by itself once a step)
+  const crumbs = [];          // where the leading guide walked (the player walked along follows it)
   const isNight = () => { const h = T.hour(); return h >= 21 || h < 6.5; };
   const unguide = (n) => {
     if (!n?.guiding) return;
@@ -306,7 +329,7 @@ export function installTownIntro(T, ctx) {
     const s = step();
     if (!s || !g || T.intro.guideId !== g.id || ctx.isPlayerDead() || T.jail || T.law.stars > 0 || isNight()) return false;
     if (T.intro.phase === 'talk') return T.simT > snoozeUntil;
-    return s.lead !== false && !!s.at && !!leadSpot(s, g);
+    return !!T.intro.debrief || (s.lead !== false && !!s.at && !!leadSpot(s, g));
   };
   const canGuide = (g) => available(g) && !g.inside && !g.following && !g.lost && !g.netFight && !(g.fear > 0)
     && (!g.task || GUIDE_OVER.has(g.task.type)) && T.talking?.npc !== g;
@@ -319,6 +342,7 @@ export function installTownIntro(T, ctx) {
     if (s.at === 'fishSpot') at = P.fishSpot;
     else if (s.at === 'fire') at = P.fire;
     else if (s.at === 'guideWork') at = g.work;
+    else if (s.at === 'market') at = P.rooms.goods?.door ?? null;
     if (!at) return null;
     const spot = T.randomNear(at.x, at.z, 2.2);
     leadAt = { step: i, guideId: g.id, x: spot.x, z: spot.z, gx: at.x, gz: at.z };
@@ -359,7 +383,10 @@ export function installTownIntro(T, ctx) {
   const updateGuide = (n, t, dt) => {
     const s = step();
     if (!s || !n.guiding || T.intro.guideId !== n.id) { unguide(n); T.decide(n); return true; }
-    if (t.step !== T.intro.step) Object.assign(t, { step: T.intro.step, called: false, arrived: false, callAt: 0, tipAt: 0 });
+    if (t.step !== T.intro.step) {
+      Object.assign(t, { step: T.intro.step, called: false, arrived: false, callAt: 0, tipAt: 0 });
+      crumbs.length = 0;
+    }
     const P = T.layout.places;
     const p = T.playerPos();
     // (the player indoors: met at the door outside)
@@ -387,8 +414,21 @@ export function installTownIntro(T, ctx) {
       }
       return true;
     }
+    // (a goal just done, the same guide carrying on: over to the player to say what's next)
+    if (T.intro.debrief) {
+      if (dMeet > GUIDE_STOP) { walkTo(n, t, meet.x, meet.z, dMeet > 12 ? RUN_SPEED : LEAD_SPEED, dt); return true; }
+      stand(n, p.x, p.z, dt);
+      if (!pRoom && canAutoTalk()) T.talkTo(n);
+      return true;
+    }
     const spot = leadSpot(s, n);
     if (!spot) { unguide(n); T.decide(n); return true; }
+    // (the way they walk — the player, walked along, follows it: updateIntroWalk)
+    const last = crumbs[crumbs.length - 1];
+    if (!T.rooms.roomAt(n.x, n.z) && (!last || dist2(last.x, last.z, n.x, n.z) > 1)) {
+      crumbs.push({ x: n.x, z: n.z });
+      if (crumbs.length > 80) crumbs.shift();
+    }
     const dSpot = dist2(n.x, n.z, spot.x, spot.z);
     const pSpot = dist2(meet.x, meet.z, spot.x, spot.z);
     if (dMeet > LEAD_LOST) {
@@ -412,6 +452,78 @@ export function installTownIntro(T, ctx) {
     return true;
   };
 
+  // ── The player walked along (T.intro.autoWalk — on when a goal is taken / 'Lead the way'):
+  // behind the guide, along the way they walked, then up to the goal itself; any move of the
+  // player's own (joystick / WASD) stops it — 🚶 Walk me there starts it again ──
+  const busy = () => T.jobTalk.isOpen() || T.marketPanel.isOpen() || T.storage.isOpen() || T.fishing || T.cooking
+    || T.sequence || T.jail || T.stalls.focused() || T.lockpick.isOpen() || ctx.isPlayerDead() || T.law.stars > 0;
+  // Where to walk the player now: { x, z, stop } (null: nowhere / there)
+  const walkTarget = () => {
+    const s = step();
+    if (!s || T.intro.phase !== 'do' || T.intro.debrief || !s.at) return null;
+    const g = s.guide ? T.npcById(T.intro.guideId) : null;
+    const P = T.layout.places;
+    const p = T.playerPos();
+    const inRoom = T.inRoom;
+    // The goal itself
+    let goal = null;
+    if (s.at === 'market') {
+      if (inRoom === 'goods') goal = { ...T.stalls.spot('goods', 'counter'), stop: 2.2 };
+      else if (!inRoom && P.rooms.goods) {
+        // (just past the door's spot, toward the house: walking there goes in — walkInDoor)
+        const r = P.rooms.goods;
+        goal = { x: r.door.x - Math.sin(r.exitYaw) * 0.6, z: r.door.z - Math.cos(r.exitYaw) * 0.6, stop: 0.05 };
+      }
+    } else if (inRoom) return null;
+    else if (s.at === 'fishSpot' && P.fishSpot) goal = { x: P.fishSpot.x, z: P.fishSpot.z, stop: 1.5 };
+    else if (s.at === 'fire') goal = { x: P.fire.x, z: P.fire.z, stop: 1.9 };
+    else if (s.at === 'guideWork' && g?.work) {
+      // (the nearest ripe crop of their field)
+      const ripe = (g.work.crops ?? []).filter((c) => c.ripe)
+        .sort((a, b) => dist2(a.x, a.z, p.x, p.z) - dist2(b.x, b.z, p.x, p.z))[0];
+      goal = ripe ? { x: ripe.x, z: ripe.z, stop: 0.8 } : { x: g.work.x, z: g.work.z, stop: 1.5 };
+    }
+    if (!goal) return null;
+    // Behind the guide while they're still on the way (and the player's further from the goal)
+    if (g?.guiding && !inRoom && leadAt && dist2(g.x, g.z, leadAt.x, leadAt.z) > 1.5
+      && dist2(p.x, p.z, goal.x, goal.z) > dist2(g.x, g.z, goal.x, goal.z)) {
+      // (from the crumb nearest the player on: the next one along)
+      let k = -1;
+      let best = Infinity;
+      crumbs.forEach((c, i) => { const d = dist2(c.x, c.z, p.x, p.z); if (d < best) { best = d; k = i; } });
+      if (k >= 0) crumbs.splice(0, best < 1.2 ? k + 1 : k);
+      return crumbs[0] ? { x: crumbs[0].x, z: crumbs[0].z, stop: 0.3, behind: g } : { x: g.x, z: g.z, stop: 2.2 };
+    }
+    return goal;
+  };
+  const updateIntroWalk = (dt) => {
+    if (!T.intro?.autoWalk || !step()) return;
+    if (ctx.isSteering()) {
+      T.intro.autoWalk = false;
+      T.actsAt = 0;
+      return;
+    }
+    if (busy()) return;
+    const tgt = walkTarget();
+    if (!tgt) return;
+    const p = T.playerPos();
+    // (close behind the guide: not into them)
+    if (tgt.behind && dist2(p.x, p.z, tgt.behind.x, tgt.behind.z) < 2) return;
+    const d = dist2(p.x, p.z, tgt.x, tgt.z);
+    if (d <= tgt.stop) return;
+    ctx.autoWalk((tgt.x - p.x) / d, (tgt.z - p.z) / d, Math.min(AUTO_WALK_SPEED * dt, d - tgt.stop + 0.02), dt);
+  };
+  // 🚶 Walk me there (walking themselves stopped it)
+  const introActs = () => {
+    if (!T.intro || T.intro.autoWalk || busy()) return [];
+    const tgt = walkTarget();
+    if (!tgt) return [];
+    const p = T.playerPos();
+    if (dist2(p.x, p.z, tgt.x, tgt.z) <= tgt.stop + 1) return [];
+    const g = T.npcById(T.intro.guideId);
+    return [{ key: 'introwalk', label: g?.guiding ? `🚶 Follow ${firstName(g.name)}` : '🚶 Walk me there', onClick: () => { if (T.intro) { T.intro.autoWalk = true; T.actsAt = 0; } } }];
+  };
+
   // Upkeep: a guide who's gone (dead, jailed) is replaced; a talk with nobody to give it, skipped
   const updateIntro = () => {
     if (!step()) { if (T.npcs.some((n) => n.guiding)) unguideAll(); return; }
@@ -422,6 +534,6 @@ export function installTownIntro(T, ctx) {
 
   Object.assign(T, {
     introAllowsPick, introEntry, introNote, introSnapshot: snapshot, introTalk, introTarget, isIntroGuide: isGuide,
-    startIntro: start, updateGuide, updateIntro,
+    introActs, startIntro: start, updateGuide, updateIntro, updateIntroWalk,
   });
 }

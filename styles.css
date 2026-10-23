@@ -4451,7 +4451,7 @@ body.town-mode #xp-bar { display: none !important; }
 body.town-mode #health-display { top: calc(14px + env(safe-area-inset-top, 0px)); }
 body.town-mode #shield-health-display { top: calc(46px + env(safe-area-inset-top, 0px)); }
 body.town-mode .town-feed { top: calc(80px + env(safe-area-inset-top, 0px)); }
-/* Coins (of the wallet's cap) + the bag, beside the health bar — phones only (townMode.js renderWallet) */
+/* Coins (of the wallet's cap) + the bag, under the health bar — phones only (townMode.js renderWallet) */
 .town-wallet {
   display: none;
   align-items: center;
@@ -4467,8 +4467,10 @@ body.town-mode .town-feed { top: calc(80px + env(safe-area-inset-top, 0px)); }
 }
 .town-wallet.town-wallet-full { border-color: var(--danger); }
 @media (pointer: coarse) {
-  body.town-mode #health-display { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-  body.town-mode .town-wallet { display: inline-flex; }
+  body.town-mode .town-wallet { display: inline-flex; align-self: flex-start; }
+  /* (under the coins / bag pill) */
+  body.town-mode #shield-health-display { top: calc(72px + env(safe-area-inset-top, 0px)); }
+  body.town-mode .town-feed { top: calc(104px + env(safe-area-inset-top, 0px)); }
 }
 /* Recent notifications: 🔔 left of ⚙️, drops down the feed's last lines */
 .town-log-btn {

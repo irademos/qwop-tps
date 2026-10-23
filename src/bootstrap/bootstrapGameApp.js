@@ -8541,6 +8541,19 @@ async function initCore(runtimeContext) {
       }
     },
     teleport: (x, z, yaw) => _teleportPlayer(x, z, yaw),
+    // Walk the player (the first day's guide leading the way): (dirX, dirZ) a unit direction,
+    // `step` metres this frame — moved by the controls like walking (walls, climbing), turned
+    // toward it
+    autoWalk: (dirX, dirZ, step, dt) => {
+      if (!playerControls || !(step > 0)) return;
+      playerControls.queueAutoMove(dirX * step, dirZ * step);
+      const dYaw = ((Math.atan2(dirX, dirZ) - playerControls.yaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+      playerControls.yaw += dYaw * Math.min(1, dt * 5);
+      _duelCamLastYaw = playerControls.yaw;
+    },
+    // The player is moving themselves (joystick — on screen or the phone's — or WASD)
+    isSteering: () => !!playerControls && (playerControls.joystickForce > 0.1
+      || ['w', 'a', 's', 'd'].some((k) => playerControls.keysPressed.has(k))),
     // (moved and turned by dYaw — camera and body alike: through a shop door, keeping the way
     // the player faced relative to it)
     teleportTurned: (x, z, dYaw) => {
