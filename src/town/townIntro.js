@@ -94,6 +94,9 @@ const LEAD_WAIT = 7;        // m — leading the way: further behind than this, 
 const LEAD_LOST = 26;       // m — further than this, they come back for them
 const LEAD_SPEED = 2.6;     // m/s — a brisk walk while leading
 const AUTO_WALK_SPEED = 3.2; // m/s the player is walked along at
+const FOLLOW_STOP = 2.4;     // m behind the guide the walked-along player stops…
+const FOLLOW_RESUME = 3.8;   // …and sets off again
+const WALK_RESUME = 1.2;     // m past a goal's stop distance before walking on again
 const GUIDE_SNOOZE_S = 90;  // s a guide leaves the player be after 'Later'
 const CALL_EVERY_S = 8;     // s between "This way!"s
 const TIP_EVERY_S = [22, 34];
@@ -496,6 +499,8 @@ export function installTownIntro(T, ctx) {
     }
     return goal;
   };
+  let walkResting = false;
+  let walkSpeed = 0;
   const updateIntroWalk = (dt) => {
     if (!T.intro?.autoWalk || !step()) return;
     if (ctx.isSteering()) {
@@ -507,11 +512,19 @@ export function installTownIntro(T, ctx) {
     const tgt = walkTarget();
     if (!tgt) return;
     const p = T.playerPos();
-    // (close behind the guide: not into them)
-    if (tgt.behind && dist2(p.x, p.z, tgt.behind.x, tgt.behind.z) < 2) return;
     const d = dist2(p.x, p.z, tgt.x, tgt.z);
-    if (d <= tgt.stop) return;
-    ctx.autoWalk((tgt.x - p.x) / d, (tgt.z - p.z) / d, Math.min(AUTO_WALK_SPEED * dt, d - tgt.stop + 0.02), dt);
+    // Stopped once close enough, and off again only once there's a margin to cover (no
+    // stop-start every frame as the guide inches ahead); behind the guide, eased down near them
+    const gap = tgt.behind ? dist2(p.x, p.z, tgt.behind.x, tgt.behind.z) : Infinity;
+    if (walkResting) {
+      if (tgt.behind ? gap < FOLLOW_RESUME : d <= tgt.stop + WALK_RESUME) return;
+      walkResting = false;
+    }
+    if (gap < FOLLOW_STOP || d <= tgt.stop) { walkResting = true; walkSpeed = 0; return; }
+    const ease = Math.min(1, (gap - FOLLOW_STOP) / (FOLLOW_RESUME - FOLLOW_STOP + 1.5), (d - tgt.stop) / 1.2 + 0.3);
+    const want = AUTO_WALK_SPEED * Math.max(0.35, ease);
+    walkSpeed += (want - walkSpeed) * Math.min(1, dt * 4);
+    ctx.autoWalk((tgt.x - p.x) / d, (tgt.z - p.z) / d, Math.min(walkSpeed * dt, d - tgt.stop + 0.02), dt);
   };
   // 🚶 Walk me there (walking themselves stopped it)
   const introActs = () => {

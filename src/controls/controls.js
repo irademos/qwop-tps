@@ -662,6 +662,15 @@ export class PlayerControls {
     this.punchButton.addEventListener('mouseleave', () => releaseBar(true));
 
     this.refreshActionButtons();
+    // (a mode's body class can hide the bubble / bomb: the touch columns close up again)
+    if (typeof MutationObserver === 'function') {
+      let lastClass = document.body.className;
+      new MutationObserver(() => {
+        if (document.body.className === lastClass) return;
+        lastClass = document.body.className;
+        this.layoutMobileActionButtons();
+      }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    }
   }
 
   // Equipped right-hand item id; the magic wand (and Town's fishing rod) is the sword weapon in
@@ -753,8 +762,23 @@ export class PlayerControls {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
-    // On touch screens Block/Fire is the bottom bar, so bubble and bomb drop down a slot
-    const blockInGrid = !this.isTouchLayout();
+    // Touch screens: two columns only — the jump column (jump, the gyro button over it) and
+    // bubble / bomb beside it; the weapon buttons stack on top of both (the middle of the
+    // screen stays clear for the interact buttons)
+    if (this.isTouchLayout()) {
+      const shown = (b) => !!b && b.style.display !== 'none' && getComputedStyle(b).display !== 'none';
+      const gyro = document.getElementById('gyro-button');
+      const rows = [shown(gyro) ? 2 : 1, 0];   // next free row: [jump column, bomb column]
+      if (shown(this.psBubbleBtn)) this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: rows[1]++ });
+      if (shown(this.psBombBtn)) this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: rows[1]++ });
+      for (const b of [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5]) {
+        if (!b.dataset.psWeaponId) continue;
+        const col = rows[1] <= rows[0] ? 1 : 0;
+        this.applyMobileButtonPosition(b, { x: col, y: rows[col]++ });
+      }
+      return;
+    }
+    const blockInGrid = true;
     if (blockInGrid && this.punchButton.style.display !== 'none') {
       this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
     }

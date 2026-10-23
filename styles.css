@@ -4328,6 +4328,23 @@ body.mobile-block-bar .classic-combo {
   white-space: nowrap;
 }
 body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+/* Touch screens: the acts get the space between the joystick and the two button columns
+   (layoutMobileActionButtons) — wrapping upward, never over either */
+@media (pointer: coarse) {
+  .town-acts {
+    --acts-grid: clamp(44px, 8vw, 64px);
+    --acts-gap: clamp(6px, 1.5vw, 10px);
+    left: calc(16px + 120px + 10px + env(safe-area-inset-left, 0px));
+    right: calc(16px + 2 * var(--acts-grid) + var(--acts-gap) + 10px + env(safe-area-inset-right, 0px));
+    transform: none;
+    width: auto;
+    max-width: none;
+    flex-wrap: wrap-reverse;
+    gap: 6px;
+  }
+  .town-acts .town-act { max-width: 100%; white-space: normal; line-height: 1.15; padding: 4px 12px; }
+  body.mobile-block-bar .town-acts { bottom: calc(var(--block-bar-clearance, 96px) + env(safe-area-inset-bottom, 0px)); }
+}
 .town-act {
   min-height: 48px;
   padding: 0 20px;
