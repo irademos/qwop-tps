@@ -307,6 +307,7 @@ export function installTownLaw(T, ctx) {
     T.closeMarket();
     T.fishing = null;
     T.stopFishingRig();
+    T.dropHose({ quiet: true });
     T.lockpick.stop();
     T.jobTalk.close();
     for (const f of T.followers()) T.dismiss(f, FOLLOW_LINES.wanted);
@@ -321,7 +322,8 @@ export function installTownLaw(T, ctx) {
       fadeTo(true);
       later(token, 700, () => {
         const P = T.layout.places;
-        ctx.revivePlayer(P.jail.x, P.jail.z, P.jailYaw + Math.PI);
+        // (in the cell, in the jail house's room — facing out through the bars)
+        ctx.revivePlayer(P.jail.x, P.jail.z, P.jailYaw);
         if (fine > 0) ctx.addCoins(-fine);
         T.feedLine(fine > 0 ? `⚖️ Fined ${fine} 🪙` : '⚖️ Locked up.');
         if (Object.values(ctx.getItems() ?? {}).some(Boolean)) {
@@ -345,6 +347,7 @@ export function installTownLaw(T, ctx) {
     T.closeMarket();
     T.fishing = null;
     T.stopFishingRig();
+    T.dropHose({ quiet: true });
     const lost = Math.floor(ctx.getCoins() * KO_COIN_SHARE);
     ctx.showBanner('KNOCKED OUT', 'You wake up by the fire…', 2400);
     later(token, 1800, () => {
@@ -359,30 +362,31 @@ export function installTownLaw(T, ctx) {
       });
     });
   };
+  // The cell is in the jail house's room (townRooms.js): it's drawn while the player's in there
   const startJail = () => {
-    const P = T.layout.places;
     T.jail = { left: JAIL_S };
-    T.layout.props.door.rotation.y = 0;
+    if (T.layout.props.door) T.layout.props.door.rotation.y = 0;
     const sheriff = T.npcs.find((n) => n.alive && n.role === 'sheriff');
     if (sheriff) T.remember(sheriff, 'jailed');
-    ctx.setPositionConstraint((controls) => {
-      const dx = controls.playerX - P.jail.x;
-      const dz = controls.playerZ - P.jail.z;
-      const d = Math.hypot(dx, dz);
-      const max = 0.75;
-      if (d > max) {
-        controls.playerX = P.jail.x + (dx / d) * max;
-        controls.playerZ = P.jail.z + (dz / d) * max;
-      }
-    });
+    T.inRoom = 'jail';
+    T.rooms.setInside('jail');
+    ctx.setPositionConstraint(T.rooms.constrainToCell);
     renderJail();
   };
+  // Out of the cell (still in the jail house: walked out through its door)
   const endJail = (text) => {
     if (!T.jail) return;
     T.jail = null;
-    ctx.setPositionConstraint(null);
     T.jailChip.classList.add('hidden');
     T.feedLine(text);
+    const p = T.playerPos();
+    if (T.rooms.roomAt(p.x, p.z) === 'jail') {
+      const out = T.rooms.outsideCell();
+      ctx.teleport(out.x, out.z, 0);
+      T.inRoom = 'jail';
+      T.rooms.setInside('jail');
+      ctx.setPositionConstraint(T.rooms.constrainPlayer);
+    } else ctx.setPositionConstraint(null);
   };
   const payBail = () => {
     if (!T.jail) return;
@@ -449,6 +453,6 @@ export function installTownLaw(T, ctx) {
 
   Object.assign(T, {
     bribe, busted, crime, demote, die, endJail, fadeTo, flee, hurt, knockedOut, lawNpcs, payBail,
-    promote, renderJail, respond, sleepItOff, startLockpick, updateLaw,
+    promote, renderJail, respond, sleepItOff, startJail, startLockpick, updateLaw,
   });
 }

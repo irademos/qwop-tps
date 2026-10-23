@@ -10,7 +10,7 @@
 // player in (a job they gave, following the player, or answering a knock — invites); ✊ Knock:
 // someone at home asks them in (friends, job), comes to the door (talk to them there) or doesn't
 // answer. Another player's home is always locked; the player's own is theirs once bought. A
-// bought lock-pick (single use, the weapon shop) opens any locked door — the lockpick minigame —
+// bought lock-pick (single use, the shop) opens any locked door — the lockpick minigame —
 // and it's a break-in (a theft) if anyone sees.
 //
 // Belongings: the player's bag holds BAG_MAX goods and the wallet WALLET_MAX coins (the wallet's
@@ -29,7 +29,7 @@
 //   - Freeing the house of a member whose place in the room lapsed (townNet.js prunes them).
 //   - Gear (weapons, bombs…) kept in the chest too, and a bigger bag to buy.
 
-import { FOUNDING_ROLES, firstName } from './townPeople.js';
+import { FOUNDING_ROLES, firstName, livesOut } from './townPeople.js';
 import { GOODS, GOOD_IDS } from './townEconomy.js';
 import { makeTextSprite } from '../village/villageMode.js';
 import { createStoragePanel } from './townStoragePanel.js';
@@ -93,7 +93,7 @@ export function installTownHomes(T, ctx) {
   const ranks = () => {
     const seen = {};
     const out = new Map();
-    const people = T.npcs.filter((n) => n.alive && !n.def.outlaw).sort((a, b) => a.id - b.id);
+    const people = T.npcs.filter((n) => n.alive && !livesOut(n.def)).sort((a, b) => a.id - b.id);
     for (const n of people) {
       const k = seen[n.role] ?? 0;
       seen[n.role] = k + 1;

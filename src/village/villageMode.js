@@ -378,14 +378,52 @@ function alignStallModel(model) {
   return group;
 }
 
-// Town mode's weapon shop (src/town/townStalls.js): the mana potion (stall units — townStalls
-// scales it to metres) and the mystery chest (metres)
+// Town mode's shop (src/town/townStalls.js): the mana potion (stall units — townStalls scales it
+// to metres) and the mystery chest (metres)
 export async function loadStallManaPotion() {
   const gltf = await loadProp(MANA_POTION_MODEL, { materials: false });
   const potion = markShared(gltf.scene.clone(true));
   potion.scale.setScalar(MANA_POTION_SCALE);
   potion.position.copy(MANA_POTION_OFFSET);
   return potion;
+}
+// Town mode's wizard stall (src/town/townStalls.js 'wizard'): the village's market stall with the
+// life potion, the mana potion and the magic wand on its counter where the village has them.
+// → { root (metres, the front toward +Z, standing at y 0), items: { life, mana, wand } (each in
+// the root's frame), keeper (where the stallkeeper stands, root-local m) }
+export async function loadWizardStall() {
+  const [stallGltf, lifeGltf, manaGltf] = await Promise.all([
+    loadProp(MARKET_STALL_MODEL),
+    loadProp(LIFE_POTION_MODEL, { materials: false }),
+    loadProp(MANA_POTION_MODEL, { materials: false }),
+  ]);
+  const root = new THREE.Group();
+  const stall = alignStallModel(markShared(stallGltf.scene.clone(true)));
+  stall.scale.setScalar(MARKET_STALL_SIZE * VILLAGE_PROP_SCALE);
+  stall.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  root.add(stall);
+  // (a potion's numbers are in stall units: its holder is in metres, so it can bob like the rest)
+  const potion = (gltf, scale, offset) => {
+    const object = markShared(gltf.scene.clone(true));
+    object.scale.setScalar(scale * STALL_UNIT);
+    const holder = new THREE.Group();
+    holder.position.copy(offset).multiplyScalar(STALL_UNIT);
+    holder.add(object);
+    root.add(holder);
+    return holder;
+  };
+  const wandDef = SHOP_ITEMS.find((d) => d.id === 'magic_wand');
+  const wand = new THREE.Group();
+  wand.add(buildItemMesh('wand'));
+  wand.position.set(wandDef.at[0], wandDef.at[1], wandDef.at[2]).multiplyScalar(STALL_UNIT);
+  root.add(wand);
+  const items = {
+    life: potion(lifeGltf, LIFE_POTION_SCALE, LIFE_POTION_OFFSET),
+    mana: potion(manaGltf, MANA_POTION_SCALE, MANA_POTION_OFFSET),
+    wand,
+  };
+  Object.values(items).forEach((o) => o.traverse((m) => { if (m.isMesh) m.castShadow = true; }));
+  return { root, items, keeper: MERCHANT_OFFSET.clone().multiplyScalar(VILLAGE_PROP_SCALE) };
 }
 export async function loadTreasureChest() {
   const gltf = await loadProp(TREASURE_CHEST_MODEL);
