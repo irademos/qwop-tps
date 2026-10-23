@@ -189,6 +189,7 @@ export function installTownActs(T, ctx) {
       const d = T.rooms.doorInside(T.inRoom);
       if (dist2(p.x, p.z, d.x, d.z) < 1.8) out.push({ key: 'leave', label: '🚪 Leave', onClick: T.leaveRoom });
       out.push(...T.chestActs());
+      out.push(...T.bedActs());
     }
     // A locked door (townHomes.js): buy the player's house, knock, pick the lock
     if (calm) out.push(...T.doorActs());
@@ -254,6 +255,6 @@ export function installTownActs(T, ctx) {
   };
 
   Object.assign(T, {
-    clearAllTalk, clearTalk, endTalk, interact, marketTalk, onKey, refreshActs,
+    clearAllTalk, clearTalk, endTalk, interact, marketTalk, onKey, refreshActs, talkTo,
   });
 }

@@ -87,8 +87,8 @@ import { isMiiCharacterUrl } from '../models/glbCharacterModel.js';
 import { updateCampfire } from '../village/villageMode.js';
 import {
   BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
-  BAG_MAX, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, SAVE_EVERY_S, SAVE_PREFIX,
-  START_MINUTES, TALK_RANGE, _v2, angleLerp, el, heightScale, rand,
+  BAG_MAX, FEED_LOG_MAX, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, SAVE_EVERY_S, SAVE_PREFIX,
+  START_MINUTES, TALK_RANGE, WALLET_MAX, _v2, angleLerp, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
 import { installTownFolk } from './townFolk.js';
@@ -198,8 +198,53 @@ export function createTownMode(ctx) {
     goodEls[g] = b;
     goodsEl.append(b);
   }
-  hud.append(top, stars, jailChip, campChip, feed, goodsEl, actsEl);
+  // Recent notifications: 🔔 by the ⚙️ button drops down what the feed said (newest first)
+  const logBtn = el('button', 'town-log-btn');
+  logBtn.type = 'button';
+  logBtn.title = 'Recent notifications';
+  const logBadge = el('span', 'town-log-badge hidden');
+  logBtn.append(el('span', null, '🔔'), logBadge);
+  const logPanel = el('div', 'town-log ui-panel hidden');
+  const logList = el('div', 'town-log-list');
+  logPanel.append(el('div', 'town-log-title', 'Recent'), logList);
+  const feedLog = [];         // [{ text, when }] newest first
+  let unread = 0;
+  const renderLog = () => {
+    logList.replaceChildren(...(feedLog.length ? feedLog.map((e) => {
+      const row = el('div', 'town-log-line');
+      row.append(el('span', 'town-log-when', e.when), el('span', null, e.text));
+      return row;
+    }) : [el('div', 'town-log-empty', 'Nothing yet.')]));
+  };
+  const renderBadge = () => {
+    logBadge.textContent = unread > 9 ? '9+' : String(unread);
+    logBadge.classList.toggle('hidden', unread <= 0);
+  };
+  const toggleLog = (open = logPanel.classList.contains('hidden')) => {
+    logPanel.classList.toggle('hidden', !open);
+    if (open) { unread = 0; renderBadge(); renderLog(); }
+  };
+  logBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleLog(); });
+  // (a tap anywhere else closes it)
+  document.addEventListener('pointerdown', (e) => {
+    if (!logPanel.classList.contains('hidden') && !logPanel.contains(e.target) && !logBtn.contains(e.target)) toggleLog(false);
+  });
+  logPanel.style.pointerEvents = 'auto';
+  // Phones: coins (of the wallet's cap) and the bag, compact beside the health bar
+  const walletEl = el('div', 'town-wallet');
+  let walletText = '';
+  const renderWallet = () => {
+    const carried = GOOD_IDS.reduce((sum, g) => sum + goods[g], 0);
+    const coins = Math.max(0, Math.round(ctx.getCoins()));
+    const text = `🪙 ${coins}/${WALLET_MAX} · 🎒 ${carried}/${BAG_MAX}`;
+    if (text === walletText) return;
+    walletText = text;
+    walletEl.textContent = text;
+    walletEl.classList.toggle('town-wallet-full', coins >= WALLET_MAX || carried >= BAG_MAX);
+  };
+  hud.append(top, stars, jailChip, campChip, feed, goodsEl, actsEl, logBtn, logPanel);
   document.body.append(hud, fade);
+  (document.getElementById('health-display') ?? hud).append(walletEl);
   const renderGoods = () => {
     const carried = GOOD_IDS.reduce((s, g) => s + goods[g], 0);
     bagEl.textContent = `🎒 ${carried}/${BAG_MAX}`;
@@ -226,8 +271,11 @@ export function createTownMode(ctx) {
     const line = el('div', 'town-feed-line', text);
     feed.prepend(line);
     while (feed.children.length > 4) feed.lastChild.remove();
-    setTimeout(() => { line.classList.add('town-feed-out'); }, 4200);
-    setTimeout(() => { line.remove(); }, 5000);
+    setTimeout(() => { line.classList.add('town-feed-out'); }, FEED_SHOW_MS);
+    setTimeout(() => { line.remove(); }, FEED_SHOW_MS + 800);
+    feedLog.unshift({ text, when: clockText().replace(/ [☀️🌙]+$/u, '') });
+    if (feedLog.length > FEED_LOG_MAX) feedLog.length = FEED_LOG_MAX;
+    if (logPanel.classList.contains('hidden')) { unread += 1; renderBadge(); } else renderLog();
   };
 
   const renderStars = () => {
@@ -588,6 +636,10 @@ export function createTownMode(ctx) {
     actsEl.replaceChildren();
     actsEl.classList.add('hidden');
     feed.replaceChildren();
+    feedLog.length = 0;
+    unread = 0;
+    renderBadge();
+    toggleLog(false);
     T.resetLights();
     root.parent?.remove(root);
     hud.classList.add('hidden');
@@ -644,6 +696,7 @@ export function createTownMode(ctx) {
     if (T.isHost()) updateArrivals();
     if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateIntro(); T.updateJobs(); T.updateReputation(); }
     T.updateMarkers();
+    renderWallet();
     if (T.simT > T.lodAt) { T.lodAt = T.simT + 0.4; T.updateLod(); }
     for (const n of T.npcs) if (n.body && !n.dying) T.syncBody(n, dt);
     if (T.simT > T.actsAt) { T.actsAt = T.simT + 0.15; T.refreshActs(); }
@@ -714,7 +767,7 @@ export function createTownMode(ctx) {
     sleep: 'Sleeping', wander: 'Out and about', chat: 'Chatting', talk: 'Talking', follow: 'Following you',
     jailed: 'In jail', lost: 'Lost', flee: 'Running away', hide: 'Hiding', fight: 'Fighting', brawl: 'Brawling',
     mug: 'Up to no good', raid: 'Raiding', raidHome: 'Raiding', camp: 'At camp', respond: 'On duty',
-    search: 'On duty', arrest: 'On duty',
+    search: 'On duty', arrest: 'On duty', guide: 'Showing you around',
   };
   const npcStatus = (n) => {
     if (n.fighter) return 'Fighting';

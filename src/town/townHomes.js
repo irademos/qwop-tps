@@ -34,8 +34,8 @@ import { GOODS, GOOD_IDS } from './townEconomy.js';
 import { makeTextSprite } from '../village/villageMode.js';
 import { createStoragePanel } from './townStoragePanel.js';
 import {
-  BAG_MAX, CHEST_ACT_DIST, COME_OUT_S, DOOR_ACT_DIST, FRIEND_ATTITUDE, GRUDGE_ATTITUDE, HOUSE_PRICE, INVITE_S,
-  KNOCK_AGAIN_S, KNOCK_S, LOCKPICK_MAX, MIN_TOWNSFOLK, WALLET_MAX, dist2, pickOf,
+  BAG_MAX, BED_ACT_DIST, CHEST_ACT_DIST, COME_OUT_S, DOOR_ACT_DIST, FRIEND_ATTITUDE, GRUDGE_ATTITUDE, HOUSE_PRICE, INVITE_S,
+  KNOCK_AGAIN_S, KNOCK_S, LOCKPICK_MAX, MIN_TOWNSFOLK, NIGHT_FROM_H, WAKE_HOUR, WALLET_MAX, dist2, pickOf,
 } from './townConfig.js';
 
 const COME_IN_LINES = ['Oh — it\'s you. Come in, come in.', 'Door\'s open, come on in.', 'Ah, good. Come in, quick, it\'s cold.'];
@@ -447,6 +447,47 @@ export function installTownHomes(T, ctx) {
   // Inside a home, by its chest
   const chestActs = () => (atChest() && !storage.isOpen() ? [{ key: 'chest', label: '📦 Chest', onClick: openChest }] : []);
 
+  // In the player's own home, by the bed: sleep till night / till morning (the clock jumps — not
+  // in a shared town, whose clock is everyone's — and the player wakes up rested, at full health)
+  const atBed = () => {
+    if (!T.inRoom || homeOfRoom(T.inRoom) < 0 || homeOfRoom(T.inRoom) !== myHome()) return false;
+    const b = T.rooms.bedside(T.inRoom);
+    const p = T.playerPos();
+    return !!b && dist2(p.x, p.z, b.x, b.z) < BED_ACT_DIST;
+  };
+  const sleepInBed = (untilH) => {
+    if (T.sequence || !atBed()) return;
+    if (T.law.stars > 0) { T.feedLine('😬 Too wound up to sleep with the guards after you.'); return; }
+    const token = {};
+    T.sequence = token;
+    T.storage.close();
+    T.fadeTo(true);
+    setTimeout(() => {
+      if (!T.active || T.sequence !== token) return;
+      const shared = T.mp();
+      if (!shared) T.advanceClock(((untilH - T.hour() + 24) % 24 || 24) * 60);
+      const { health, max } = ctx.getHealth();
+      if (max > health) ctx.heal(max - health);
+      T.feedLine(shared ? '😴 You nap a while and wake up rested. (The town\'s clock is everyone\'s — it didn\'t wait.)'
+        : untilH === WAKE_HOUR ? '☀️ Good morning! You wake up rested.' : '🌙 You wake up as night falls, rested.');
+      T.save();
+      setTimeout(() => {
+        if (T.sequence === token) T.sequence = null;
+        T.fadeTo(false);
+        T.actsAt = 0;
+      }, 600);
+    }, 900);
+  };
+  const bedActs = () => {
+    if (!atBed() || T.storage.isOpen()) return [];
+    const out = [];
+    const h = T.hour();
+    // (till night only by day — from evening on, it's till morning)
+    if (h >= WAKE_HOUR && h < NIGHT_FROM_H - 0.5) out.push({ key: 'sleepnight', label: '🌙 Sleep till night', onClick: () => sleepInBed(NIGHT_FROM_H) });
+    out.push({ key: 'sleepmorning', label: '☀️ Sleep till morning', onClick: () => sleepInBed(WAKE_HOUR) });
+    return out;
+  };
+
   // ── Each frame ──
   const updateHomes = () => {
     if (T.knock && T.simT - T.knock.at > KNOCK_S) {
@@ -494,7 +535,7 @@ export function installTownHomes(T, ctx) {
   const applyHouses = (h) => { T.houses = cleanHouses(h); };
 
   Object.assign(T, {
-    applyHouses, bagCount, bagFullNote, bagRoom, chestActs, doorAccess, doorActs, freeHome, handleHomesNet, homesSnapshot,
+    applyHouses, bagCount, bagFullNote, bagRoom, bedActs, chestActs, doorAccess, doorActs, freeHome, handleHomesNet, homesSnapshot,
     lockedNote, myHome, reserveFirst, resetHomes, restoreHomes, settleAfterSpawn, storage, updateHomes,
   });
 }

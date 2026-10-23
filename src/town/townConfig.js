@@ -204,6 +204,9 @@ export const KNOCK_AGAIN_S = 20;            // s before the same door can be kno
 export const INVITE_S = 90;                 // s an invitation in stands
 export const COME_OUT_S = 25;               // s a townsperson who came to the door stays out
 export const DOOR_ACT_DIST = 1.6;           // m from a locked door outside: its buttons (knock / pick / buy)
+export const FEED_SHOW_MS = 7500;           // ms a feed line stays on screen (then in the 🔔 list)
+export const FEED_LOG_MAX = 30;             // feed lines kept for the 🔔 list
+export const BED_ACT_DIST = 2.0;            // m from the bedside in the player's home: 😴 Sleep till night / morning
 export const CHEST_ACT_DIST = 1.7;          // m from the chest in the player's home: 📦 Chest
 
 export const SAVE_EVERY_S = 20;
