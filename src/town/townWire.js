@@ -305,7 +305,7 @@ export function installTownWire(T, ctx) {
       case 'claim': {
         if (!n?.alive) return;
         const busy = (n.ctrl && n.ctrl !== from && T.net.peerIds().includes(n.ctrl))
-          || (!n.ctrl && (n.fighter || n.following || n.lost || T.talking?.npc === n
+          || (!n.ctrl && (n.fighter || n.following || n.guiding || n.lost || T.talking?.npc === n
             || ['respond', 'search', 'talk', 'flee'].includes(n.task?.type)));
         if (busy) { T.net.send(from, { w: 1, op: 'deny', id: n.id, c: n.ctrl || T.myId() }); return; }
         T.endBrawl(n);
@@ -427,7 +427,7 @@ export function installTownWire(T, ctx) {
     const me = T.myId();
     for (const n of T.npcs) {
       if (!n.alive || n.ctrl) continue;
-      const keep = n.fighter || n.following || n.lost || T.talking?.npc === n || ['respond', 'search', 'flee', 'talk'].includes(n.task?.type);
+      const keep = n.fighter || n.following || n.guiding || n.lost || T.talking?.npc === n || ['respond', 'search', 'flee', 'talk'].includes(n.task?.type);
       if (keep) {
         n.ctrl = me;
         n.claimAt = T.simT;

@@ -189,6 +189,7 @@ export function installTownActs(T, ctx) {
       const d = T.rooms.doorInside(T.inRoom);
       if (dist2(p.x, p.z, d.x, d.z) < 1.8) out.push({ key: 'leave', label: '🚪 Leave', onClick: T.leaveRoom });
       out.push(...T.chestActs());
+      out.push(...T.bedActs());
     }
     // A locked door (townHomes.js): buy the player's house, knock, pick the lock
     if (calm) out.push(...T.doorActs());
@@ -212,6 +213,8 @@ export function installTownActs(T, ctx) {
       // (and how they feel about the player — townMemory.js)
       out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)} ${T.moodOf(n.attitude).emoji}`, onClick: () => talkTo(n) });
     }
+    // (the first day: walk the player to the goal again — townIntro.js)
+    if (calm) out.push(...T.introActs());
     if (calm) {
       out.push(...T.cookActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
@@ -254,6 +257,6 @@ export function installTownActs(T, ctx) {
   };
 
   Object.assign(T, {
-    clearAllTalk, clearTalk, endTalk, interact, marketTalk, onKey, refreshActs,
+    clearAllTalk, clearTalk, endTalk, interact, marketTalk, onKey, refreshActs, talkTo,
   });
 }

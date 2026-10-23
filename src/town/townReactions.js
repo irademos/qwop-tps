@@ -262,6 +262,7 @@ export function installTownReactions(T, ctx) {
         }
         return true;
       }
+      case 'guide': return T.updateGuide(n, t, dt); // (the first day — townIntro.js)
       case 'mug': {
         const v = t.target;
         if (!v?.alive || v.fighter || v.inside || v.jailedUntil > T.simT) { n.task = null; T.decide(n); return true; }

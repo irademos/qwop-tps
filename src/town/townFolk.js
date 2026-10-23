@@ -218,6 +218,8 @@ export function installTownFolk(T, ctx) {
         return;
       }
     }
+    // (showing the player round on their first day — townIntro.js)
+    if (n.guiding) { setTask(n, { type: 'guide', dur: Infinity }); return; }
     // (a claim's over: back to the host's town)
     if (T.netMode === 'client') { release(n); return; }
     if (def.outlaw) { T.decideBandit(n, h); return; }
