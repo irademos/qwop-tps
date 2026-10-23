@@ -3,7 +3,7 @@
 // weapon shops' counters (townStalls.js), the sell panel — townsfolk buying food and delivering
 // goods, and the stand-ins bullets / bombs / spells hit townsfolk through.
 
-import { FOOD_IDS, GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR } from './townEconomy.js';
+import { GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR } from './townEconomy.js';
 import { SHOUT_EAT_BUY, firstName, shout } from './townPeople.js';
 import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
@@ -25,7 +25,7 @@ export function installTownTrade(T, ctx) {
     T.renderGoods();
     return got;
   };
-  // Food for health (the goods pill / 🍽 Eat)
+  // Food for health (the goods pill / Settings → Town)
   const eat = (g) => {
     if (!GOODS[g]?.food || T.goods[g] <= 0 || T.sequence || ctx.isPlayerDead()) return;
     const { health, max } = ctx.getHealth();
@@ -34,11 +34,6 @@ export function installTownTrade(T, ctx) {
     ctx.heal(GOODS[g].heal);
     T.renderGoods();
     T.feedLine(`😋 Ate a ${GOODS[g].label.toLowerCase()}. +${GOODS[g].heal} ❤️`);
-  };
-  const hurtFood = () => {
-    const { health, max } = ctx.getHealth();
-    if (health >= max) return null;
-    return FOOD_IDS.filter((g) => T.goods[g] > 0).sort((a, b) => GOODS[b].heal - GOODS[a].heal)[0] ?? null;
   };
   // Chop: the sword tip in a trunk (CHOP_HITS hits a log)
   const tryChop = (tip) => {
@@ -531,7 +526,7 @@ export function installTownTrade(T, ctx) {
 
   Object.assign(T, {
     buyFood, calmNow, closeMarket, deliverGoods, eat, enterRoom, focusStall, gain, gearOpen, getMagicTargets,
-    getWeaponTargets, hurtFood, leaveRoom, marketOpen, nearDoor, nearStall, nearestStall, noteStock,
+    getWeaponTargets, leaveRoom, marketOpen, nearDoor, nearStall, nearestStall, noteStock,
     openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen, tryChop,
     updateRegrowth, updateRooms, workingMerchant,
   });
