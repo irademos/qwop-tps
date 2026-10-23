@@ -1380,6 +1380,24 @@ body.settings-open #inventory-button {
   color: var(--text);
 }
 
+/* Settings → Town: the player's bag (tap a food to eat) and jobs */
+.town-settings-bag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.town-settings-good:disabled { opacity: 1; cursor: default; }
+
+.town-settings-hint { flex-basis: 100%; font-size: 12px; }
+
+.town-settings-jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Settings → Town: who lives in town and their coins (the richest wears the crown) */
 .town-roster-filters {
   display: flex;
@@ -4274,20 +4292,7 @@ body.mobile-block-bar .classic-combo {
 }
 /* The bandit camp's countdown (same spot as the jail chip — never both) */
 .town-camp { color: var(--danger); border-color: var(--danger); }
-.town-lobby {
-  position: absolute;
-  top: calc(10px + env(safe-area-inset-top, 0px));
-  left: calc(12px + env(safe-area-inset-left, 0px));
-  min-height: 44px;
-  padding: 0 16px;
-  font-size: 15px;
-  font-weight: 700;
-  background: var(--surface-strong);
-  border-color: var(--border-strong);
-}
-.town-hud .town-lobby:hover,
-.town-hud .town-lobby:active { background: var(--surface-strong); transform: none; }
-/* What's happening in town: newest on top, under ⬅ Lobby and the health bar */
+/* What's happening in town: newest on top, under the health bar */
 .town-feed {
   position: absolute;
   left: calc(12px + env(safe-area-inset-left, 0px));
@@ -4330,36 +4335,22 @@ body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-botto
   font-weight: 800;
   animation: village-act-in 0.2s var(--ease);
 }
-/* Fishing (townFishing.js): what to do now + the line out / its strain, above the acts */
+/* Fishing (townFishing.js): a hint (Pull / Reel in) once the player's been getting it wrong, above the acts */
 .town-fishing {
   position: absolute;
   left: 50%;
   bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
-  width: min(320px, calc(100% - 32px));
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 10px 18px;
   pointer-events: none;
 }
 body.mobile-block-bar .town-fishing { bottom: calc(160px + env(safe-area-inset-bottom, 0px)); }
 .town-fishing-cue { font: 800 16px var(--font-ui); text-align: center; color: var(--text); }
 .town-fishing[data-cue='bite'] .town-fishing-cue,
 .town-fishing[data-cue='pull'] .town-fishing-cue { color: var(--accent); animation: town-fish-cue 0.45s ease-in-out infinite; }
-.town-fishing[data-cue='snap'] .town-fishing-cue,
-.town-fishing[data-cue='lost'] .town-fishing-cue { color: var(--danger); }
-.town-fishing[data-cue='landed'] .town-fishing-cue { color: var(--success); }
 @keyframes town-fish-cue { 50% { transform: scale(1.08); } }
-.town-fishing-bars { display: flex; flex-direction: column; gap: 4px; }
-.town-fishing-bars:empty { display: none; }
-.town-fishing-row { display: flex; align-items: center; gap: 8px; }
-.town-fishing-label { width: 46px; font-size: 11px; font-weight: 700; color: var(--text-muted); }
-.town-fishing-track { flex: 1; height: 6px; border-radius: var(--radius-pill); background: var(--surface-hover); overflow: hidden; }
-.town-fishing-fill { height: 100%; width: 0; border-radius: inherit; background: var(--info); transition: width 0.15s linear; }
-.town-fishing-fill[data-level='low'] { background: var(--success); }
-.town-fishing-fill[data-level='mid'] { background: var(--accent); }
-.town-fishing-fill[data-level='high'] { background: var(--danger); }
 /* The on-screen reel (no phone connected — the phone has its own): crank it clockwise */
 .town-reel {
   position: absolute;
@@ -4400,19 +4391,21 @@ body.mobile-block-bar .town-fishing { bottom: calc(160px + env(safe-area-inset-b
   background: radial-gradient(circle at 35% 35%, #fde68a, #c89a62);
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
 }
-.town-reel-label {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  text-align: center;
-  font: 800 13px var(--font-ui);
-  color: var(--text-muted);
-  pointer-events: none;
-}
 /* (the line out: no Block bar) */
 body.town-reeling .ps-block-btn { display: none !important; }
+/* Phones: the reel takes the joystick's place while the line's out */
+@media (pointer: coarse) {
+  .town-reel {
+    top: auto;
+    right: auto;
+    margin-top: 0;
+    left: calc(16px + env(safe-area-inset-left, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: 140px;
+    height: 140px;
+  }
+  body.town-reeling #joystick-container { visibility: hidden !important; }
+}
 /* Who the player's talking to: their mood toward the player — a row in the talk box (townMemory.js relationRow) */
 .town-relation {
   display: flex;
@@ -4437,7 +4430,7 @@ body.town-reeling .ps-block-btn { display: none !important; }
 .town-relation-fill[data-mood='good'] { background: var(--success); }
 .town-relation-note { font-size: 11px; color: var(--text-dim); }
 @media (max-width: 520px) {
-  .town-top { left: calc(50% + 34px); gap: 6px; padding: 6px 10px; font-size: 13px; }
+  .town-top { gap: 6px; padding: 6px 10px; font-size: 13px; }
   .town-top-rep-title { display: none; }
   .town-act { min-height: 44px; padding: 0 12px; font-size: 14px; }
 }
@@ -4452,12 +4445,18 @@ body.town-reeling .ps-block-btn { display: none !important; }
   transition: opacity 0.6s ease;
 }
 .town-fade.town-fade-on { opacity: 1; pointer-events: auto; }
-/* ⬅ Lobby sits top left: the name / level badge and XP bar give way, health moves under it */
+/* No name / level badge or XP bar in Town: health sits top left */
 body.town-mode #player-info,
 body.town-mode #xp-bar { display: none !important; }
-body.town-mode #health-display { top: calc(64px + env(safe-area-inset-top, 0px)); }
-body.town-mode #shield-health-display { top: calc(96px + env(safe-area-inset-top, 0px)); }
-body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
+body.town-mode #health-display { top: calc(14px + env(safe-area-inset-top, 0px)); }
+body.town-mode #shield-health-display { top: calc(46px + env(safe-area-inset-top, 0px)); }
+body.town-mode .town-feed { top: calc(80px + env(safe-area-inset-top, 0px)); }
+/* Phones: just the day and time up top; the bag and the jobs are in Settings → Town */
+@media (pointer: coarse) {
+  .town-top > :not(.town-top-clock) { display: none; }
+  .town-hud .town-goods,
+  .town-hud .town-quests { display: none; }
+}
 /* What the player carries (top right, under ⚙️); tap a food to eat it */
 .town-goods {
   position: absolute;

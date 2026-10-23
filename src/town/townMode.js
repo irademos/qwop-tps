@@ -70,7 +70,7 @@
 //   cancelCarry(), isPlayerArmed()
 //   spawnBlood(position, groundY), playSfx('hit' | 'chop'), dropCoins(position, n)
 //   getCoins(), addCoins(delta) (coins past the wallet's cap drop at the player's feet), profileKey() → string | null,
-//   memberKey() (the player's key in a shared town — their house), onLobby()
+//   memberKey() (the player's key in a shared town — their house)
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
 //   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n)
 //   net (townNet.js, or null): start(), stop(), isOn(), ready(), isHost(), id(), hostId(),
@@ -180,9 +180,6 @@ export function createTownMode(ctx) {
   const stars = el('div', 'town-stars hidden');
   const jailChip = el('div', 'town-jail ui-panel hidden');
   const campChip = el('div', 'town-jail town-camp ui-panel hidden');
-  const lobbyBtn = el('button', 'ui-btn ui-btn-secondary town-lobby', '⬅ Lobby');
-  lobbyBtn.type = 'button';
-  lobbyBtn.addEventListener('click', () => { if (T.active) ctx.onLobby(); });
   const feed = el('div', 'town-feed');
   const actsEl = el('div', 'town-acts hidden');
   const fade = el('div', 'town-fade');
@@ -201,7 +198,7 @@ export function createTownMode(ctx) {
     goodEls[g] = b;
     goodsEl.append(b);
   }
-  hud.append(top, stars, jailChip, campChip, lobbyBtn, feed, goodsEl, actsEl);
+  hud.append(top, stars, jailChip, campChip, feed, goodsEl, actsEl);
   document.body.append(hud, fade);
   const renderGoods = () => {
     const carried = GOOD_IDS.reduce((s, g) => s + goods[g], 0);
@@ -758,13 +755,24 @@ export function createTownMode(ctx) {
         stars: p.stars, status: p.stars > 0 ? 'Wanted' : 'Out and about',
       });
     }
-    return { town: TOWN_NAME, day: clock.day, shared: T.netMode === 'host' || T.netMode === 'client', people };
+    // The player's bag (tap a food to eat) and jobs — on phones these live here, not on the HUD
+    const bag = {
+      max: BAG_MAX,
+      goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || goods[g] > 0).map((g) => ({
+        id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, n: goods[g] || 0, food: !!GOODS[g].food, heal: GOODS[g].heal ?? 0,
+      })),
+    };
+    return {
+      town: TOWN_NAME, day: clock.day, time: clockText(), shared: T.netMode === 'host' || T.netMode === 'client', people,
+      bag, jobs: tracker.entries(),
+    };
   };
 
   return {
     enter,
     exit,
     roster,
+    eat: (g) => { if (T.active && T.ready) T.eat(g); },
     update,
     trySwordHit,
     // Fishing, the line out: the phone's Block bar is a reel ({ reel, cue, text, tension }) — or null

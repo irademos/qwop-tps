@@ -6250,7 +6250,7 @@ async function initCore(runtimeContext) {
     const status = _phoneControllerGearStatus();
     // Town fishing, the line out: the bar is a reel (cranked round on the phone's screen)
     const fishing = town?.isActive() ? town.fishingHud() : null;
-    if (fishing?.reel) return { ...status, reelMode: true, fishCue: fishing.cue, fishText: fishing.text, tension: fishing.tension };
+    if (fishing?.reel) return { ...status, reelMode: true, fishCue: fishing.cue, fishText: fishing.text };
     const interact = _phoneInteract();
     return interact === undefined ? status : { ...status, interactMode: true, interact };
   };
@@ -6769,6 +6769,7 @@ async function initCore(runtimeContext) {
     // Everything Settings → Profile shows (Showdown / Classic stage stats, upgrades, characters)
     // Settings → Town: the town's people + players with their coins (townMode.js roster), null outside Town
     getTownRoster: () => town?.roster?.() ?? null,
+    townEat: (good) => town?.eat?.(good),
     getProfileStats: () => ({
       // (in Town: Showdown's, set aside — _saveAside)
       level: _saveAside?.stats.level ?? statsState.level,
@@ -8643,9 +8644,7 @@ async function initCore(runtimeContext) {
     isPlayerArmed: () => !!_heldWeaponId() && !isRodEquipped(),
     putWeaponsAway: () => _putWeaponsAway(),
     // Fishing (townTrade.js): the rod in hand, its model (the tip casts the line), the reel
-    ownsRod: () => isRodAllowed(),
     isRodEquipped: () => isRodEquipped(),
-    equipRod: () => { equipInventoryItem(FISHING_ROD_ITEM_ID); playerControls?.refreshActionButtons?.(); },
     getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
     // A live gyro sword (phone, or this device's own): else casting / hooking are buttons
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
@@ -8670,7 +8669,6 @@ async function initCore(runtimeContext) {
     maxMana: MAX_MANA,
     getHealth: () => ({ health: statsState.health, max: effectiveMaxHealthSegments() }),
     heal: (n) => setStat('health', Math.min(effectiveMaxHealthSegments(), statsState.health + n)),
-    onLobby: () => { void appState.returnToLobby(); },
   });
   window.town = town; // (dev console: town.debug())
   // Town at night, out past the houses (town.wantsLantern): a lantern on the player's left

@@ -144,6 +144,7 @@ export const FISH_LINE_MAX = 14;            // m — it takes all the line: gone
 export const FISH_LAND_DIST = 1.4;          // m — reeled in this close: landed
 export const FISH_KEY_REEL = 1.6;           // turns / s holding R (no phone)
 export const FISH_CANCEL_DIST = 1.2;        // m — walking off reels in
+export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, snapped, lost) before the HUD says Pull / Reel in
 
 // ── Reactions ──
 export const ATTITUDE_FADE = 0.004;         // per second, toward 0 (fondness fades at half the rate)
