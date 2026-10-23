@@ -369,9 +369,17 @@ function buildTownPanel() {
     filterButtons[id] = chip;
   });
   const list = createElement('ol', 'town-roster');
+  // The player's bag (tap a food to eat it) and jobs
+  const bagTitle = createElement('h3', 'settings-section-title', 'Your Bag');
+  const bag = createElement('div', 'town-settings-bag');
+  const jobsTitle = createElement('h3', 'settings-section-title', 'Jobs');
+  const jobs = createElement('div', 'town-settings-jobs');
+  const peopleTitle = createElement('h3', 'settings-section-title', 'People');
 
-  panelEl.append(offlineHint, summary, filters, list);
-  elements.town = { offlineHint, summary, summaryFields, filters, filterButtons, list };
+  panelEl.append(offlineHint, summary, bagTitle, bag, jobsTitle, jobs, peopleTitle, filters, list);
+  elements.town = {
+    offlineHint, summary, summaryFields, filters, filterButtons, list, bagTitle, bag, jobsTitle, jobs, peopleTitle,
+  };
   return panelEl;
 }
 
@@ -380,10 +388,11 @@ function renderTownRoster() {
   if (!ui) return;
   const roster = context.appState?.getTownRoster?.() ?? null;
   ui.offlineHint.hidden = !!roster;
-  ui.summary.hidden = !roster;
-  ui.filters.hidden = !roster;
-  ui.list.hidden = !roster;
+  [ui.summary, ui.filters, ui.list, ui.bagTitle, ui.bag, ui.jobsTitle, ui.jobs, ui.peopleTitle].forEach((node) => {
+    node.hidden = !roster;
+  });
   if (!roster) return;
+  renderTownBag(ui, roster);
 
   const people = roster.people ?? [];
   const known = (p) => Number.isFinite(p.coins);
@@ -434,6 +443,46 @@ function renderTownRoster() {
     const coins = createElement('div', 'town-roster-coins', known(p) ? `🪙 ${p.coins}` : '🪙 ?');
     row.append(who, coins);
     ui.list.appendChild(row);
+  });
+}
+
+function renderTownBag(ui, roster) {
+  const bag = roster.bag;
+  const goods = bag?.goods ?? [];
+  const carried = goods.reduce((sum, g) => sum + g.n, 0);
+  ui.bagTitle.textContent = bag ? `Your Bag · 🎒 ${carried}/${bag.max}` : 'Your Bag';
+  ui.bag.innerHTML = '';
+  goods.forEach((g) => {
+    const canEat = g.food && g.n > 0;
+    const btn = createElement('button', 'ui-chip town-settings-good', `${g.emoji} ${g.n}`);
+    btn.type = 'button';
+    btn.disabled = !canEat;
+    btn.title = g.food ? `Eat ${g.label} (+${g.heal} health)` : g.label;
+    if (canEat) {
+      btn.dataset.action = 'town-eat';
+      btn.dataset.good = g.id;
+    }
+    ui.bag.appendChild(btn);
+  });
+  if (goods.some((g) => g.food && g.n > 0)) {
+    ui.bag.appendChild(createElement('div', 'settings-muted town-settings-hint', 'Tap a food to eat it.'));
+  }
+
+  const jobs = roster.jobs ?? [];
+  ui.jobs.innerHTML = '';
+  if (!jobs.length) {
+    ui.jobs.appendChild(createElement('div', 'settings-muted', 'No jobs right now — look for ❗ over townsfolk.'));
+    return;
+  }
+  jobs.forEach((j) => {
+    const row = createElement('div', 'town-roster-row town-settings-job');
+    const who = createElement('div', 'town-roster-who');
+    who.append(
+      createElement('div', 'town-roster-name', `${j.icon ?? '📍'} ${j.title}`),
+      createElement('div', 'town-roster-meta', j.progress ?? ''),
+    );
+    row.appendChild(who);
+    ui.jobs.appendChild(row);
   });
 }
 
@@ -1178,6 +1227,9 @@ async function handleAction(target) {
     }
   } else if (action === 'town-filter') {
     townFilter = target.dataset.filter || 'all';
+    renderTownRoster();
+  } else if (action === 'town-eat') {
+    context.appState?.townEat?.(target.dataset.good);
     renderTownRoster();
   } else if (action === 'open-leaderboard') {
     await openLeaderboardOverlay(target.dataset.leaderboard || 'kills');

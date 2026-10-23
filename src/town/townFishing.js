@@ -11,6 +11,9 @@
 //     hold R) until it's at the bank
 // Without a gyro the cast / pull are buttons (acts). The game's player-local rod tip is
 // sampled each frame; a cast / pull is its travel within FISH_GESTURE_S.
+// The HUD says nothing while it goes well: only after FISH_HINT_AFTER mistakes (scared it off,
+// too slow, snapped, lost it) does it show ⬆ Pull the rod! / 🌀 Reel in! at those moments, until
+// a fish is landed.
 //
 // Fishing anywhere there's water would mean: `atSpot` → "water within reach" over the whole map
 // (the town's nav grid only covers NAV_BOUNDS — elsewhere sample `ctx.getWaterY` / the map's
@@ -23,50 +26,32 @@
 import * as THREE from 'three';
 import { createFishingRig } from '../items/fishingRod.js';
 import {
-  FISH_CANCEL_DIST, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HOOK_S,
-  FISH_KEY_REEL, FISH_LAND_DIST, FISH_LINE_MAX, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S, FISH_PULL_KEEP,
+  FISH_CANCEL_DIST, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER,
+  FISH_HOOK_S, FISH_KEY_REEL, FISH_LAND_DIST, FISH_LINE_MAX, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S, FISH_PULL_KEEP,
   FISH_PULL_SWING, FISH_PULL_TENSION, FISH_REEL_M, FISH_RUN_S, FISH_RUN_SPEED, FISH_SETTLE_S, FISH_SIZES,
   FISH_SPOT_RADIUS, FISH_TENSION_DECAY, FISH_TENSION_PER_TURN, FISH_TIRED_S, FISH_WAIT_S, NAV_CELL,
   dist2, el, rand,
 } from './townConfig.js';
 
 const TURN = Math.PI * 2;
-const END_CUE_S = 1.2;      // s the last cue (caught / snapped / got away) stays on the reel
 
-// What each moment of it says (the HUD, the phone's reel); key = the phone's buzz
-const CUES = {
-  aim: '🎣 Swing the rod forward to cast',
-  aimButton: '🎣 Cast when you\'re ready',
-  cast: '🎣 …',
-  wait: 'Wait for a bite… (reel to bring it in)',
-  nibble: 'Something\'s nibbling… wait for it!',
-  bite: '❗ BITE! Pull the rod back!',
-  run: '🐟 It\'s running — ease off!',
-  pull: '⬆ PULL!',
-  reel: '🌀 Reel it in!',
+// The hint at each moment once the player's been getting it wrong (the HUD, the phone's reel);
+// the cue itself is the phone's buzz either way
+const HINTS = {
+  bite: '⬆ Pull the rod!',
+  pull: '⬆ Pull the rod!',
+  reel: '🌀 Reel in!',
 };
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownFishing(T, ctx) {
-  // ── HUD: what to do + the line / tension, and an on-screen reel (no phone) ──
+  // ── HUD: a hint once they're struggling, and an on-screen reel (no phone) ──
   const meter = el('div', 'town-fishing ui-panel hidden');
   const cueEl = el('div', 'town-fishing-cue');
-  const bars = el('div', 'town-fishing-bars');
-  const bar = (label) => {
-    const row = el('div', 'town-fishing-row');
-    const fill = el('div', 'town-fishing-fill');
-    const track = el('div', 'town-fishing-track');
-    track.append(fill);
-    row.append(el('span', 'town-fishing-label', label), track);
-    bars.append(row);
-    return { row, fill };
-  };
-  const lineBar = bar('Line');
-  const tensionBar = bar('Strain');
-  meter.append(cueEl, bars);
+  meter.append(cueEl);
   const reelEl = el('div', 'town-reel hidden');
   const reelHandle = el('div', 'town-reel-handle');
-  reelEl.append(reelHandle, el('div', 'town-reel-label', 'Reel'));
+  reelEl.append(reelHandle);
   T.hud.append(meter, reelEl);
 
   // Cranking the on-screen reel (mouse or touch): clockwise winds in
@@ -182,13 +167,13 @@ export function installTownFishing(T, ctx) {
   //     left, tension, side } }
   let rig = null;
   const fishingRig = () => (rig ??= createFishingRig(ctx.scene));
-  let endCue = null; // { cue, text, until } — the last word, shown a moment after the line's in
   let lastCue = null;
+  let misses = 0; // mistakes since the last fish landed (FISH_HINT_AFTER → hints)
+  const miss = () => { misses += 1; };
   const say = (text) => T.feedLine(text);
-  const finish = (cue, text, caught = false) => {
+  const finish = (caught = false) => {
     T.fishing = null;
     rig?.reel(caught);
-    endCue = { cue, text, until: T.simT + END_CUE_S };
   };
 
   let awayHintAt = -99;
@@ -209,7 +194,6 @@ export function installTownFishing(T, ctx) {
       left: rand(...FISH_WAIT_S), nibble: 0, nibbled: Math.random() < FISH_NIBBLE_CHANCE,
       settleAt: T.simT + FISH_SETTLE_S, fish: null,
     };
-    endCue = null;
     fishingRig().cast(rod, at);
     return true;
   };
@@ -221,21 +205,21 @@ export function installTownFishing(T, ctx) {
       f.nibble = 0;
       f.nibbled = false;
       f.left = rand(...FISH_WAIT_S) + 2;
-      say('🐟 Too soon — you scared it off. Wait for the bobber to go under.');
+      miss();
+      say('🐟 Scared it off.');
     } else if (f.phase === 'bite') {
       const size = pickSize();
       f.phase = 'fight';
       f.t = 0;
       f.fish = { size, stamina: size.pulls, mode: 'run', left: rand(...FISH_RUN_S), tension: 0, side: Math.random() < 0.5 ? -1 : 1 };
       rig?.hook();
-      say(`🎣 Hooked ${size.label}! Ease off while it runs, pull when it tires.`);
     } else if (f.phase === 'fight') {
       const fish = f.fish;
       if (fish.mode === 'tired') {
         fish.stamina -= 1;
         f.d = Math.max(FISH_LAND_DIST + 0.4, f.d * FISH_PULL_KEEP);
         fish.tension = Math.max(0, fish.tension - 0.3);
-        if (fish.stamina <= 0) { fish.mode = 'beaten'; say('🐟 It\'s worn out — reel it in!'); }
+        if (fish.stamina <= 0) fish.mode = 'beaten';
         else { fish.mode = 'run'; fish.left = rand(...FISH_RUN_S); fish.side = -fish.side; }
       } else if (fish.mode === 'run') {
         fish.tension += FISH_PULL_TENSION;
@@ -248,7 +232,7 @@ export function installTownFishing(T, ctx) {
   };
 
   // Put away at once (leaving Town, arrests): no reeling in
-  const stopFishingRig = () => { rig?.stop(); endCue = null; };
+  const stopFishingRig = () => { rig?.stop(); };
 
   const _fishAt = { x: 0, z: 0 };
   const updateFishing = (dt) => {
@@ -277,8 +261,8 @@ export function installTownFishing(T, ctx) {
     if (f) {
       const p = T.playerPos();
       if (dist2(p.x, p.z, f.x, f.z) > FISH_CANCEL_DIST * FISH_CANCEL_DIST || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
-        if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.stop(); endCue = null; }
-        else finish(f.fish ? 'lost' : 'in', f.fish ? 'It got away…' : 'Reeled in.');
+        if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.stop(); }
+        else { if (f.fish) say('🐟 It got away.'); finish(); }
         refreshHud();
         return;
       }
@@ -289,7 +273,7 @@ export function installTownFishing(T, ctx) {
       } else if (f.phase === 'wait') {
         // Reeling in a waiting line just brings the bobber back
         if (turns > 0) f.d -= turns * FISH_REEL_M;
-        if (f.d <= FISH_LAND_DIST) { finish('in', 'Reeled in — cast again.'); refreshHud(); return; }
+        if (f.d <= FISH_LAND_DIST) { finish(); refreshHud(); return; }
         f.left -= dt;
         if (f.nibbled && f.left < FISH_NIBBLE_S + 0.6 && f.left > 0.6) f.nibble = f.left - 0.6;
         else f.nibble = 0;
@@ -304,7 +288,8 @@ export function installTownFishing(T, ctx) {
           f.t = 0;
           f.left = rand(...FISH_WAIT_S);
           f.nibbled = Math.random() < FISH_NIBBLE_CHANCE;
-          say('🐟 Too slow — it stole the bait. Pull the rod back as soon as the bobber goes under.');
+          miss();
+          say('🐟 It stole the bait.');
         }
       } else if (f.phase === 'fight') {
         const fish = f.fish;
@@ -319,7 +304,7 @@ export function installTownFishing(T, ctx) {
           f.d -= turns * FISH_REEL_M * 0.6;
           fish.left -= dt;
           // (no pull in time: it gets its breath back)
-          if (fish.left <= 0) { fish.mode = 'run'; fish.left = rand(...FISH_RUN_S); fish.side = -fish.side; }
+          if (fish.left <= 0) { miss(); fish.mode = 'run'; fish.left = rand(...FISH_RUN_S); fish.side = -fish.side; }
           load = 0.4;
         } else {
           f.d -= turns * FISH_REEL_M;
@@ -330,14 +315,17 @@ export function installTownFishing(T, ctx) {
         // (until it's worn out it won't come right in)
         if (fish.mode !== 'beaten') f.d = Math.max(FISH_LAND_DIST + 0.4, f.d);
         if (fish.tension >= 1) {
-          finish('snap', '💥 The line snapped!');
-          say('💥 Snap! You strained the line too hard — let it run, then pull when it tires.');
+          miss();
+          finish();
+          say('💥 The line snapped!');
         } else if (f.d > FISH_LINE_MAX) {
-          finish('lost', 'It took all the line…');
-          say('🐟 It ran off with all your line — pull it in when it tires!');
+          miss();
+          finish();
+          say('🐟 It got away.');
         } else if (f.d <= FISH_LAND_DIST) {
           const n = fish.size.n;
-          finish('landed', `🐟 Caught ${fish.size.label}!`, true);
+          misses = 0;
+          finish(true);
           const got = T.gain('fish', n);
           say(`🐟 Caught ${fish.size.label}! ${got > 1 ? `+${got} fish` : '+1 fish'} (${T.goods.fish})${got < n ? ' — no room in your bag for the other' : ''}`);
           T.introNote('fish');
@@ -356,40 +344,29 @@ export function installTownFishing(T, ctx) {
   };
 
   // ── What it says right now (the HUD, the phone's reel) ──
-  // { line: the line's out, cue, text, tension, d } or null (nothing to do with fishing)
+  // { line: the line's out, cue, hint (only once they've been getting it wrong) } or null
   const status = () => {
     const f = T.fishing;
-    if (!f) {
-      if (endCue && T.simT < endCue.until) return { line: true, cue: endCue.cue, text: endCue.text, tension: 0, d: 0 };
-      if (ctx.isRodEquipped() && atSpot() && !T.sequence) {
-        return { line: false, cue: 'aim', text: ctx.hasGyro() ? CUES.aim : CUES.aimButton, tension: 0, d: 0 };
-      }
-      return null;
-    }
+    if (!f) return null;
     let cue = f.phase;
     if (f.phase === 'wait' && f.nibble > 0) cue = 'nibble';
     if (f.phase === 'fight') cue = f.fish.mode === 'run' ? 'run' : f.fish.mode === 'tired' ? 'pull' : 'reel';
-    return { line: true, cue, text: CUES[cue], tension: f.fish?.tension ?? 0, d: f.d };
+    return { line: true, cue, hint: misses >= FISH_HINT_AFTER ? HINTS[cue] ?? '' : '' };
   };
   let hudKey = '';
   const refreshHud = () => {
     const s = status();
     // (the DOM only when something shows differently)
-    const k = s ? `${s.cue}|${s.text}|${s.line}|${Math.round(s.d * 4)}|${Math.round(s.tension * 40)}|${!!T.fishing?.fish}|${ctx.isPhoneConnected()}` : '';
+    const k = s ? `${s.cue}|${s.hint}|${ctx.isPhoneConnected()}` : '';
     if (k === hudKey) return;
     hudKey = k;
-    meter.classList.toggle('hidden', !s);
+    meter.classList.toggle('hidden', !s?.hint);
     // (the on-screen reel when there's no phone — it has its own)
-    reelEl.classList.toggle('hidden', !s?.line || ctx.isPhoneConnected());
-    document.body.classList.toggle('town-reeling', !!s?.line);
-    if (s) {
-      cueEl.textContent = s.text;
+    reelEl.classList.toggle('hidden', !s || ctx.isPhoneConnected());
+    document.body.classList.toggle('town-reeling', !!s);
+    if (s?.hint) {
+      cueEl.textContent = s.hint;
       meter.dataset.cue = s.cue;
-      lineBar.row.classList.toggle('hidden', !s.line || !T.fishing);
-      tensionBar.row.classList.toggle('hidden', !T.fishing?.fish);
-      lineBar.fill.style.width = `${Math.round(Math.min(1, s.d / FISH_LINE_MAX) * 100)}%`;
-      tensionBar.fill.style.width = `${Math.round(Math.min(1, s.tension) * 100)}%`;
-      tensionBar.fill.dataset.level = s.tension > 0.75 ? 'high' : s.tension > 0.45 ? 'mid' : 'low';
     }
     // A new cue: the phone hears it now (it buzzes), not on its next status tick
     const key = s ? s.cue : null;
@@ -398,25 +375,19 @@ export function installTownFishing(T, ctx) {
   // For the phone: the reel while the line's out
   const fishingHud = () => {
     const s = status();
-    if (!s?.line) return null;
-    return { reel: true, cue: s.cue, text: s.text, tension: Math.round(s.tension * 10) / 10 };
+    if (!s) return null;
+    return { reel: true, cue: s.cue, text: s.hint };
   };
 
-  // ── Acts (townActs.js): at the spot — get the rod out / buy one; no gyro: Cast / Pull ──
+  // ── Acts (townActs.js): only without a gyro — Cast / Pull with the rod out at the spot ──
   const fishingActs = (calm) => {
     const out = [];
+    if (ctx.hasGyro()) return out;
     if (T.fishing) {
-      if (!ctx.hasGyro()) out.push({ key: 'fishpull', label: '⬆ Pull', onClick: pull });
+      out.push({ key: 'fishpull', label: '⬆ Pull', onClick: pull });
       return out;
     }
-    if (!calm || !atSpot()) return out;
-    if (!ctx.ownsRod()) {
-      out.push({ key: 'fishrod', label: '🎣 Need a rod', onClick: () => say('🎣 Fishing rods are sold at the ⚔️ Weapon Shop.') });
-    } else if (!ctx.isRodEquipped()) {
-      out.push({ key: 'fishrod', label: '🎣 Fish', onClick: () => { ctx.equipRod(); say(ctx.hasGyro() ? '🎣 Swing the rod forward to cast.' : '🎣 Rod out — Cast when you\'re ready.'); } });
-    } else if (!ctx.hasGyro()) {
-      out.push({ key: 'fishcast', label: '🎣 Cast', onClick: () => cast(0.55) });
-    }
+    if (calm && atSpot() && ctx.isRodEquipped()) out.push({ key: 'fishcast', label: '🎣 Cast', onClick: () => cast(0.55) });
     return out;
   };
   const hideFishingHud = () => {

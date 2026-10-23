@@ -132,12 +132,16 @@ export function createQuestTracker(parent) {
   const box = el('div', 'town-quests hidden');
   parent.append(box);
   let key = '';
+  let shown = [];
   return {
+    // (what it shows now — also listed in Settings → Town)
+    entries: () => shown,
     // entries: [{ title, progress, icon? }] (📍 being done, ❓ back for the reward)
     render: (entries) => {
       const k = entries.map((e) => `${e.icon}|${e.title}|${e.progress}`).join('/');
       if (k === key) return;
       key = k;
+      shown = entries.map((e) => ({ ...e }));
       box.replaceChildren(...entries.map((e) => {
         const row = el('div', 'town-quest');
         row.append(el('div', 'town-quest-title', `${e.icon ?? '📍'} ${e.title}`), el('div', 'town-quest-progress', e.progress));

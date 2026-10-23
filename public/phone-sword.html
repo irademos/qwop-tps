@@ -223,23 +223,24 @@
     #btn-sword.shown { display: block; }
     #btn-rod { background: rgba(13, 148, 136, 0.42); border-color: rgba(153, 246, 228, 0.6); display: none; }
     #btn-rod.owned { display: block; }
-    /* Town fishing with the line out: the bar is a reel — crank the handle round (clockwise)
-       to wind the line in; the ring shows the line's tension, the middle what to do */
+    /* Town fishing with the line out: the reel takes the joystick's place (and the Block bar
+       goes) — crank the handle round (clockwise) to wind the line in; the middle says Pull /
+       Reel in only once the player's been getting it wrong */
     #reel {
       display: none;
       position: relative;
-      justify-self: center;
+      flex: 0 0 auto;
       width: clamp(150px, 44vw, 190px);
       height: clamp(150px, 44vw, 190px);
       border-radius: 50%;
       background: radial-gradient(circle, #334155 0%, #1e293b 62%, #0f172a 100%);
-      border: 6px solid var(--tension, #22c55e);
+      border: 6px solid rgba(255, 255, 255, 0.25);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 10px rgba(255, 255, 255, 0.04);
       touch-action: none;
-      transition: border-color 0.15s;
     }
     body.reel-mode #reel { display: block; }
-    body.reel-mode #block-btn { display: none; }
+    body.reel-mode #block-btn,
+    body.reel-mode #joystick { display: none; }
     #reel-handle {
       position: absolute;
       inset: 0;
@@ -447,11 +448,11 @@ Rod</button>
     <div id="block-row">
       <div class="block-side" id="block-side-left"></div>
       <button id="block-btn">🛡️ BLOCK</button>
-      <div id="reel"><div id="reel-handle"></div><div id="reel-text"></div></div>
       <div class="block-side" id="block-side-right"></div>
     </div>
     <div id="joy-row">
       <div id="joystick"><div id="joystick-knob"></div></div>
+      <div id="reel"><div id="reel-handle"></div><div id="reel-text"></div></div>
       <button class="ctl-btn" id="btn-jump" data-action="jump">⬆️<br>Jump</button>
     </div>
     <div id="swipe-hint">Swipe the screen to roll</div>
@@ -708,9 +709,8 @@ Rod</button>
       if (cue !== fishCue && cue && FISH_BUZZ[cue] && navigator.vibrate) navigator.vibrate(FISH_BUZZ[cue]);
       fishCue = cue;
       reelText.textContent = reeling ? st.fishText || '' : '';
-      ['bite', 'pull'].forEach((c) => reelEl.classList.toggle(`cue-${c}`, cue === c));
-      const tension = Math.max(0, Math.min(1, Number(st.tension) || 0));
-      reelEl.style.setProperty('--tension', tension > 0.75 ? '#ef4444' : tension > 0.45 ? '#f59e0b' : '#22c55e');
+      // (it pulses only with a hint showing)
+      ['bite', 'pull'].forEach((c) => reelEl.classList.toggle(`cue-${c}`, cue === c && !!reelText.textContent));
       // Town: 🗡 Sword out / ✋ Hands (nothing in hand)
       btnSword.classList.toggle('shown', !!st.canUnequip);
       const unarmed = st.equipped === 'none';

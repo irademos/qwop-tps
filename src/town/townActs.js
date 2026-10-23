@@ -216,8 +216,6 @@ export function installTownActs(T, ctx) {
       out.push(...T.cookActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
       out.push(...T.fishingActs(true));
-      const food = T.hurtFood();
-      if (food) out.push({ key: `eat:${food}`, label: `🍽 Eat ${GOODS[food].emoji}`, onClick: () => T.eat(food) });
     }
     return out.slice(0, 3);
   };
