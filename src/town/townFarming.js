@@ -1,28 +1,27 @@
-// Town: farming. The allotment (townLayout.js — an open patch by the fields) has PLOT_COUNT farm
-// plots round a water tap; a farmer sells the player one (🌱 Buy a plot, PLOT_PRICE to that
-// farmer), seeds come from the shop (SHOP_GEAR 'seeds' → T.seeds), and a plot's beds are planted
-// (🌱 Plant) and harvested once ripe (🥕 Harvest, HARVEST_VEG veg a bed). A bed only grows while
-// its soil is wet: the hose at the tap (🚿 Grab the hose — empty hands, the player can't walk
-// further than HOSE_LENGTH from the tap meanwhile) is held in the right hand and aimed with the
-// gyro like the sword (no gyro: where the player faces); 💧 Water — the Block bar's place on the
-// game's screen and the phone (bootstrapGameApp.js: isHoseHeld / setWatering) — or holding F
-// sprays it, and the beds the water lands on soak (WATER_SOAK_S of spray) and stay wet
-// SOIL_DRY_S.
+// Town: farming. The farmers' fields (townLayout.js) can be bought — walk up to one and 🌱 Buy
+// this field (FIELD_PRICE, paid to the farmer who works it; no talking needed): its crops are the
+// player's to pick from then on (no theft), and the farmer stops working it. Seeds come from the
+// shop (SHOP_GEAR 'seeds' → T.seeds) and are planted anywhere (🌱 Plant a seed — a little dirt
+// pile in front of the player); each grows one veg in a town day (VEG_DRY_S), or in VEG_WET_S
+// while its soil is wet, then 🥕 Pick your veg. The water: the hose at the tap (🚿 Grab the hose —
+// empty hands, the player can't walk further than HOSE_LENGTH from the tap meanwhile) is held in
+// the right hand and aimed with the gyro like the sword (no gyro: where the player faces);
+// 💧 Water — the Block bar's place on the game's screen and the phone (bootstrapGameApp.js:
+// isHoseHeld / setWatering) — or holding F sprays it, and the dirt piles the water lands on soak
+// (WATER_SOAK_S of spray) and stay wet SOIL_DRY_S.
 //
-// Who owns which plot is the town's (T.plotOwners: plot → { k: member key, n: name }; a shared
-// town's host keeps it — 'buyPlot' / 'plots' ops); what grows in the player's own plots is
-// theirs (T.plots, saved with their own things — others see their soil only).
+// Who owns which field is the town's (T.fieldOwners: field index → { k: member key, n: name }; a
+// shared town's host keeps it — 'buyField' / 'fields' ops); what's planted is the player's own
+// (T.veg, saved with their own things — others don't see it).
 
 import * as THREE from 'three';
 import { makeTextSprite } from '../village/villageMode.js';
 import { firstName } from './townPeople.js';
 import {
-  CROP_GROW_S, HARVEST_VEG, HOSE_GRAB_DIST, HOSE_LENGTH, HOSE_SPEED, HOSE_SPLASH_R, PLOT_ACT_DIST, PLOT_BED, PLOT_COLS,
-  PLOT_COUNT, PLOT_PRICE, PLOT_ROWS, SEEDS_MAX, SOIL_DRY_S, TALK_RANGE, WATER_SOAK_S, dist2,
+  FIELD_ACT_DIST, FIELD_PRICE, HOSE_GRAB_DIST, HOSE_LENGTH, HOSE_SPEED, HOSE_SPLASH_R, SEEDS_MAX, SOIL_DRY_S,
+  VEG_DRY_S, VEG_GAP, VEG_MAX, VEG_PICK_DIST, VEG_WET_S, WATER_SOAK_S, dist2,
 } from './townConfig.js';
 
-// Plots round the tap (m from it)
-const PLOT_OFFSETS = [[-2.0, -1.6], [2.0, -1.6], [-2.0, 1.6], [2.0, 1.6]];
 const GRAVITY = 9.8;
 const DROPS = 90;                   // water drops in the air at once…
 const DROP_RATE = 45;               // …sprayed per second
@@ -31,6 +30,7 @@ const DRY_COLOR = new THREE.Color(0x8a6a45);
 const WET_COLOR = new THREE.Color(0x43301d);
 const GYRO_MAX_AGE_MS = 500;        // (as playerModel.js: older, the gyro's not live)
 const HOSE_REEL_UP = 0.55;          // m — the hose leaves the tap this high
+const PLANT_AHEAD = 0.6;            // m in front of the player a seed goes in
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -41,162 +41,143 @@ const _FWD = new THREE.Vector3(0, 0, 1);
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownFarming(T, ctx) {
-  T.plotOwners = {};
-  T.plots = {};               // plot index → [{ s: 0 bare | 1 growing | 2 ripe, g: 0..1, w: s of wet soil left }]
+  T.fieldOwners = {};
+  T.veg = [];                 // the player's planted seeds: [{ x, z, g: 0..1 (1 ripe), w: s of wet soil left }]
   T.seeds = 0;
   T.hose = null;              // { watering, dropAt } while the player holds it
-  let farm = null;            // the allotment's meshes (buildFarm)
+  let farm = null;            // the meshes (buildFarm)
   let keyDown = false;
 
-  const allot = () => T.layout?.places.allotment ?? null;
+  const tapSpot = () => T.layout?.places.tap ?? null;
+  const fields = () => T.layout?.places.fields ?? [];
   const myKey = () => (T.mp() ? ctx.memberKey() : 'me');
-  const isMine = (i) => T.plotOwners[i]?.k === myKey();
-  const myPlots = () => Object.keys(T.plotOwners).map(Number).filter(isMine);
-  const freshBeds = () => Array.from({ length: PLOT_COLS * PLOT_ROWS }, () => ({ s: 0, g: 0, w: 0 }));
-  const bedsOf = (i) => (T.plots[i] ??= freshBeds());
+  const ownsField = (i) => T.fieldOwners[i]?.k === myKey();
+  const myFields = () => Object.keys(T.fieldOwners).map(Number).filter(ownsField);
+  // Whose a field is: 'mine', 'theirs' (another player's) or null (a farmer's)
+  const fieldOwner = (f) => {
+    const o = T.fieldOwners[fields().indexOf(f)];
+    return !o ? null : o.k === myKey() ? 'mine' : 'theirs';
+  };
 
-  // ── Layout (townLayout.js): the plots round a tap at c ──
-  const layoutAllotment = (c) => ({
-    tap: { x: c.x, z: c.z },
-    plots: PLOT_OFFSETS.slice(0, PLOT_COUNT).map(([ox, oz], i) => {
-      const x = c.x + ox;
-      const z = c.z + oz;
-      const beds = [];
-      for (let r = 0; r < PLOT_ROWS; r++) {
-        for (let k = 0; k < PLOT_COLS; k++) {
-          beds.push({ x: x + (k - (PLOT_COLS - 1) / 2) * PLOT_BED, z: z + (r - (PLOT_ROWS - 1) / 2) * PLOT_BED });
-        }
-      }
-      return { i, x, z, beds };
-    }),
-  });
-
-  // ── Props ──
-  const buildFarm = (group, A) => {
-    const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1, metalness: 0 });
-    const stemMat = new THREE.MeshStandardMaterial({ color: 0x5f9e3a, roughness: 1, metalness: 0 });
-    const vegMat = new THREE.MeshStandardMaterial({ color: 0xe0782a, roughness: 0.9, metalness: 0 });
-    const soilGeo = new THREE.BoxGeometry(PLOT_BED * 0.88, 0.08, PLOT_BED * 0.88);
-    const stemGeo = new THREE.ConeGeometry(0.12, 0.4, 5).translate(0, 0.2, 0);
-    const vegGeo = new THREE.SphereGeometry(0.09, 8, 6);
-    const plots = A.plots.map((p) => {
-      const beds = p.beds.map((b, k) => {
-        const y = T.groundAt(b.x, b.z);
-        const soil = new THREE.Mesh(soilGeo, new THREE.MeshStandardMaterial({ color: DRY_COLOR, roughness: 1, metalness: 0 }));
-        soil.position.set(b.x, y + 0.03, b.z);
-        soil.receiveShadow = true;
-        const crop = new THREE.Group();
-        const stem = new THREE.Mesh(stemGeo, stemMat);
-        stem.castShadow = true;
-        const veg = new THREE.Mesh(vegGeo, vegMat);
-        veg.position.y = 0.05;
-        veg.castShadow = true;
-        crop.add(stem, veg);
-        crop.position.set(b.x, y + 0.07, b.z);
-        crop.rotation.y = k * 1.3;
-        crop.visible = false;
-        group.add(soil, crop);
-        return { soil, crop, veg, wet: -1 };
-      });
-      // A low wooden edge round the plot
-      const w = PLOT_COLS * PLOT_BED + 0.15;
-      const d = PLOT_ROWS * PLOT_BED + 0.15;
-      const y = T.groundAt(p.x, p.z);
-      for (const [sx, sz, lx, lz] of [[0, -d / 2, w, 0.08], [0, d / 2, w, 0.08], [-w / 2, 0, 0.08, d], [w / 2, 0, 0.08, d]]) {
-        const edge = new THREE.Mesh(new THREE.BoxGeometry(lx, 0.12, lz), wood);
-        edge.position.set(p.x + sx, y + 0.06, p.z + sz);
-        edge.castShadow = true;
-        group.add(edge);
-      }
-      return { beds, sign: null, signText: '', signY: y + 1.25 };
-    });
-    // The tap: a post with a spout, the hose reel on it
-    const tap = new THREE.Group();
-    tap.position.set(A.tap.x, T.groundAt(A.tap.x, A.tap.z), A.tap.z);
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.9, 0.14), wood);
-    post.position.y = 0.45;
+  // ── Props: the tap (+ the hose, its nozzle, the water), the fields' signs, the dirt piles ──
+  const mat = (color) => new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 });
+  const buildFarm = (group, places) => {
     const metal = new THREE.MeshStandardMaterial({ color: 0x8a9096, roughness: 0.4, metalness: 0.7 });
-    const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.18, 8), metal);
-    spout.rotation.x = Math.PI / 2;
-    spout.position.set(0, 0.82, 0.12);
-    const reel = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 18), new THREE.MeshStandardMaterial({ color: 0x3f8a3a, roughness: 0.8, metalness: 0 }));
-    reel.position.set(0, HOSE_REEL_UP, 0.12);
-    tap.add(post, spout, reel);
-    tap.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-    group.add(tap);
-    const tapSign = makeTextSprite('🚿 Hose', { height: 0.24 });
-    tapSign.position.set(A.tap.x, tap.position.y + 1.25, A.tap.z);
-    group.add(tapSign);
+    const hoseMat = mat(0x3f8a3a);
+    farm = {
+      group, fieldSigns: places.fields.map(() => ({ sign: null, text: '' })), live: [], piles: new Map(),
+      pileGeo: new THREE.SphereGeometry(0.25, 10, 6).scale(1, 0.4, 1),
+      stemGeo: new THREE.ConeGeometry(0.09, 0.4, 5).translate(0, 0.2, 0),
+      vegGeo: new THREE.SphereGeometry(0.1, 8, 6),
+      stemMat: mat(0x5f9e3a), vegMat: mat(0xe0782a),
+    };
+    const tap = places.tap;
+    if (tap) {
+      const root = new THREE.Group();
+      root.position.set(tap.x, T.groundAt(tap.x, tap.z), tap.z);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.9, 0.14), mat(0x6b4a2b));
+      post.position.y = 0.45;
+      const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.18, 8), metal);
+      spout.rotation.x = Math.PI / 2;
+      spout.position.set(0, 0.82, 0.12);
+      const reel = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 18), hoseMat);
+      reel.position.set(0, HOSE_REEL_UP, 0.12);
+      root.add(post, spout, reel);
+      root.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+      group.add(root);
+      const sign = makeTextSprite('🚿 Hose', { height: 0.24 });
+      sign.position.set(tap.x, root.position.y + 1.25, tap.z);
+      group.add(sign);
+      farm.tapTop = root.position.clone().add(_v.set(0, HOSE_REEL_UP, 0.12));
+    }
     // The hose out to the player's hand (rebuilt each frame while held), its nozzle, the water
-    const hoseMat = new THREE.MeshStandardMaterial({ color: 0x3f8a3a, roughness: 0.8, metalness: 0 });
-    const hose = new THREE.Mesh(new THREE.BufferGeometry(), hoseMat);
-    hose.visible = false;
-    hose.castShadow = true;
-    group.add(hose);
-    const nozzle = new THREE.Group();
-    const nozzleBody = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, 0.2, 10).rotateX(Math.PI / 2).translate(0, 0, 0.05), metal);
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.12, 8).translate(0, -0.05, -0.02), hoseMat);
-    nozzle.add(nozzleBody, grip);
-    nozzle.visible = false;
-    group.add(nozzle);
-    const drops = new THREE.InstancedMesh(new THREE.SphereGeometry(0.035, 6, 4),
+    farm.hose = new THREE.Mesh(new THREE.BufferGeometry(), hoseMat);
+    farm.hose.visible = false;
+    farm.hose.castShadow = true;
+    farm.nozzle = new THREE.Group();
+    farm.nozzle.add(
+      new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, 0.2, 10).rotateX(Math.PI / 2).translate(0, 0, 0.05), metal),
+      new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.12, 8).translate(0, -0.05, -0.02), hoseMat),
+    );
+    farm.nozzle.visible = false;
+    farm.drops = new THREE.InstancedMesh(new THREE.SphereGeometry(0.035, 6, 4),
       new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.75, depthWrite: false }), DROPS);
-    drops.count = 0;
-    drops.frustumCulled = false;
-    group.add(drops);
-    farm = { A, group, plots, tap, hose, nozzle, drops, live: [], tapTop: tap.position.clone().add(_v.set(0, HOSE_REEL_UP, 0.12)) };
+    farm.drops.count = 0;
+    farm.drops.frustumCulled = false;
+    group.add(farm.hose, farm.nozzle, farm.drops);
     renderSigns();
   };
 
-  // Over each plot: for sale, someone's, yours
+  // Over each field: for sale, someone's, yours
   const renderSigns = () => {
     if (!farm) return;
-    const { A } = farm;
-    farm.plots.forEach((fp, i) => {
-      const o = T.plotOwners[i];
-      const text = !o ? `🌱 Plot for sale · ${PLOT_PRICE} 🪙 — ask a farmer` : isMine(i) ? '🌱 Your plot' : `🌱 ${o.n || 'Someone'}'s plot`;
-      if (text === fp.signText) return;
-      fp.signText = text;
-      if (fp.sign) { fp.sign.parent?.remove(fp.sign); fp.sign.material.map?.dispose(); fp.sign.material.dispose(); }
-      fp.sign = makeTextSprite(text, { height: 0.2 });
-      fp.sign.position.set(A.plots[i].x, fp.signY, A.plots[i].z);
-      farm.group.add(fp.sign);
+    fields().forEach((f, i) => {
+      const fs = farm.fieldSigns[i];
+      if (!fs) return;
+      const o = T.fieldOwners[i];
+      const text = !o ? `🌱 Field for sale · ${FIELD_PRICE} 🪙` : ownsField(i) ? '🌱 Your field' : `🌱 ${o.n || 'Someone'}'s field`;
+      if (text === fs.text) return;
+      fs.text = text;
+      if (fs.sign) { fs.sign.parent?.remove(fs.sign); fs.sign.material.map?.dispose(); fs.sign.material.dispose(); }
+      fs.sign = makeTextSprite(text, { height: 0.22 });
+      fs.sign.position.set(f.x, T.groundAt(f.x, f.z) + 1.6, f.z);
+      farm.group.add(fs.sign);
     });
   };
 
-  // ── Buying a plot (from a farmer) ──
-  const freePlot = () => (allot()?.plots ?? []).findIndex((p, i) => !T.plotOwners[i]);
-  const canSellPlot = (n) => n?.alive && n.role === 'farmer' && !n.fighter && n.attitude >= -0.5 && freePlot() >= 0;
-  const buyPlot = (n) => {
-    const i = freePlot();
-    if (i < 0 || !canSellPlot(n)) return;
-    if (ctx.getCoins() < PLOT_PRICE) { T.feedLine(`🪙 A plot costs ${PLOT_PRICE} coins.`); return; }
-    ctx.addCoins(-PLOT_PRICE);
-    T.npcMoney(n, PLOT_PRICE);
-    T.plotOwners[i] = { k: myKey(), n: ctx.getPlayerName() };
-    T.plots[i] = freshBeds();
-    if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'buyPlot', i, k: myKey(), n: ctx.getPlayerName() });
-    else if (T.netMode === 'host') T.net.broadcast({ w: 1, op: 'plots', p: T.plotOwners });
-    T.say(n, `It's yours! Plant some seeds and keep the soil wet — the hose is by the tap.`, { big: true });
-    T.feedLine(`🌱 Bought a farm plot from ${firstName(n.name)}. Seeds are at the shop.`);
-    T.remember(n, 'customer');
+  // ── Buying a field (at the field: paid to the farmer who works it) ──
+  const fieldNear = () => {
+    if (T.inRoom) return -1;
+    const p = T.playerPos();
+    let best = -1;
+    let bd = FIELD_ACT_DIST;
+    fields().forEach((f, i) => {
+      const d = dist2(p.x, p.z, f.x, f.z);
+      if (d < bd) { bd = d; best = i; }
+    });
+    return best;
+  };
+  const buyField = (i) => {
+    const f = fields()[i];
+    if (!f || T.fieldOwners[i]) return;
+    if (ctx.getCoins() < FIELD_PRICE) { T.feedLine(`🪙 This field costs ${FIELD_PRICE} coins.`); return; }
+    const farmer = T.npcs.find((n) => n.alive && n.role === 'farmer' && n.work === f) ?? null;
+    ctx.addCoins(-FIELD_PRICE);
+    if (farmer) T.npcMoney(farmer, FIELD_PRICE);
+    T.fieldOwners[i] = { k: myKey(), n: ctx.getPlayerName() };
+    if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'buyField', i, k: myKey(), n: ctx.getPlayerName() });
+    else if (T.netMode === 'host') T.net.broadcast({ w: 1, op: 'fields', f: T.fieldOwners });
+    // (its farmer goes and farms another, if there's one left)
+    T.assignWork();
+    if (farmer) {
+      if (farmer.task?.type === 'work') T.decide(farmer);
+      T.say(farmer, 'It\'s yours now — look after it!', { big: true });
+      T.remember(farmer, 'customer');
+    }
+    T.feedLine(`🌱 You bought ${farmer ? `${firstName(farmer.name)}'s` : 'the'} field. Its veg is yours to pick.`);
     renderSigns();
     T.save();
   };
+  const fieldActs = () => {
+    const i = fieldNear();
+    if (i < 0 || T.fieldOwners[i]) return [];
+    return [{ key: `field:${i}`, label: `🌱 Buy this field (${FIELD_PRICE} 🪙)`, onClick: () => buyField(i) }];
+  };
   // Shared town: the host keeps who owns which
   const handleFarmNet = (from, d) => {
-    if (d.op === 'plots') {
-      if (T.netMode === 'client' && from === T.net.hostId()) { T.plotOwners = cleanOwners(d.p); renderSigns(); }
+    if (d.op === 'fields') {
+      if (T.netMode === 'client' && from === T.net.hostId()) { T.fieldOwners = cleanOwners(d.f); T.assignWork(); renderSigns(); }
       return true;
     }
-    if (d.op !== 'buyPlot') return false;
+    if (d.op !== 'buyField') return false;
     if (T.netMode !== 'host' || !T.ready) return true;
     const i = Number(d.i);
-    if (Number.isInteger(i) && i >= 0 && i < (allot()?.plots.length ?? 0) && !T.plotOwners[i] && typeof d.k === 'string') {
-      T.plotOwners[i] = { k: d.k, n: typeof d.n === 'string' ? d.n.slice(0, 40) : '' };
+    if (Number.isInteger(i) && i >= 0 && i < fields().length && !T.fieldOwners[i] && typeof d.k === 'string') {
+      T.fieldOwners[i] = { k: d.k, n: typeof d.n === 'string' ? d.n.slice(0, 40) : '' };
+      T.assignWork();
       renderSigns();
     }
-    T.net.broadcast({ w: 1, op: 'plots', p: T.plotOwners });
+    T.net.broadcast({ w: 1, op: 'fields', f: T.fieldOwners });
     return true;
   };
   const cleanOwners = (p) => {
@@ -204,80 +185,73 @@ export function installTownFarming(T, ctx) {
     if (!p || typeof p !== 'object') return out;
     for (const [i, v] of Object.entries(p)) {
       const idx = Number(i);
-      if (Number.isInteger(idx) && idx >= 0 && idx < PLOT_COUNT && typeof v?.k === 'string') out[idx] = { k: v.k, n: typeof v.n === 'string' ? v.n.slice(0, 40) : '' };
+      if (Number.isInteger(idx) && idx >= 0 && idx < fields().length && typeof v?.k === 'string') out[idx] = { k: v.k, n: typeof v.n === 'string' ? v.n.slice(0, 40) : '' };
     }
     return out;
   };
 
-  // ── Planting / harvesting ──
-  const nearMyPlot = () => {
-    const A = allot();
-    if (!A || T.inRoom) return -1;
+  // ── Planting anywhere / picking ──
+  // Where a seed would go: just in front of the player, on dry open ground (null: not here)
+  const plantSpot = () => {
+    if (T.inRoom || T.jail || T.seeds <= 0 || T.veg.length >= VEG_MAX) return null;
+    const pm = ctx.getPlayerModel();
+    if (!pm) return null;
+    pm.getWorldQuaternion(_q);
+    const f = _v.set(0, 0, 1).applyQuaternion(_q).setY(0).normalize();
     const p = T.playerPos();
-    let best = -1;
-    let bd = PLOT_ACT_DIST;
-    for (const i of myPlots()) {
-      const d = dist2(p.x, p.z, A.plots[i].x, A.plots[i].z);
-      if (d < bd) { bd = d; best = i; }
-    }
-    return best;
+    const x = p.x + f.x * PLANT_AHEAD;
+    const z = p.z + f.z * PLANT_AHEAD;
+    if (ctx.isOverWater(x, z) || T.rooms.roomAt(x, z) || T.veg.some((v) => dist2(v.x, v.z, x, z) < VEG_GAP)) return null;
+    if (!Number.isFinite(ctx.getGroundY(x, z)) || Math.abs(ctx.getGroundY(x, z) - p.y) > 0.6) return null;
+    return { x, z };
   };
-  const plant = (i) => {
-    const beds = bedsOf(i);
-    let n = 0;
-    for (const b of beds) {
-      if (b.s !== 0 || T.seeds <= 0) continue;
-      b.s = 1;
-      b.g = 0;
-      T.seeds -= 1;
-      n += 1;
-    }
-    if (!n) return;
-    const dry = beds.some((b) => b.s === 1 && b.w <= 0);
-    T.feedLine(`🌱 Planted ${n} seed${n > 1 ? 's' : ''}${dry ? ' — water them with the hose to make them grow' : ''}.`);
+  const plant = () => {
+    const at = plantSpot();
+    if (!at) return;
+    T.seeds -= 1;
+    T.veg.push({ x: at.x, z: at.z, g: 0, w: 0 });
+    T.feedLine(T.veg.length === 1
+      ? '🌱 Planted a seed. It\'ll grow a veg by tomorrow — or water it with the hose and it\'s ready in no time.'
+      : `🌱 Planted a seed (${T.seeds} left).`);
   };
-  const harvest = (i) => {
-    let got = 0;
-    for (const b of bedsOf(i)) {
-      if (b.s !== 2 || T.bagRoom() < 1) continue;
-      got += T.gain('crops', HARVEST_VEG);
-      b.s = 0;
-      b.g = 0;
-    }
-    if (got) T.feedLine(`🥕 +${got} Veg from your plot (${T.goods.crops})`);
+  const ripeVegNear = () => {
+    const p = T.playerPos();
+    return T.veg.find((v) => v.g >= 1 && dist2(v.x, v.z, p.x, p.z) < VEG_PICK_DIST) ?? null;
+  };
+  const pickVeg = () => {
+    const v = ripeVegNear();
+    if (!v) return;
+    if (T.bagRoom() <= 0) { T.bagFullNote(); return; }
+    T.gain('crops');
+    T.veg = T.veg.filter((o) => o !== v);
+    T.feedLine(`🥕 +1 Veg you grew (${T.goods.crops})`);
   };
   const farmActs = () => {
     const out = [];
-    const i = nearMyPlot();
-    if (i < 0 || T.hose?.watering) return out;
-    const beds = bedsOf(i);
-    const ripe = beds.filter((b) => b.s === 2).length;
-    const bare = beds.filter((b) => b.s === 0).length;
-    if (ripe) out.push({ key: `harvest:${i}`, label: `🥕 Harvest (${ripe})`, onClick: () => harvest(i) });
-    if (bare && T.seeds > 0) out.push({ key: `plant:${i}`, label: `🌱 Plant (${Math.min(bare, T.seeds)})`, onClick: () => plant(i) });
+    if (T.hose?.watering) return out;
+    if (ripeVegNear()) out.push({ key: 'pickVeg', label: '🥕 Pick your veg', onClick: pickVeg });
+    out.push(...fieldActs());
+    if (plantSpot()) out.push({ key: 'plant', label: `🌱 Plant a seed (${T.seeds})`, onClick: plant });
     return out;
   };
-  // A farmer within talking range sells a plot
-  const plotActs = (n) => (n && canSellPlot(n) && T.distToPlayer(n) < TALK_RANGE && myPlots().length < PLOT_COUNT
-    ? [{ key: `plot:${n.id}`, label: `🌱 Buy a plot (${PLOT_PRICE} 🪙)`, onClick: () => buyPlot(n) }] : []);
 
   // ── The hose ──
   const hoseConstraint = (controls) => {
-    const A = allot();
+    const A = tapSpot();
     if (!A) return;
-    const dx = controls.playerX - A.tap.x;
-    const dz = controls.playerZ - A.tap.z;
+    const dx = controls.playerX - A.x;
+    const dz = controls.playerZ - A.z;
     const d = Math.hypot(dx, dz);
     // (a teleport — knocked out, the game's own — isn't pulled back: the hose is dropped)
     if (d <= HOSE_LENGTH || d > HOSE_LENGTH + 6) return;
-    controls.playerX = A.tap.x + (dx / d) * HOSE_LENGTH;
-    controls.playerZ = A.tap.z + (dz / d) * HOSE_LENGTH;
+    controls.playerX = A.x + (dx / d) * HOSE_LENGTH;
+    controls.playerZ = A.z + (dz / d) * HOSE_LENGTH;
   };
   const nearTap = () => {
-    const A = allot();
+    const A = tapSpot();
     if (!A || T.inRoom) return false;
     const p = T.playerPos();
-    return dist2(p.x, p.z, A.tap.x, A.tap.z) < HOSE_GRAB_DIST;
+    return dist2(p.x, p.z, A.x, A.z) < HOSE_GRAB_DIST;
   };
   const grabHose = () => {
     if (T.hose || !farm || ctx.isPlayerDead() || T.sequence || T.jail) return;
@@ -339,12 +313,12 @@ export function installTownFarming(T, ctx) {
   const _from = new THREE.Vector3();
   const _dir = new THREE.Vector3();
   const updateHose = (dt) => {
-    const A = allot();
+    const A = tapSpot();
     if (!T.hose || !farm || !A) return;
     const p = T.playerPos();
     // Let go: down, arrested, gone in somewhere, a weapon out, too far (a teleport)
     if (ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom || ctx.isPlayerArmed() || ctx.isRodEquipped()
-      || dist2(p.x, p.z, A.tap.x, A.tap.z) > HOSE_LENGTH + 3) {
+      || dist2(p.x, p.z, A.x, A.z) > HOSE_LENGTH + 3) {
       dropHose({ keepConstraint: !!(T.jail || T.inRoom), quiet: !!(T.jail || T.sequence || ctx.isPlayerDead()) });
       return;
     }
@@ -355,12 +329,12 @@ export function installTownFarming(T, ctx) {
     farm.nozzle.quaternion.setFromUnitVectors(_FWD, _dir);
     // The hose: off the reel, along the ground to the player's feet, up to the nozzle
     const t0 = farm.tapTop;
-    const pts = [t0.clone(), new THREE.Vector3(A.tap.x, T.groundAt(A.tap.x, A.tap.z) + 0.04, A.tap.z + 0.3)];
+    const pts = [t0.clone(), new THREE.Vector3(A.x, T.groundAt(A.x, A.z) + 0.04, A.z + 0.3)];
     const steps = 5;
     for (let k = 1; k <= steps; k++) {
       const f = k / (steps + 1);
-      const x = A.tap.x + (p.x - A.tap.x) * f;
-      const z = A.tap.z + 0.3 + (p.z - A.tap.z - 0.3) * f;
+      const x = A.x + (p.x - A.x) * f;
+      const z = A.z + 0.3 + (p.z - A.z - 0.3) * f;
       pts.push(new THREE.Vector3(x + Math.sin(k * 2.1) * 0.25, T.groundAt(x, z) + 0.04, z + Math.cos(k * 1.7) * 0.25));
     }
     pts.push(new THREE.Vector3(p.x, p.y + 0.05, p.z), farm.nozzle.position.clone().addScaledVector(_dir, -0.08));
@@ -372,7 +346,7 @@ export function installTownFarming(T, ctx) {
       if (!T.hose.wasOn) { T.hose.wasOn = true; T.hose.dropAt = T.simT; }
       while (T.hose.dropAt <= T.simT && farm.live.length < DROPS) {
         T.hose.dropAt += 1 / DROP_RATE;
-        const v = _v.copy(_dir);
+        const v = _dir.clone();
         v.x += (Math.random() - 0.5) * DROP_SPREAD * 2;
         v.y += (Math.random() - 0.5) * DROP_SPREAD * 2;
         v.z += (Math.random() - 0.5) * DROP_SPREAD * 2;
@@ -381,12 +355,10 @@ export function installTownFarming(T, ctx) {
       T.hose.dropAt = Math.max(T.hose.dropAt, T.simT - 0.1);
     } else T.hose.wasOn = false;
   };
-  // Drops fly and land: a bed they land on gets wetter (WATER_SOAK_S of spray soaks it), a
+  // Drops fly and land: a dirt pile they land on gets wetter (WATER_SOAK_S of spray soaks it), a
   // townsperson they hit isn't pleased
   const updateDrops = (dt) => {
     if (!farm) return;
-    const A = allot();
-    const mine = myPlots();
     const perDrop = SOIL_DRY_S / (DROP_RATE * WATER_SOAK_S);
     farm.live = farm.live.filter((d) => {
       d.v.y -= GRAVITY * dt;
@@ -404,13 +376,8 @@ export function installTownFarming(T, ctx) {
       }
       const gy = T.groundAt(d.p.x, d.p.z, -100);
       if (d.p.y > gy + 0.05) return d.p.y > gy - 20;
-      for (const i of mine) {
-        const pl = A.plots[i];
-        if (Math.abs(d.p.x - pl.x) > 2.2 || Math.abs(d.p.z - pl.z) > 1.8) continue;
-        const beds = bedsOf(i);
-        pl.beds.forEach((b, k) => {
-          if (dist2(b.x, b.z, d.p.x, d.p.z) < HOSE_SPLASH_R) beds[k].w = Math.min(SOIL_DRY_S, beds[k].w + perDrop);
-        });
+      for (const v of T.veg) {
+        if (dist2(v.x, v.z, d.p.x, d.p.z) < HOSE_SPLASH_R) v.w = Math.min(SOIL_DRY_S, v.w + perDrop);
       }
       return false;
     });
@@ -418,43 +385,61 @@ export function installTownFarming(T, ctx) {
     farm.live.forEach((d, k) => farm.drops.setMatrixAt(k, _m.compose(d.p, _q.identity(), _s)));
     if (farm.live.length) farm.drops.instanceMatrix.needsUpdate = true;
   };
-  // The player's beds grow while wet; their meshes follow (others' plots: bare soil)
-  let readyNoteAt = -1e9;
-  const updateBeds = (dt) => {
+  // The planted seeds grow (a town day dry, VEG_WET_S wet); their dirt piles follow
+  let ripeNoteAt = -1e9;
+  const makePile = () => {
+    const g = new THREE.Group();
+    const pile = new THREE.Mesh(farm.pileGeo, new THREE.MeshStandardMaterial({ color: DRY_COLOR, roughness: 1, metalness: 0 }));
+    pile.receiveShadow = true;
+    const sprout = new THREE.Group();
+    const stem = new THREE.Mesh(farm.stemGeo, farm.stemMat);
+    const veg = new THREE.Mesh(farm.vegGeo, farm.vegMat);
+    veg.position.y = 0.05;
+    stem.castShadow = true;
+    veg.castShadow = true;
+    sprout.add(stem, veg);
+    sprout.position.y = 0.06;
+    g.add(pile, sprout);
+    farm.group.add(g);
+    return { g, pile, sprout, veg, wet: -1 };
+  };
+  const updateVeg = (dt) => {
     if (!farm) return;
     let ripeNow = false;
-    farm.plots.forEach((fp, i) => {
-      const mine = isMine(i);
-      const beds = mine ? bedsOf(i) : null;
-      fp.beds.forEach((m, k) => {
-        const b = beds?.[k];
-        if (b) {
-          if (b.w > 0) {
-            b.w = Math.max(0, b.w - dt);
-            if (b.s === 1) {
-              b.g += dt / CROP_GROW_S;
-              if (b.g >= 1) { b.s = 2; b.g = 1; ripeNow = true; }
-            }
-          }
-        }
-        const wet = b && b.w > 0 ? 1 : 0;
-        if (wet !== m.wet) { m.wet = wet; m.soil.material.color.copy(wet ? WET_COLOR : DRY_COLOR); }
-        const show = !!b && b.s > 0;
-        m.crop.visible = show;
-        if (show) {
-          const g = b.s === 2 ? 1 : b.g;
-          m.crop.scale.setScalar(0.25 + 0.75 * g);
-          m.veg.visible = g > 0.6;
-        }
-      });
-    });
-    if (ripeNow && T.simT - readyNoteAt > 20) { readyNoteAt = T.simT; T.feedLine('🥕 Veg in your plot is ripe — 🥕 Harvest it.'); }
+    for (const v of T.veg) {
+      if (v.g < 1) {
+        v.g = Math.min(1, v.g + dt / (v.w > 0 ? VEG_WET_S : VEG_DRY_S));
+        if (v.g >= 1) ripeNow = true;
+      }
+      if (v.w > 0) v.w = Math.max(0, v.w - dt);
+    }
+    if (ripeNow && T.simT - ripeNoteAt > 15) { ripeNoteAt = T.simT; T.feedLine('🥕 A veg you planted is ready — 🥕 Pick your veg.'); }
+    // (meshes: one per planted seed)
+    for (const [v, m] of farm.piles) {
+      if (T.veg.includes(v)) continue;
+      m.g.parent?.remove(m.g);
+      m.pile.material.dispose();
+      farm.piles.delete(v);
+    }
+    for (const v of T.veg) {
+      let m = farm.piles.get(v);
+      if (!m) {
+        m = makePile();
+        m.g.position.set(v.x, T.groundAt(v.x, v.z), v.z);
+        m.g.rotation.y = (v.x * 7.3 + v.z * 3.1) % (Math.PI * 2);
+        farm.piles.set(v, m);
+      }
+      const wet = v.w > 0 ? 1 : 0;
+      if (wet !== m.wet) { m.wet = wet; m.pile.material.color.copy(wet ? WET_COLOR : DRY_COLOR); }
+      m.sprout.scale.setScalar(0.15 + 0.85 * v.g);
+      m.veg.visible = v.g > 0.6;
+    }
   };
   const updateFarm = (dt) => {
     if (!T.ready) return;
     updateHose(dt);
     updateDrops(dt);
-    updateBeds(dt);
+    updateVeg(dt);
     renderSigns();
   };
 
@@ -469,28 +454,23 @@ export function installTownFarming(T, ctx) {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
 
+
   // ── Saves ──
-  // The world's (who owns which) and the player's own (seeds, their beds)
+  // The world's (who owns which field) and the player's own (seeds, what they planted)
   const restoreFarm = (state, own) => {
-    T.plotOwners = cleanOwners(state?.plots);
+    T.fieldOwners = cleanOwners(state?.fieldOwners);
     T.seeds = Math.max(0, Math.min(SEEDS_MAX, Math.floor(own?.seeds || 0)));
-    T.plots = {};
-    for (const [i, beds] of Object.entries(own?.beds ?? {})) {
-      if (!Array.isArray(beds)) continue;
-      T.plots[i] = freshBeds().map((b, k) => ({
-        s: [0, 1, 2].includes(beds[k]?.s) ? beds[k].s : 0,
-        g: Math.max(0, Math.min(1, Number(beds[k]?.g) || 0)),
-        w: Math.max(0, Math.min(SOIL_DRY_S, Number(beds[k]?.w) || 0)),
-      }));
-    }
+    T.veg = (Array.isArray(own?.veg) ? own.veg : []).slice(0, VEG_MAX)
+      .filter((v) => Number.isFinite(v?.x) && Number.isFinite(v?.z))
+      .map((v) => ({ x: v.x, z: v.z, g: Math.max(0, Math.min(1, Number(v.g) || 0)), w: Math.max(0, Math.min(SOIL_DRY_S, Number(v.w) || 0)) }));
     // (a shared town: the player's own record of what they bought, until the host's word)
-    for (const i of own?.myPlots ?? []) if (!T.plotOwners[i] && T.mp()) T.plotOwners[i] = { k: myKey(), n: ctx.getPlayerName() };
+    for (const i of own?.myFields ?? []) if (!T.fieldOwners[i] && T.mp() && fields()[i]) T.fieldOwners[i] = { k: myKey(), n: ctx.getPlayerName() };
     renderSigns();
   };
   const farmSnapshot = () => ({
     seeds: T.seeds,
-    myPlots: myPlots(),
-    beds: Object.fromEntries(myPlots().map((i) => [i, bedsOf(i).map((b) => ({ s: b.s, g: Math.round(b.g * 1000) / 1000, w: Math.round(b.w) }))])),
+    myFields: myFields(),
+    veg: T.veg.map((v) => ({ x: Math.round(v.x * 100) / 100, z: Math.round(v.z * 100) / 100, g: Math.round(v.g * 1000) / 1000, w: Math.round(v.w) })),
   });
   const resetFarm = () => {
     dropHose({ quiet: true });
@@ -498,9 +478,9 @@ export function installTownFarming(T, ctx) {
   };
 
   Object.assign(T, {
-    buildFarm, dropHose, farmActs, farmSnapshot, handleFarmNet, hoseActs, layoutAllotment, plotActs, resetFarm,
-    restoreFarm, setWatering, updateFarm,
-    applyPlots: (p) => { T.plotOwners = cleanOwners(p); renderSigns(); },
+    buildFarm, dropHose, farmActs, farmSnapshot, fieldOwner, handleFarmNet, hoseActs, resetFarm, restoreFarm, setWatering,
+    updateFarm,
+    applyFieldOwners: (f) => { T.fieldOwners = cleanOwners(f); renderSigns(); },
     hoseHeld: () => !!T.hose,
   });
 }

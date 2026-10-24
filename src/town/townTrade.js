@@ -83,7 +83,11 @@ export function installTownTrade(T, ctx) {
     crop.mesh.visible = false;
     gain('crops');
     T.feedLine(`🥕 +1 Veg (${T.goods.crops})`);
-    // (helping the farmer with the harvest on the first day: allowed — townIntro.js)
+    // (the player's own field — bought, townFarming.js — or helping the farmer with the harvest
+    // on the first day: allowed — townIntro.js)
+    const bought = T.fieldOwner(field);
+    if (bought === 'mine') return;
+    if (bought === 'theirs') { T.crime('theft', null); return; }
     if (T.introAllowsPick(field)) { T.introNote('pick'); return; }
     const owner = T.npcs.find((n) => n.alive && n.role === 'farmer' && n.work === field) ?? null;
     T.crime('theft', owner);

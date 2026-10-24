@@ -175,7 +175,7 @@ export function installTownActs(T, ctx) {
       out.push(...T.cookActs());
       return out;
     }
-    // The hose in hand (townFarming.js): water / put it back, and the plot's buttons
+    // The hose in hand (townFarming.js): water / put it back, and the farming buttons
     if (T.hose) {
       out.push(...T.hoseActs(), ...T.farmActs());
       return out.slice(0, 3);
@@ -204,7 +204,7 @@ export function installTownActs(T, ctx) {
       out.push({ key: 'sell', label: '💰 Sell', onClick: T.openMarket });
     }
     if (stall === 'wizard' && T.stallOpen('wizard')) out.push({ key: 'wizard', label: '🔮 Wizard\'s wares', onClick: () => T.focusStall('wizard') });
-    // Farming (townFarming.js): the player's plot — 🥕 Harvest / 🌱 Plant
+    // Farming (townFarming.js): pick a grown veg, buy a field, plant a seed
     if (calm) out.push(...T.farmActs());
     // A job's townsperson within reach (not only the nearest): its 📦 / 💰 first
     if (!ctx.isPlayerDead() && calm) {
@@ -219,8 +219,6 @@ export function installTownActs(T, ctx) {
       const icon = T.isIntroGuide(n) ? '❗' : j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : '💬';
       // (and how they feel about the player — townMemory.js)
       out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)} ${T.moodOf(n.attitude).emoji}`, onClick: () => talkTo(n) });
-      // (a farmer sells a farm plot)
-      if (calm) out.push(...T.plotActs(n));
     }
     // (the first day: walk the player to the goal again — townIntro.js)
     if (calm) out.push(...T.introActs());

@@ -193,7 +193,7 @@ export function installTownWire(T, ctx) {
     if (Number.isFinite(s.minutes)) T.clock.minutes = s.minutes;
     if (Array.isArray(s.departed)) T.departed = s.departed;
     if (s.houses) T.applyHouses(s.houses);
-    if (s.plots) T.applyPlots(s.plots);
+    if (s.fieldOwners) { T.applyFieldOwners(s.fieldOwners); T.assignWork(); }
     if (s.market) { for (const g of GOOD_IDS) if (Number.isFinite(s.market[g])) T.market.stock[g] = s.market[g]; T.noteStock(); }
     const ids = new Set();
     let added = false;

@@ -1,6 +1,6 @@
 // Town: the layout, built once from the map — the walkability grid (townNav.js), the shop and the
 // jail (two of the houses) and the homes (the rest; each house with a known door opens into a
-// room — townRooms.js), the campfire, fields, the allotment's farm plots (townFarming.js), work
+// room — townRooms.js), the campfire, fields (the player can buy them — townFarming.js), the hose's tap, work
 // spots, the patrol loop, the wizard's stall in the woods, the bandit camp — and its props.
 
 import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
@@ -209,18 +209,18 @@ export function installTownLayout(T, ctx) {
       shore.push({ ...p, face: { x: nav.cellX(w), z: nav.cellZ(w) } });
       if (shore.length >= 4) break;
     }
-    // The allotment (townFarming.js): an open patch of grass by the first field (or near the
-    // middle) — the farm plots round a water tap
+    // The hose's water tap (townFarming.js): an open patch of grass by the first field (or near
+    // the middle)
     const anchor = fields[0] ?? C;
-    const allotCell = best(nav.cellsWhere((i) => {
+    const tapCell = best(nav.cellsWhere((i) => {
       const x = nav.cellX(i);
       const z = nav.cellZ(i);
       const d = dist2(x, z, anchor.x, anchor.z);
-      return offRoad(i) && nav.clearanceAt(i) >= 3.5 && dC(i) < 46 && d < 30 && (fields.length ? d > 7.5 : d > 10)
-        && fields.every((f) => dist2(x, z, f.x, f.z) > 7.5) && dist2(x, z, market.x, market.z) > 12
+      return offRoad(i) && nav.clearanceAt(i) >= 2 && dC(i) < 46 && d < 20 && d > 4
+        && fields.every((f) => dist2(x, z, f.x, f.z) > 4) && dist2(x, z, market.x, market.z) > 12
         && dist2(x, z, jailDoor.x, jailDoor.z) > 8 && dist2(x, z, fire.x, fire.z) > 9;
     }), (i) => Math.min(nav.clearanceAt(i), 6) - dist2(nav.cellX(i), nav.cellZ(i), anchor.x, anchor.z) * 0.12);
-    const allotment = allotCell >= 0 ? T.layoutAllotment(cellPos(allotCell)) : null;
+    const tap = tapCell >= 0 ? cellPos(tapCell) : null;
     // Patrol: road spots spread around the middle (farthest-point picks), walked in a loop
     // (from the jail's door)
     const roadCells = nav.cellsWhere((i) => nav.kindAt(i) === 2 && dC(i) < 34);
@@ -292,7 +292,7 @@ export function installTownLayout(T, ctx) {
     const fishSpot = shore[0] ?? null;
     const places = {
       center: C, market, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
-      homes, treeSpots, fields, allotment, shore, fishSpot, patrol, entrance, camp, campFire, strongbox, wizard,
+      homes, treeSpots, fields, tap, shore, fishSpot, patrol, entrance, camp, campFire, strongbox, wizard,
       // the player arrives between the shop and the fire
       spawn: (() => {
         const i = nav.nearestWalkable((market.x + fire.x) / 2, (market.z + fire.z) / 2);
@@ -362,8 +362,8 @@ export function installTownLayout(T, ctx) {
     const star = makeTextSprite('✨', { height: 0.3, size: 96, bg: null, pad: 10 });
     star.position.set(hut.x, groundAt(hut.x, hut.z) + 2.1, hut.z);
     group.add(star);
-    // The allotment's plots and its tap / hose (townFarming.js)
-    if (places.allotment) T.buildFarm(group, places.allotment);
+    // The hose's tap, the fields' for-sale signs (townFarming.js)
+    T.buildFarm(group, places);
     // Fields: rows of crops on dark soil
     const soilMat = new THREE.MeshStandardMaterial({ color: 0x4a3420, roughness: 1, metalness: 0 });
     const cropMat = new THREE.MeshStandardMaterial({ color: 0x5f9e3a, roughness: 1, metalness: 0 });

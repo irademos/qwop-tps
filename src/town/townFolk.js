@@ -44,9 +44,11 @@ export function installTownFolk(T, ctx) {
       mem: Array.isArray(mem) ? mem : [], memBias: 0,
     };
   };
-  // Work spots handed out per role (two woodcutters don't share a tree)
+  // Work spots handed out per role (two woodcutters don't share a tree; a field the player
+  // bought isn't farmed any more — townFarming.js)
   const assignWork = () => {
-    const { treeSpots, fields, shore } = T.layout.places;
+    const { treeSpots, shore } = T.layout.places;
+    const fields = T.layout.places.fields.filter((f, i) => !T.fieldOwners?.[i]);
     const used = { tree: 0, field: 0, shore: 0 };
     for (const n of T.npcs) {
       if (!n.alive) continue;

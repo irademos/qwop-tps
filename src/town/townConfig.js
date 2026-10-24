@@ -116,23 +116,23 @@ export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
 // The wizard's stall (townStalls.js 'wizard', the wizard townsperson behind it): out in the woods
 export const WIZARD_STALL_DIST = [30, 75];  // m from the middle of town
 export const WIZARD_HUT_DIST = 4;           // m from the stall: where the wizard sleeps (his tent)
-// Farming (townFarming.js): plots bought from a farmer by the town's allotment, seeds from the
-// shop; a crop grows only while its soil is wet — the hose at the allotment's tap waters it
-export const PLOT_COUNT = 4;                // plots at the allotment (round its tap)
-export const PLOT_PRICE = 40;               // coins (to the farmer)
-export const PLOT_COLS = 3;                 // beds per plot…
-export const PLOT_ROWS = 2;
-export const PLOT_BED = 0.9;                // …this many m apart
-export const PLOT_ACT_DIST = 2.2;           // m from a plot's middle: 🌱 Plant / 🥕 Harvest
+// Farming (townFarming.js): the farmers' fields can be bought (at the field, no talk needed);
+// seeds from the shop are planted anywhere — a dirt pile that grows one veg in a town day, or
+// in VEG_WET_S once the hose has soaked it
+export const FIELD_PRICE = 100;             // coins (to the field's farmer)
+export const FIELD_ACT_DIST = 4.5;          // m from a field's middle: 🌱 Buy this field
+export const VEG_DRY_S = 480;               // s for a seed to grow unwatered (a town day: 1440 min / MINUTES_PER_SEC)
+export const VEG_WET_S = 40;                // s while its soil is wet
+export const VEG_MAX = 24;                  // seeds planted at once
+export const VEG_PICK_DIST = 1.4;           // m — 🥕 Pick your veg
+export const VEG_GAP = 0.6;                 // m between dirt piles
 export const SEEDS_MAX = 30;
-export const CROP_GROW_S = 110;             // s of wet soil from seed to ripe
-export const SOIL_DRY_S = 70;               // s a soaked bed stays wet
-export const WATER_SOAK_S = 1.2;            // s of hose on a bed to soak it
-export const HARVEST_VEG = 2;               // veg a ripe bed gives
+export const SOIL_DRY_S = 60;               // s a soaked dirt pile stays wet
+export const WATER_SOAK_S = 1.2;            // s of hose on a pile to soak it
 export const HOSE_LENGTH = 16;              // m the hose reaches from the tap
 export const HOSE_GRAB_DIST = 1.8;          // m from the tap: 🚿 Grab the hose
 export const HOSE_SPEED = 6.5;              // m/s the water leaves the nozzle
-export const HOSE_SPLASH_R = 0.55;          // m round where the water lands: those beds get it
+export const HOSE_SPLASH_R = 0.55;          // m round where the water lands: the dirt piles there get it
 // Fishing (townFishing.js): the rod is bought at the shop and held like the sword; swing
 // it forward to cast, wait for a bite, pull it back to hook the fish, then wear it out — pull
 // when it tires, ease off while it runs — and crank the reel to bring it in

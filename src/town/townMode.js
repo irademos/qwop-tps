@@ -11,8 +11,8 @@
 // market and are paid by the merchant; everyone buys their food (and firewood) there; prices
 // follow the stock. The player gathers too — chops trees with the sword, fishes at the fishing
 // spot with a rod bought at the shop (townFishing.js), picks veg (stealing, if anyone sees),
-// grows veg in a farm plot of their own (townFarming.js: bought from a farmer, seeds from the
-// shop, watered with the hose) — and trades at the market (townStalls.js): one of the houses is
+// buys the farmers' fields and plants seeds from the shop anywhere (townFarming.js — watered
+// with the hose they grow fast) — and trades at the market (townStalls.js): one of the houses is
 // the shop — walking in through the door puts the player in its room, shopped like the Showdown
 // village's — everything in one place, run by the merchant (the goods behind the counter, the
 // gear on the side counters, a mystery chest); the wizard sells the wand and potions at his
@@ -337,7 +337,7 @@ export function createTownMode(ctx) {
     nextId: T.nextId,
     market: T.market.snapshot(),
     houses: T.houses,
-    plots: T.plotOwners,
+    fieldOwners: T.fieldOwners,
     goods: { ...goods },
     items: ctx.getItems() ?? T.lastItems,
     ...T.homesSnapshot(),
@@ -359,7 +359,7 @@ export function createTownMode(ctx) {
     nextId: T.nextId,
     market: T.market.snapshot(),
     houses: T.houses,
-    plots: T.plotOwners,
+    fieldOwners: T.fieldOwners,
     at: Date.now(),
   });
   const personalSnapshot = () => ({
@@ -519,7 +519,7 @@ export function createTownMode(ctx) {
     ctx.startLoadout(T.lastItems ?? {});
     // (the houses — who owns which — and the player's chest, lock-picks: townHomes.js)
     T.restoreHomes(state, own);
-    // (the farm plots — whose they are — and the player's seeds / beds: townFarming.js)
+    // (the fields — whose they are — and the player's seeds / what they planted: townFarming.js)
     T.restoreFarm(state, own);
     T.nextId = state?.nextId ?? 1;
     if (state) {

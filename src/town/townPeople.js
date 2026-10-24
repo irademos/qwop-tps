@@ -87,7 +87,7 @@ const TASK_LINES = {
     nightGuard: ['Strange folk about after dark.', 'Keep to the lamplight.', 'Nothing gets past the watch.'],
     sheriff: ['Brindlewick has laws. I keep them.', 'Cells are empty. Let\'s keep it that way.', 'Don\'t make me write you up.'],
     woodcutter: ['This old oak won\'t chop itself.', 'Mind your toes — timber!', 'Best wood on the island, this.'],
-    farmer: ['The carrots are coming along.', 'Rain soon, I can smell it.', 'Long rows today.', 'Fancy growing your own? I\'ll sell you a plot by the tap.'],
+    farmer: ['The carrots are coming along.', 'Rain soon, I can smell it.', 'Long rows today.', 'Fancy a field of your own? A hundred coins and it\'s yours.'],
     wizard: ['Potions! Wands! Wonders!', 'The trees whisper prices to me. Reasonable ones.', 'Mind the wand — it bites.'],
     fisher: ['Fish are biting.', 'Shh — you\'ll scare them off.', 'Caught a big one this morning. Honest.'],
   },
