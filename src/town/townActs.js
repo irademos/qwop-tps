@@ -175,6 +175,11 @@ export function installTownActs(T, ctx) {
       out.push(...T.cookActs());
       return out;
     }
+    // The hose in hand (townFarming.js): water / put it back, and the plot's buttons
+    if (T.hose) {
+      out.push(...T.hoseActs(), ...T.farmActs());
+      return out.slice(0, 3);
+    }
     const calm = T.calmNow();
     // (the strongbox can be snatched mid-fight: the gang guards it)
     if (!T.strongboxHeld && T.layout.props.strongbox.visible && T.activeJobs().some((j) => j.kind === 'fetchStrongbox')) {
@@ -194,11 +199,13 @@ export function installTownActs(T, ctx) {
     // A locked door (townHomes.js): buy the player's house, knock, pick the lock
     if (calm) out.push(...T.doorActs());
     const stall = calm ? T.nearestStall() : null;
-    if (stall === 'gear' && T.gearOpen()) out.push({ key: 'gear', label: '⚔️ Weapons', onClick: () => T.focusStall('gear') });
-    if (stall === 'goods' && T.marketOpen()) {
-      out.push({ key: 'goods', label: '🧺 Goods', onClick: () => T.focusStall('goods') });
+    if (stall === 'shop' && T.marketOpen()) {
+      out.push({ key: 'shop', label: '🛒 Shop', onClick: () => T.focusStall('shop') });
       out.push({ key: 'sell', label: '💰 Sell', onClick: T.openMarket });
     }
+    if (stall === 'wizard' && T.stallOpen('wizard')) out.push({ key: 'wizard', label: '🔮 Wizard\'s wares', onClick: () => T.focusStall('wizard') });
+    // Farming (townFarming.js): the player's plot — 🥕 Harvest / 🌱 Plant
+    if (calm) out.push(...T.farmActs());
     // A job's townsperson within reach (not only the nearest): its 📦 / 💰 first
     if (!ctx.isPlayerDead() && calm) {
       for (const o of T.npcs) {
@@ -212,11 +219,14 @@ export function installTownActs(T, ctx) {
       const icon = T.isIntroGuide(n) ? '❗' : j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : '💬';
       // (and how they feel about the player — townMemory.js)
       out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)} ${T.moodOf(n.attitude).emoji}`, onClick: () => talkTo(n) });
+      // (a farmer sells a farm plot)
+      if (calm) out.push(...T.plotActs(n));
     }
     // (the first day: walk the player to the goal again — townIntro.js)
     if (calm) out.push(...T.introActs());
     if (calm) {
       out.push(...T.cookActs());
+      out.push(...T.hoseActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
       out.push(...T.fishingActs(true));
     }

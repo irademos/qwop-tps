@@ -1,68 +1,62 @@
-// Town mode: the market's two shops — two of the town's houses; walking in through the door puts the
-// player inside its room (townRooms.js: shop.glb, under the map), shopped the Showdown village's
-// way — the things for sale sit on the counters, tap one (or swipe / ‹ › / arrow keys) for its
-// buy card.
-//   • the goods shop (wood / fish / veg — the merchant townsperson stands behind the back counter)
-//   • the weapon shop (the village shop's gear + a fishing rod + the mystery chest, a keeper behind it)
-// Inside, a button by the back counter frames the camera on it (focus); tapping a thing on a
-// counter does too. At a counter, tapping anywhere else, Esc, ⬅ Back or walking off goes back.
-// Selling stays in the market panel (townMarketPanel.js).
+// Town mode: the market — the shop (one of the town's houses: walking in through the door puts the
+// player inside its room — townRooms.js: shop.glb, under the map) and the wizard's stall out in
+// the woods (the Showdown village's market stall), shopped the Showdown village's way — the
+// things for sale sit on the counters, tap one (or swipe / ‹ › / arrow keys) for its buy card.
+//   • the shop sells everything: the goods (wood / fish / veg + seeds) on the back counter, where
+//     the merchant townsperson stands behind it, the gear on the side counters, the mystery chest
+//   • the wizard's stall: the magic wand and the potions (the wizard townsperson behind it)
+// A button by the shop's back counter (by the stall) frames the camera on it (focus); tapping a
+// thing on a counter does too. At a counter, tapping anywhere else, Esc, ⬅ Back or walking off
+// goes back. Selling stays in the market panel (townMarketPanel.js).
 //
-// The counters' things, picking, the buy card and the shop camera only: the rooms themselves are
-// townRooms.js; townMode.js decides what each thing costs, whether it can be had, and does the
+// The counters' things, picking, the buy card and the camera only: the rooms themselves are
+// townRooms.js; townTrade.js decides what each thing costs, whether it can be had, and does the
 // buying (ctx.getState / ctx.buy).
 
 import * as THREE from 'three';
 import {
-  makeTextSprite, buildItemMesh, loadStallManaPotion, loadTreasureChest, STALL_UNIT, CHEST_PRIZE_DELAY_MS,
+  makeTextSprite, buildItemMesh, loadTreasureChest, loadWizardStall, CHEST_PRIZE_DELAY_MS,
 } from '../village/villageMode.js';
 import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { createFishingRodModel } from '../items/fishingRod.js';
-import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { COUNTERS } from './townRooms.js';
 
 // ── In the room (room-local metres: the middle of the floor at the origin, the doorway at +Z) ──
 const BEHIND_Z = -3.95;              // behind the back counter (the shopkeeper)
 export const SHOP_SPOTS = {
-  keeper: { x: 0.3, z: BEHIND_Z },
   merchant: { x: -0.2, z: BEHIND_Z },
   customer: { x: 0, z: -2.2 },
   counter: { x: 0, z: -2.3 },        // in front of the back counter (the buttons / market panel)
 };
+// The wizard's stall (stall-local metres: its front toward +Z)
+export const STALL_SPOTS = {
+  merchant: { x: 0, z: -0.8 },
+  customer: { x: 0, z: 1.3 },
+  counter: { x: 0, z: 1.2 },
+};
 
 // On the counters, in swipe order. counter / along (m along it: left / right = room z, back =
 // room x) / lift (m above its top); hang: floats over it, turning
-const GEAR_ITEMS = [
+const SHOP_ITEMS = [
+  { id: 'wood', counter: 'back', along: -1.6, lift: 0, build: 'wood' },
+  { id: 'fish', counter: 'back', along: -0.75, lift: 0, build: 'fish' },
+  { id: 'crops', counter: 'back', along: 0.1, lift: 0, build: 'veg' },
+  { id: 'seeds', counter: 'back', along: 1.0, lift: 0, build: 'seeds' },
+  { id: 'sword', counter: 'right', along: 2.5, lift: 0.4, build: 'sword', hang: true },
+  { id: 'gun', counter: 'right', along: 1.5, lift: 0.02, build: 'gun' },
+  { id: 'shield', counter: 'right', along: 0.5, lift: -0.06, build: 'shield' },
+  { id: 'bubble', counter: 'right', along: -0.7, lift: 0.35, build: 'bubble', hang: true },
+  { id: 'lockpick', counter: 'left', along: -0.8, lift: 0.01, build: 'lockpick' },
+  { id: 'ammo', counter: 'left', along: 0.4, lift: 0.01, build: 'bullets' },
+  { id: 'bomb', counter: 'left', along: 1.4, lift: 0.07, build: 'bomb' },
   { id: 'rod', counter: 'left', along: 2.75, lift: 0.02, build: 'rod' },
-  { id: 'bomb', counter: 'left', along: 1.0, lift: 0.07, build: 'bomb' },
-  { id: 'ammo', counter: 'left', along: -0.3, lift: 0.01, build: 'bullets' },
-  { id: 'sword', counter: 'back', along: -1.5, lift: 0.4, build: 'sword', hang: true },
-  { id: 'gun', counter: 'back', along: -0.5, lift: 0.02, build: 'gun' },
-  { id: 'wand', counter: 'back', along: 0.4, lift: 0.02, build: 'wand' },
-  { id: 'shield', counter: 'back', along: 1.3, lift: -0.06, build: 'shield' },
-  { id: 'mana', counter: 'right', along: 0.1, lift: 0.06, potion: true },
-  { id: 'bubble', counter: 'right', along: 1.3, lift: 0.35, build: 'bubble', hang: true },
-  { id: 'lockpick', counter: 'right', along: 2.5, lift: 0.01, build: 'lockpick' },
   { id: 'chest', chest: true },
 ];
-const GOODS_ITEMS = [
-  { id: 'wood', counter: 'back', along: -1.2, lift: 0, build: 'wood' },
-  { id: 'fish', counter: 'back', along: 0, lift: 0, build: 'fish' },
-  { id: 'crops', counter: 'back', along: 1.2, lift: 0, build: 'veg' },
-];
-export const STALL_ITEMS = { goods: GOODS_ITEMS, gear: GEAR_ITEMS };
-// Stock on show on the side counters (not for picking)
-const DECOR = {
-  goods: [
-    { build: 'wood', counter: 'left', along: [-0.9, 0.3, 1.5, 2.6] },
-    { build: 'fish', counter: 'right', along: [-0.9, 0.1] },
-    { build: 'veg', counter: 'right', along: [1.3, 2.4] },
-  ],
-  gear: [],
-};
+// The wizard's stall: what loadWizardStall puts on its counter
+const WIZARD_ITEMS = [{ id: 'life' }, { id: 'mana' }, { id: 'wand' }];
+export const STALL_ITEMS = { shop: SHOP_ITEMS, wizard: WIZARD_ITEMS };
 const CHEST_AT = { x: -2.45, z: 3.85, yaw: Math.PI / 2 - 0.25 };
 
-const KEEPER_URL = glbCharacterConfig.wizardUrl;
 const SHOP_FOV = 55;
 const CAMERA_LERP = 4;               // 1/s
 const RELEASE_DONE = 0.03;           // m — the camera's back with the player controls
@@ -93,6 +87,28 @@ const makeLockpickMesh = () => {
   return g;
 };
 
+// A sack of seeds: a burlap bag tied at the top, a few seeds spilled by it
+const makeSeedsMesh = () => {
+  const g = new THREE.Group();
+  const sack = new THREE.MeshStandardMaterial({ color: 0xb08a55, roughness: 1, metalness: 0 });
+  const seed = new THREE.MeshStandardMaterial({ color: 0x6b4a22, roughness: 1, metalness: 0 });
+  const bag = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 10), sack);
+  bag.scale.set(1, 1.15, 1);
+  bag.position.y = 0.09;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, 0.05, 10), sack);
+  neck.position.y = 0.19;
+  const tie = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.007, 6, 14), new THREE.MeshStandardMaterial({ color: 0x3f6b2a, roughness: 1, metalness: 0 }));
+  tie.rotation.x = Math.PI / 2;
+  tie.position.y = 0.18;
+  g.add(bag, neck, tie);
+  for (let k = 0; k < 5; k++) {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 4), seed);
+    s.position.set(0.1 + Math.cos(k * 1.7) * 0.03, 0.01, Math.sin(k * 1.7) * 0.04);
+    g.add(s);
+  }
+  return g;
+};
+
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -113,7 +129,7 @@ const el = (tag, className, text) => {
 export function createTownStalls(ctx) {
   const { camera, domElement, rooms } = ctx;
   let active = false;
-  // key → { key, root, items: [entry], keeper, labels }
+  // key → { key, root, items: [entry], labels, outdoor }
   const stalls = {};
   const clickables = [];
   let focus = null;           // stall key
@@ -127,11 +143,19 @@ export function createTownStalls(ctx) {
   let failedUntil = 0;
   let cardAt = 0;
 
-  const spot = (key, name) => rooms.toWorld(key, SHOP_SPOTS[name]);
+  // Stalls out in the open (the wizard's): where they stand (setOutdoor — the layout, before
+  // they're built), key → { x, y, z, yaw }
+  const outdoor = {};
+  const setOutdoor = (key, at) => { outdoor[key] = { ...at }; };
+  const fromStall = (at, p) => ({
+    x: at.x + Math.sin(at.yaw) * p.z + Math.cos(at.yaw) * p.x,
+    z: at.z + Math.cos(at.yaw) * p.z - Math.sin(at.yaw) * p.x,
+  });
+  const spot = (key, name) => (outdoor[key] ? fromStall(outdoor[key], STALL_SPOTS[name]) : rooms.toWorld(key, SHOP_SPOTS[name]));
   // Near the back counter (the buttons)
   const atCounter = (key, x, z, dist) => {
     const c = spot(key, 'counter');
-    return rooms.roomAt(x, z) === key && Math.hypot(x - c.x, z - c.z) < dist;
+    return (outdoor[key] ? !rooms.roomAt(x, z) : rooms.roomAt(x, z) === key) && Math.hypot(x - c.x, z - c.z) < dist;
   };
 
   // ── Buy card (the village's) ──
@@ -169,17 +193,40 @@ export function createTownStalls(ctx) {
   };
   const makeItemMesh = (build, bombGltf) => {
     const mesh = build === 'bomb' && bombGltf ? createBombMesh(bombGltf)
-      : build === 'rod' ? createFishingRodModel() : build === 'lockpick' ? makeLockpickMesh() : buildItemMesh(build);
+      : build === 'rod' ? createFishingRodModel() : build === 'lockpick' ? makeLockpickMesh()
+      : build === 'seeds' ? makeSeedsMesh() : buildItemMesh(build);
     if (build === 'bomb') { mesh.scale.multiplyScalar(0.8); mesh.position.y = 0.1; }
     // (the rod lies along the counter, tip toward the back of the shop)
     if (build === 'rod') { mesh.scale.setScalar(0.55); mesh.rotation.set(-0.08, Math.PI / 2, 0); mesh.position.y = 0.02; }
     return mesh;
   };
 
+  // Item centres + a bigger invisible tap target round each small one (once the things are in)
+  const finishItems = (stall) => {
+    const { root } = stall;
+    root.updateMatrixWorld(true);
+    const hitMat = new THREE.MeshBasicMaterial({ visible: false });
+    stall.items.forEach((entry, i) => {
+      const box = new THREE.Box3().setFromObject(entry.object);
+      const at = entry.object.getWorldPosition(new THREE.Vector3());
+      const c = box.isEmpty() ? at.clone() : box.getCenter(new THREE.Vector3());
+      entry.centerOffset = c.clone().sub(at);
+      makeClickable(entry.object, { stall: stall.key, item: i });
+      if (!entry.def.chest) {
+        const size = box.isEmpty() ? 0.12 : box.getSize(new THREE.Vector3()).length() / 2;
+        const hit = new THREE.Mesh(new THREE.SphereGeometry(THREE.MathUtils.clamp(size, 0.1, 0.16), 10, 8), hitMat);
+        hit.position.copy(root.worldToLocal(c.clone()));
+        root.add(hit);
+        makeClickable(hit, { stall: stall.key, item: i });
+      }
+    });
+    if (focus === stall.key) refreshCard();
+  };
+
   // def: { key, label } — in that shop's room (townRooms.js build)
   const build = (group, def) => {
     const root = rooms.build(group, def.key);
-    const stall = { key: def.key, root, items: [], keeper: null, labels: [] };
+    const stall = { key: def.key, root, items: [], labels: [] };
     stalls[def.key] = stall;
     const back = COUNTERS.back;
     const sign = makeTextSprite(def.label, { height: 0.3 });
@@ -190,11 +237,10 @@ export function createTownStalls(ctx) {
 
     const defs = STALL_ITEMS[def.key];
     const needs = [
-      defs.some((d) => d.potion) ? loadStallManaPotion() : null,
       defs.some((d) => d.chest) ? loadTreasureChest() : null,
       defs.some((d) => d.build === 'bomb') ? getBombGLTF().catch(() => null) : null,
     ];
-    Promise.all(needs).then(([potion, chest, bombGltf]) => {
+    Promise.all(needs).then(([chest, bombGltf]) => {
       stall.items = defs.map((d) => {
         let object;
         if (d.chest) {
@@ -204,47 +250,14 @@ export function createTownStalls(ctx) {
           root.add(object);
         } else {
           object = new THREE.Group();
-          if (d.potion) {
-            const wrap = new THREE.Group();
-            wrap.scale.setScalar(STALL_UNIT); // (the potion's in stall units)
-            potion.position.set(0, 0, 0);
-            wrap.add(potion);
-            object.add(wrap);
-          } else {
-            object.add(makeItemMesh(d.build, bombGltf));
-          }
+          object.add(makeItemMesh(d.build, bombGltf));
           placeOnCounter(object, d);
           root.add(object);
         }
         object.traverse((m) => { if (m.isMesh) m.castShadow = true; });
         return { def: d, object, baseY: object.position.y, baseRotY: object.rotation.y, hopUntil: 0 };
       });
-      for (const d of DECOR[def.key] ?? []) {
-        for (const along of d.along) {
-          const object = new THREE.Group();
-          object.add(makeItemMesh(d.build, bombGltf));
-          placeOnCounter(object, { ...d, along });
-          object.rotation.y += (along * 2.3) % 1 - 0.5;
-          root.add(object);
-        }
-      }
-      // Item centres + a bigger invisible tap target round each small one
-      root.updateMatrixWorld(true);
-      const hitMat = new THREE.MeshBasicMaterial({ visible: false });
-      stall.items.forEach((entry, i) => {
-        const box = new THREE.Box3().setFromObject(entry.object);
-        const at = entry.object.getWorldPosition(new THREE.Vector3());
-        const c = box.isEmpty() ? at.clone() : box.getCenter(new THREE.Vector3());
-        entry.centerOffset = c.clone().sub(at);
-        makeClickable(entry.object, { stall: def.key, item: i });
-        if (!entry.def.chest) {
-          const size = box.isEmpty() ? 0.12 : box.getSize(new THREE.Vector3()).length() / 2;
-          const hit = new THREE.Mesh(new THREE.SphereGeometry(THREE.MathUtils.clamp(size, 0.1, 0.16), 10, 8), hitMat);
-          hit.position.copy(root.worldToLocal(c.clone()));
-          root.add(hit);
-          makeClickable(hit, { stall: def.key, item: i });
-        }
-      });
+      finishItems(stall);
       const chestEntry = stall.items.find((e) => e.def.chest);
       if (chestEntry) {
         const label = makeTextSprite('🎁 Mystery Chest', { height: 0.22 });
@@ -253,19 +266,33 @@ export function createTownStalls(ctx) {
         stall.labels.push(label);
         makeClickable(label, { stall: def.key, item: stall.items.indexOf(chestEntry) });
       }
-      if (focus === def.key) refreshCard();
     }).catch((e) => console.warn(`[Town] ${def.key} shop failed to load:`, e));
-
-    if (def.keeper) {
-      // (a shopkeeper, not one of the townsfolk: just stands there in the market's hours)
-      createGLBCharacterInstance({ targetHeight: 1.0, url: KEEPER_URL, armIK: false }).then(({ container, character }) => {
-        container.position.set(SHOP_SPOTS.keeper.x, 0, SHOP_SPOTS.keeper.z);
-        character.setMoving(false);
-        root.add(container);
-        stall.keeper = { container, character };
-        makeClickable(container, { stall: def.key, item: -1 });
-      }).catch((e) => console.warn('[Town] keeper failed to load:', e));
-    }
+    return stall;
+  };
+  // def: { key, label } — a market stall out in the open, where setOutdoor put it (the ground's
+  // height there: y)
+  const buildOutdoor = (group, def) => {
+    const at = outdoor[def.key];
+    const root = new THREE.Group();
+    root.position.set(at.x, at.y ?? 0, at.z);
+    root.rotation.y = at.yaw;
+    group.add(root);
+    const stall = { key: def.key, root, items: [], labels: [], outdoor: true };
+    stalls[def.key] = stall;
+    const sign = makeTextSprite(def.label, { height: 0.34 });
+    sign.position.set(0, 2.35, 0);
+    root.add(sign);
+    stall.labels.push(sign);
+    makeClickable(sign, { stall: def.key, item: -1 });
+    loadWizardStall().then(({ root: model, items }) => {
+      root.add(model);
+      makeClickable(model, { stall: def.key, item: -1 });
+      stall.items = STALL_ITEMS[def.key].map((d) => {
+        const object = items[d.id];
+        return { def: d, object, baseY: object.position.y, baseRotY: object.rotation.y, hopUntil: 0 };
+      });
+      finishItems(stall);
+    }).catch((e) => console.warn(`[Town] ${def.key} stall failed to load:`, e));
     return stall;
   };
 
@@ -373,6 +400,19 @@ export function createTownStalls(ctx) {
     const s = stalls[focus];
     const compact = (camera.aspect || 1) < 1 || COARSE_POINTER;
     const entry = current();
+    if (s.outdoor) {
+      // (a stall: from its front)
+      const yaw = s.root.rotation.y;
+      if (entry) {
+        const p = itemCenter(entry, new THREE.Vector3());
+        p.y += 0.05;
+        setView(p, _v2.set(Math.sin(yaw), 0.5, Math.cos(yaw)).clone(), compact ? 0.6 : 0.75, 0.45, compact ? 1.1 : 1.4, 2.4);
+      } else {
+        const target = _v2.copy(s.root.position).add(_v.set(Math.sin(yaw) * 0.25, 0.95, Math.cos(yaw) * 0.25)).clone();
+        setView(target, _v.set(Math.sin(yaw), 0.55, Math.cos(yaw)).clone(), compact ? 1.0 : 1.4, compact ? 0.55 : 0.75, 1.8, 4.5);
+      }
+      return;
+    }
     if (entry) {
       // (from the side of the counter the customers stand on — the chest from the middle of the room)
       const c = COUNTERS[entry.def.counter];
@@ -444,7 +484,6 @@ export function createTownStalls(ctx) {
     for (const s of Object.values(stalls)) {
       // (labels would fill the close-up)
       for (const label of s.labels) label.visible = focus !== s.key;
-      s.keeper?.character.animate(dt);
       s.items.forEach((entry, i) => {
         const o = entry.object;
         const sel = focus === s.key && i === selected;
@@ -558,6 +597,8 @@ export function createTownStalls(ctx) {
 
   return {
     build,
+    buildOutdoor,
+    setOutdoor,
     setActive,
     update,
     focus: focusStall,
@@ -567,7 +608,6 @@ export function createTownStalls(ctx) {
     buySelected,
     buyLabel,
     refresh: () => { if (focus) refreshCard(); },
-    setKeeperVisible: (key, visible) => { if (stalls[key]?.keeper) stalls[key].keeper.container.visible = visible; },
     get: (key) => stalls[key] ?? null,
     // While a counter is framed: where the shop camera is and what it looks at (else null)
     view: () => (focus && overriding ? { camera: camPos, stall: wantLook } : null),

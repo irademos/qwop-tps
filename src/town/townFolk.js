@@ -1,7 +1,7 @@
 // Town: the townsfolk themselves — making them, who runs them in a shared town (take / release),
 // paths and tasks, what to do next (decide), speech bubbles and their bodies (level of detail).
 
-import { FOLLOW_LINES, ROLES, firstName } from './townPeople.js';
+import { FOLLOW_LINES, ROLES, firstName, livesOut } from './townPeople.js';
 import { FOOD_IDS, GOOD_IDS } from './townEconomy.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 import { makeTextSprite } from '../village/villageMode.js';
@@ -17,10 +17,10 @@ export function installTownFolk(T, ctx) {
   const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : rand(4, 14), attitude = 0, carry = null, vendetta = false, following = false, mem = null }) => {
     const def = ROLES[role] ?? ROLES.townsfolk;
     const { homes } = T.layout.places;
-    // (bandits live at the camp: home index -1)
-    const homeIndex = def.outlaw ? -1
+    // (bandits live at the camp, the wizard in his tent by his stall: home index -1)
+    const homeIndex = livesOut(def) ? -1
       : Number.isInteger(home) && home >= 0 && home < homes.length ? home : Math.floor(Math.random() * homes.length);
-    const homeSpot = def.outlaw ? T.layout.places.camp : homes[homeIndex];
+    const homeSpot = def.outlaw ? T.layout.places.camp : def.hermit ? T.layout.places.wizard.hut : homes[homeIndex];
     return {
       id, name, role, url, def,
       homeIndex,
@@ -231,7 +231,7 @@ export function installTownFolk(T, ctx) {
       if (working) options.push(['work', 1]);
       else options.push(['sleep', 1]);
     } else {
-      if (working && (def.work === 'market' || n.work)) options.push(['work', 0.8 + Math.random() * 0.2]);
+      if (working && (def.work === 'market' || def.work === 'wizard' || n.work)) options.push(['work', 0.8 + Math.random() * 0.2]);
       // Something to eat in their own basket: a bite where they stand
       const ownFood = FOOD_IDS.find((g) => n.carry[g] > 0);
       if (n.needs.hunger > 0.6 && ownFood) {
@@ -249,8 +249,8 @@ export function installTownFolk(T, ctx) {
       const sleepy = def.nightOwl ? (h >= 3 && h < 11) : night;
       options.push(['sleep', sleepy ? 1.25 : n.needs.energy < 0.18 ? 0.9 : 0]);
       options.push(['wander', 0.22]);
-      // (a look round the weapon shop)
-      if (T.gearOpen() && !night && Math.random() < SHOP_BROWSE_CHANCE) options.push(['browse', 0.3]);
+      // (a look round the shop's gear)
+      if (T.marketOpen() && !night && Math.random() < SHOP_BROWSE_CHANCE) options.push(['browse', 0.3]);
     }
     let bestType = 'wander';
     let bestScore = -Infinity;
@@ -265,6 +265,7 @@ export function installTownFolk(T, ctx) {
     if (type === 'work') {
       const w = n.def.work;
       if (w === 'market') setTask(n, { type, to: P.merchantSpot, dur: rand(60, 120), face: P.customerSpot });
+      else if (w === 'wizard') setTask(n, { type, to: P.wizard.keeper, dur: rand(60, 120), face: P.wizard.customer });
       else if (w === 'patrol') {
         n.patrolI = (n.patrolI + 1) % P.patrol.length;
         setTask(n, { type, to: P.patrol[n.patrolI], dur: rand(2, 6) });
@@ -279,8 +280,8 @@ export function installTownFolk(T, ctx) {
     } else if (type === 'eat') {
       setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.2), dur: 4, face: P.merchantSpot });
     } else if (type === 'browse') {
-      // (somewhere in the weapon shop, looking at the counters)
-      const c = T.stalls.spot('gear', 'counter');
+      // (somewhere in the shop, looking at the side counters)
+      const c = T.stalls.spot('shop', 'counter');
       const to = randomNear(c.x, c.z + 1.6, 1.8);
       setTask(n, { type, to, dur: rand(6, 14), face: { x: to.x + (to.x < c.x ? -3 : 3), z: to.z } });
     } else if (type === 'social') {

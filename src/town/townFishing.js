@@ -1,4 +1,4 @@
-// Town: fishing. The rod is bought at the weapon shop (SHOP_GEAR 'rod') and held like the
+// Town: fishing. The rod is bought at the shop (SHOP_GEAR 'rod') and held like the
 // sword — it is the sword weapon in rod form, swung with the phone's gyro (bootstrapGameApp.js).
 // At the fishing spot (one for now — the shore spot nearest the middle, `places.fishSpot`):
 //   • cast: swing the rod forward — the harder, the farther the bobber flies (FISH_CAST_*)

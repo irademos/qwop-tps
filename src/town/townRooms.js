@@ -1,7 +1,8 @@
-// Town mode: the rooms the town's houses open into — two shops (shop.glb: walls on three sides,
-// three counters; a front wall with the doorway and a ceiling added here) and every other house
-// with a known door a home (home_interior.glb: the same room with its own front wall, ceiling,
-// windows and a bed). Walking in through a house's door puts you in its room; each room sits far
+// Town mode: the rooms the town's houses open into — the shop (shop.glb: walls on three sides,
+// three counters; a front wall with the doorway and a ceiling added here), the jail
+// (home_interior.glb with a cell of iron bars round the bed and the sheriff's desk) and every
+// other house with a known door a home (home_interior.glb: the same room with its own front
+// wall, ceiling, windows and a bed). Walking in through a house's door puts you in its room; each room sits far
 // off the island under the seabed (ROOMS_ORIGIN, a grid ROOM_SPACING apart), out of sight, and
 // only the room the player's in is drawn.
 //
@@ -35,6 +36,15 @@ const BED = { x0: -2.80, x1: -0.49, z0: -3.81, z1: -1.97, top: 0.55 };
 // player's bag / wallet stays in there (townHomes.js); CHEST_FRONT = where to stand to open it
 const CHEST = { x0: 1.85, x1: 2.85, z0: -4.4, z1: -3.7, top: 0.62 };
 const CHEST_FRONT = { x: 2.35, z: -3.15 };
+// The jail: a cell round the bed (bars along its front at z1 and its side at x1 — a block for
+// everyone outside it; the door in the front bars, hinged at CELL_DOOR.x0), where the prisoner
+// is kept (CELL_FREE), and the sheriff's desk (OFFICE: where the sheriff stands behind it)
+const CELL = { x0: -3.6, x1: 0.4, z0: -5.0, z1: -0.6 };
+const CELL_DOOR = { x0: -1.5, x1: -0.6 };
+const CELL_FREE = { x0: -2.8, x1: 0.1, z0: -1.75, z1: -0.9 };
+const CELL_SPOT = { x: -1.3, z: -1.3 };
+const DESK = { x0: 1.2, x1: 2.2, z0: -2.6, z1: -1.6, top: 0.74 };
+const OFFICE = { x: 2.65, z: -2.1 };
 export const ROOM_TYPES = {
   shop: {
     load: loadShopInterior,
@@ -65,6 +75,7 @@ export const ROOM_TYPES = {
     windows: /^Plane\.?\d+$/,
   },
 };
+ROOM_TYPES.jail = { ...ROOM_TYPES.home, blocks: [CELL, DESK], chest: null, cell: CELL, desk: DESK };
 // Where a townsperson stands by the bed before turning in, and the sleepers' places on it
 // (feet at x, lying head toward −x; past three, on the floor beside it)
 const BEDSIDE = { x: -1.2, z: -1.2 };
@@ -132,6 +143,54 @@ const makeChest = (c) => {
   g.position.set((c.x0 + c.x1) / 2, 0, (c.z0 + c.z1) / 2);
   return g;
 };
+// The jail's cell: iron bars along its front / side (the door a group of its own — swung open
+// by townMode.js) and the sheriff's desk
+const makeCell = (c) => {
+  const g = new THREE.Group();
+  const iron = new THREE.MeshStandardMaterial({ color: 0x2f2f35, roughness: 0.6, metalness: 0.3 });
+  const barGeo = new THREE.CylinderGeometry(0.025, 0.025, 2.2, 6).translate(0, 1.1, 0);
+  const railGeo = new THREE.BoxGeometry(1, 0.06, 0.06);
+  const bars = (parent, x0, z0, x1, z1, n) => {
+    for (let k = 0; k <= n; k++) {
+      const bar = new THREE.Mesh(barGeo, iron);
+      bar.position.set(x0 + (x1 - x0) * (k / n), 0, z0 + (z1 - z0) * (k / n));
+      bar.castShadow = true;
+      parent.add(bar);
+    }
+    for (const y of [0.08, 2.15]) {
+      const rail = new THREE.Mesh(railGeo, iron);
+      rail.scale.x = Math.hypot(x1 - x0, z1 - z0);
+      rail.position.set((x0 + x1) / 2, y, (z0 + z1) / 2);
+      rail.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
+      parent.add(rail);
+    }
+  };
+  const wallX = -3.175;
+  const wallZ = -4.613;
+  bars(g, wallX, c.z1, CELL_DOOR.x0, c.z1, 9);
+  bars(g, CELL_DOOR.x1, c.z1, c.x1, c.z1, 5);
+  bars(g, c.x1, c.z1, c.x1, wallZ, 20);
+  const door = new THREE.Group();
+  door.position.set(CELL_DOOR.x0, 0, c.z1);
+  bars(door, 0, 0, CELL_DOOR.x1 - CELL_DOOR.x0, 0, 5);
+  g.add(door);
+  return { group: g, door };
+};
+const makeDesk = (d) => {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x5e3d22, roughness: 1, metalness: 0 });
+  const top = new THREE.Mesh(new THREE.BoxGeometry(d.x1 - d.x0, 0.06, d.z1 - d.z0), wood);
+  top.position.y = d.top - 0.03;
+  g.add(top);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.07, d.top - 0.06, 0.07), wood);
+    leg.position.set(sx * ((d.x1 - d.x0) / 2 - 0.06), (d.top - 0.06) / 2, sz * ((d.z1 - d.z0) / 2 - 0.06));
+    g.add(leg);
+  }
+  g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  g.position.set((d.x0 + d.x1) / 2, 0, (d.z0 + d.z1) / 2);
+  return g;
+};
 const DOOR_EXIT_IN = 0.5;            // m from the front wall: walking this far into the doorway = out
 
 // Front wall (the doorway in it) + ceiling: boxes with the walls' material, its UVs stretched
@@ -144,9 +203,9 @@ const wallBox = (w, h, d, material) => {
   return new THREE.Mesh(geo, material);
 };
 
-// Room keys: the shops, then a home per house ('home<i>' = places.homes[i]) — each its own
-// place in the grid
-const roomIndex = (key) => (key === 'goods' ? 0 : key === 'gear' ? 1 : /^home\d+$/.test(key) ? 2 + Number(key.slice(4)) : -1);
+// Room keys: the shop, the jail, then a home per house ('home<i>' = places.homes[i]) — each its
+// own place in the grid
+const roomIndex = (key) => (key === 'shop' ? 0 : key === 'jail' ? 1 : /^home\d+$/.test(key) ? 2 + Number(key.slice(4)) : -1);
 const originOf = (index) => ({
   x: ROOMS_ORIGIN.x - (index % ROOM_COLUMNS) * ROOM_SPACING,
   y: ROOMS_ORIGIN.y,
@@ -165,15 +224,15 @@ export function createTownRooms(ctx) {
   let insideKey = null;
   let unregisterHeight = null;
 
-  // A room for that key (the shops are there from the start; townLayout adds the homes)
+  // A room for that key (the shop and the jail are there from the start; townLayout adds the homes)
   const add = (key, typeName) => {
     const index = roomIndex(key);
     if (index < 0) throw new Error(`[Town] bad room key ${key}`);
     rooms[index] ??= { key, type: ROOM_TYPES[typeName], typeName, origin: originOf(index), root: null, light: null, doorway: null, windows: [] };
     return rooms[index];
   };
-  add('goods', 'shop');
-  add('gear', 'shop');
+  add('shop', 'shop');
+  add('jail', 'jail');
   const get = (key) => rooms[roomIndex(key)] ?? null;
 
   // ── Where the rooms are (world) ──
@@ -240,6 +299,23 @@ export function createTownRooms(ctx) {
   };
   // In front of a home's chest (world), or null (a shop)
   const chestSpot = (key) => (get(key)?.type.chest ? toWorld(key, CHEST_FRONT) : null);
+  // The jail (world): the prisoner's spot in the cell, behind the sheriff's desk
+  const jailSpots = () => ({ cell: toWorld('jail', CELL_SPOT), office: toWorld('jail', OFFICE) });
+  // The positionConstraint while the player's locked in the cell
+  const constrainToCell = (controls) => {
+    const l = toLocal('jail', controls.playerX, controls.playerZ);
+    if (Math.hypot(l.x, l.z) > 30) return;
+    const w = toWorld('jail', {
+      x: THREE.MathUtils.clamp(l.x, CELL_FREE.x0, CELL_FREE.x1),
+      z: THREE.MathUtils.clamp(l.z, CELL_FREE.z0, CELL_FREE.z1),
+    });
+    controls.playerX = w.x;
+    controls.playerZ = w.z;
+  };
+  // Just out of the cell's door (world): where a prisoner set free stands
+  const outsideCell = () => toWorld('jail', { x: (CELL_DOOR.x0 + CELL_DOOR.x1) / 2, z: CELL.z1 + 0.7 });
+  // The cell door's group (swung open / shut — townMode.js), once the jail's built
+  const cellDoor = () => get('jail')?.cellDoor ?? null;
   // The player controls' positionConstraint while inside: on the floor, off the counters / bed
   // (the room they're in — setInside: a long frame's step may land past its walls; a teleport
   // far away — knocked out, the game's own — isn't pulled back)
@@ -295,6 +371,12 @@ export function createTownRooms(ctx) {
     room.doorway = doorway;
 
     if (type.chest) root.add(makeChest(type.chest));
+    if (type.cell) {
+      const cell = makeCell(type.cell);
+      root.add(cell.group);
+      room.cellDoor = cell.door;
+    }
+    if (type.desk) root.add(makeDesk(type.desk));
 
     type.load().then((model) => {
       const shell = new THREE.Group();
@@ -405,6 +487,7 @@ export function createTownRooms(ctx) {
   return {
     add, build, get, toWorld, toLocal,
     roomAt, kindAt, isFree, doorInside, roomPath, spotNear, bedside, somewhereIn, sleepPose, chestSpot,
+    jailSpots, constrainToCell, outsideCell, cellDoor,
     constrainPlayer, leftThroughDoor, clampCamera,
     setInside, setNight, setActive,
     inside: () => insideKey,
