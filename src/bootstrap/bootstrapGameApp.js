@@ -137,6 +137,10 @@ const MAGIC_WAND_ITEM_ID = 'magic_wand';
 // Town's fishing rod (bought at the shop): the sword weapon in rod form, like the wand
 const FISHING_ROD_ITEM_ID = 'fishing_rod';
 const OAR_ITEM_ID = 'canoe_oar';
+// Town's canoe oar: the phone's tilt away from upright is multiplied by this for the oar, so a
+// small lean of the phone swings it well out (capped at OAR_GYRO_MAX_TILT from straight down)
+const OAR_GYRO_GAIN = 2.5;
+const OAR_GYRO_MAX_TILT = 160 * Math.PI / 180;
 const MAX_MANA = 100;
 const WAND_MANA_COST = 10;               // per blast; mana potions refill it
 const WAND_SWIPE_START_SPEED = 405;      // deg/s: a swipe starts…
@@ -2811,6 +2815,20 @@ async function initCore(runtimeContext) {
   let _oarActive = false;
   const isOarAllowed = () => !!town?.inCanoe?.();
   const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
+  // (in place) The oar's hold, its tilt from upright (player-local +Y) amplified — OAR_GYRO_GAIN
+  const _oarUp = new THREE.Vector3(0, 1, 0);
+  const _oarDir = new THREE.Vector3();
+  const _oarAxis = new THREE.Vector3();
+  const _oarExtra = new THREE.Quaternion();
+  const _amplifyOarHold = (q) => {
+    _oarDir.set(0, 0, 1).applyQuaternion(q);
+    const tilt = _oarUp.angleTo(_oarDir);
+    _oarAxis.crossVectors(_oarUp, _oarDir);
+    if (tilt < 1e-4 || _oarAxis.lengthSq() < 1e-10) return q;
+    const extra = Math.min(tilt * OAR_GYRO_GAIN, OAR_GYRO_MAX_TILT) - tilt;
+    if (extra <= 0) return q;
+    return q.premultiply(_oarExtra.setFromAxisAngle(_oarAxis.normalize(), extra));
+  };
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
   const _wandSwipe = {
     active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3(),
@@ -9159,6 +9177,7 @@ async function initCore(runtimeContext) {
 
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
+          if (_oarActive) _amplifyOarHold(foamSword._holdQuaternion);
         }
         // Unarmed (village): the gyro moves the player's right arm (updateProceduralPlayerRig)
         const _pmUD = playerControls?.playerModel?.userData;
@@ -9183,7 +9202,8 @@ async function initCore(runtimeContext) {
       // Re-derive active Q — use bounceCurrentQ if bouncing, else live gyro
       const _nowSecPS = performance.now() / 1000;
       const _activeQ = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
-      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
+      if (_oarActive) foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(foamSword._holdQuaternion);
+      else foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
 
       // ── Hide any leftover trail lines from the old swing system ─────────────
       for (const l of _psw.trailLines) l.visible = false;
