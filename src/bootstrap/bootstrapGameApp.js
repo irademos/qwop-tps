@@ -138,9 +138,18 @@ const MAGIC_WAND_ITEM_ID = 'magic_wand';
 const FISHING_ROD_ITEM_ID = 'fishing_rod';
 const OAR_ITEM_ID = 'canoe_oar';
 // Town's canoe oar: the phone's tilt away from upright is multiplied by this for the oar, so a
-// small lean of the phone swings it well out (capped at OAR_GYRO_MAX_TILT from straight down)
-const OAR_GYRO_GAIN = 2.5;
+// small lean of the phone swings it well out (capped at OAR_GYRO_MAX_TILT from straight down)…
+const OAR_GYRO_GAIN = 1.8;
 const OAR_GYRO_MAX_TILT = 160 * Math.PI / 180;
+// …then pulled toward one of two settled tilts — the blade in the water beside the hull
+// (OAR_IN_TILT) or lifted clear of it (OAR_OUT_TILT), flipping quickly around OAR_SNAP_TILT —
+// by OAR_GUIDE, faded in over the first few degrees from upright (no twitching when held still)
+const DEG_RAD = Math.PI / 180;
+const OAR_IN_TILT = 32 * DEG_RAD;
+const OAR_OUT_TILT = 75 * DEG_RAD;
+const OAR_SNAP_TILT = 52 * DEG_RAD;
+const OAR_SNAP_WIDTH = 5 * DEG_RAD;
+const OAR_GUIDE = 0.65;
 const MAX_MANA = 100;
 const WAND_MANA_COST = 10;               // per blast; mana potions refill it
 const WAND_SWIPE_START_SPEED = 405;      // deg/s: a swipe starts…
@@ -2815,7 +2824,8 @@ async function initCore(runtimeContext) {
   let _oarActive = false;
   const isOarAllowed = () => !!town?.inCanoe?.();
   const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
-  // (in place) The oar's hold, its tilt from upright (player-local +Y) amplified — OAR_GYRO_GAIN
+  // (in place) The oar's hold, its tilt from upright (player-local +Y) amplified — OAR_GYRO_GAIN —
+  // and guided into the water / out of it (OAR_IN_TILT / OAR_OUT_TILT)
   const _oarUp = new THREE.Vector3(0, 1, 0);
   const _oarDir = new THREE.Vector3();
   const _oarAxis = new THREE.Vector3();
@@ -2825,8 +2835,11 @@ async function initCore(runtimeContext) {
     const tilt = _oarUp.angleTo(_oarDir);
     _oarAxis.crossVectors(_oarUp, _oarDir);
     if (tilt < 1e-4 || _oarAxis.lengthSq() < 1e-10) return q;
-    const extra = Math.min(tilt * OAR_GYRO_GAIN, OAR_GYRO_MAX_TILT) - tilt;
-    if (extra <= 0) return q;
+    const amp = Math.min(tilt * OAR_GYRO_GAIN, OAR_GYRO_MAX_TILT);
+    const settled = OAR_IN_TILT + (OAR_OUT_TILT - OAR_IN_TILT) / (1 + Math.exp(-(amp - OAR_SNAP_TILT) / OAR_SNAP_WIDTH));
+    const guide = OAR_GUIDE * THREE.MathUtils.smoothstep(amp, 3 * DEG_RAD, 14 * DEG_RAD);
+    const extra = amp + (settled - amp) * guide - tilt;
+    if (Math.abs(extra) < 1e-5) return q;
     return q.premultiply(_oarExtra.setFromAxisAngle(_oarAxis.normalize(), extra));
   };
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)

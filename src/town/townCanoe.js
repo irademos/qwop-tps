@@ -8,7 +8,8 @@
 // Paddling is the oar's blade moving through the water: each frame its blade (`oar-blade`,
 // oar.js) is sampled in the world; while it is under the water and out past the hull, its
 // stroke along the hull — its speed past the canoe (a blade held still in it does nothing) —
-// pushes the canoe the other way (CANOE_PADDLE_PUSH × that speed; a stroke forward backs it up,
+// pushes the canoe the other way (CANOE_PADDLE_PUSH × that speed, more for a quicker stroke —
+// CANOE_STROKE_SPEED; a stroke forward backs it up,
 // CANOE_PADDLE_BACK as hard) at the blade, so off to the side it turns the canoe too
 // (CANOE_PADDLE_TURN of the moment): a stroke back on the left drives it forward and a little to
 // the right, on the right forward and a little to the left. The hull slides along easily and
@@ -26,7 +27,7 @@ import { createCanoe, CANOE_FLOOR_Y, CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from 
 import {
   CANOE_BLADE_DEPTH, CANOE_BLADE_MAX_SPEED, CANOE_BOARD_DIST, CANOE_BOB, CANOE_DRAG, CANOE_MAX_SPEED,
   CANOE_MIN_DEPTH, CANOE_PADDLE_BACK, CANOE_PADDLE_PUSH, CANOE_PADDLE_TURN, CANOE_SHORE_DIST, CANOE_SIDE_DRAG, CANOE_STAND_Z,
-  CANOE_STEER_ACCEL, CANOE_STEER_TURN, CANOE_TURN_DRAG, dist2,
+  CANOE_STEER_ACCEL, CANOE_STEER_TURN, CANOE_STROKE_SPEED, CANOE_TURN_DRAG, dist2,
 } from './townConfig.js';
 
 // Where the hull's water depth is checked (canoe-local m: across, along)
@@ -195,7 +196,7 @@ export function installTownCanoe(T, ctx) {
           // (past the canoe: its own way through the water taken off)
           let bvx = (_b.x - prev.x) / span - c.vx;
           let bvz = (_b.z - prev.z) / span - c.vz;
-          // (a quick flick of the phone still counts, at most this fast)
+          // (a jump in the oar's pose isn't a stroke: capped at this)
           const bs = Math.hypot(bvx, bvz);
           if (bs > CANOE_BLADE_MAX_SPEED) { bvx *= CANOE_BLADE_MAX_SPEED / bs; bvz *= CANOE_BLADE_MAX_SPEED / bs; }
           const bite = THREE.MathUtils.clamp((waterY(_b.x, _b.z) - _b.y) / CANOE_BLADE_DEPTH + 0.25, 0, 1);
@@ -204,17 +205,21 @@ export function installTownCanoe(T, ctx) {
           // The stroke along the hull: back drives it on, forward backs it up (weaker)
           const fwdX = Math.sin(c.yaw);
           const fwdZ = Math.cos(c.yaw);
-          let push = -(bvx * fwdX + bvz * fwdZ) * CANOE_PADDLE_PUSH * bite;
+          // (a quicker stroke bites harder: the push grows with its speed — CANOE_STROKE_SPEED)
+          const stroke = bvx * fwdX + bvz * fwdZ;
+          let push = -stroke * (1 + Math.abs(stroke) / CANOE_STROKE_SPEED) * CANOE_PADDLE_PUSH * bite;
           if (push < 0) push *= CANOE_PADDLE_BACK;
           if (outside && push !== 0) {
             const fx = fwdX * push;
             const fz = fwdZ * push;
             c.vx += fx * dt;
             c.vz += fz * dt;
-            // (pushed off its middle: it turns — the moment about the vertical)
+            // (pushed off its middle: it turns — the moment about the vertical; from the plain
+            // stroke, without the quick stroke's extra bite, so fast paddling doesn't spin it)
             const rx = _b.x - c.x;
             const rz = _b.z - c.z;
-            c.w += (rz * fx - rx * fz) * CANOE_PADDLE_TURN * dt;
+            const plain = 1 / (1 + Math.abs(stroke) / CANOE_STROKE_SPEED);
+            c.w += (rz * fx - rx * fz) * plain * CANOE_PADDLE_TURN * dt;
           }
         }
       } else {
