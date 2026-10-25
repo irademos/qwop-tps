@@ -150,7 +150,7 @@ export function installTownTrade(T, ctx) {
     if (!access.open && !forced) { T.lockedNote(key, access); return; }
     T.fishing = null;
     T.stopFishingRig?.();
-    T.dropHose?.({ quiet: true });
+    T.dropHeld?.({ quiet: true });
     ctx.putWeaponsAway?.();
     const d = rooms.doorInside(key);
     // (turned the way the player faced the door: in the room, π faces in — the back wall;

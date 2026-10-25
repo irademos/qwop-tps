@@ -77,7 +77,7 @@
 //   memberKey() (the player's key in a shared town — their house)
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
 //   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n),
-//   refreshButtons() (the hose picked up / put down: the Block bar is / stops being 💧 Water)
+//   refreshButtons() (something grabbed / dropped: the Block bar is / stops being its mode — the hose's 💧 Water)
 //   net (townNet.js, or null): start(), stop(), isOn(), ready(), isHost(), id(), hostId(),
 //   peerIds(), send(to, data), broadcast(data), loadRoomState(), saveRoomState(state),
 //   roomId(), canSave(), playerCount(), sendBounty(to, coins)
@@ -111,6 +111,7 @@ import { installTownMemory, moodOf } from './townMemory.js';
 import { installTownIntro } from './townIntro.js';
 import { installTownHomes } from './townHomes.js';
 import { installTownLights } from './townLights.js';
+import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
@@ -799,6 +800,7 @@ export function createTownMode(ctx) {
   installTownIntro(T, ctx);
   installTownHomes(T, ctx);
   installTownLights(T, ctx);
+  installTownGrab(T, ctx);
   installTownFarming(T, ctx);
 
   // ── Settings → Town (settingsPanel.js): everyone in town, their coins and a few stats ──
@@ -892,10 +894,12 @@ export function createTownMode(ctx) {
       ctx.showBanner('BOUNTY!', `${name} is off to jail · 🪙 +${coins}`, 2600);
     },
     isActive: () => T.active,
-    // Farming: the hose in hand (the Block bar is 💧 Water — held: setWatering(true / false))
-    hoseHeld: () => !!(T.active && T.ready && T.hose),
-    setWatering: (on) => { if (T.active) T.setWatering(on); },
-    dropHose: () => { if (T.active) T.dropHose(); },
+    // Something grabbed in hand (townGrab.js): its Block bar mode ('water' — the hose; null: none),
+    // the bar held down / let go, dropping it (the phone's 🗡/✋ button)
+    holding: () => !!(T.active && T.ready && T.held),
+    heldBar: () => (T.active && T.ready ? T.heldBar() : null),
+    useHeld: (on) => { if (T.active) T.useHeld(on); },
+    dropHeld: () => { if (T.active) T.dropHeld(); },
     // Night, out of town: the player carries a lantern in their left hand
     wantsLantern: () => !!(T.active && T.ready && T.lantern),
     // The phone's Block bar label while there's something to do (undefined: it stays Block)

@@ -516,7 +516,7 @@ Rod</button>
         // (Shield again goes back to the sword)
         else if (pressMode === 'sword') sendAction('shield');
         else if (pressMode === 'shield') sendAction('wandShieldDown');
-        else if (pressMode === 'water') sendAction('waterDown');
+        else if (pressMode === 'water') sendAction('heldDown');
       }
     };
     const releaseBar = () => {
@@ -525,7 +525,7 @@ Rod</button>
       setBlocking(false);
       blockBtn.classList.remove('pressed');
       if (mode === 'shield') sendAction('wandShieldUp');
-      if (mode === 'water') sendAction('waterUp');
+      if (mode === 'water') sendAction('heldUp');
     };
     blockBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -723,15 +723,15 @@ Rod</button>
       // Town: 🗡 Sword out / ✋ Hands (nothing in hand)
       btnSword.classList.toggle('shown', !!st.canUnequip);
       const unarmed = st.equipped === 'none';
-      // (Town, the hose in hand: it puts the hose down)
-      btnSword.textContent = st.waterMode ? '🚿\nPut down' : unarmed ? '🗡️\nSword' : '✋\nHands';
-      btnSword.disabled = unarmed && st.hasSword === false && !st.waterMode;
+      // (Town, something grabbed — the hose: it drops it)
+      btnSword.textContent = st.holding ? '✋\nDrop' : unarmed ? '🗡️\nSword' : '✋\nHands';
+      btnSword.disabled = unarmed && st.hasSword === false && !st.holding;
       layoutRowButtons();
       // The bar: Interact (village / talk / calibration popup), Fire (gun), Sword (shield),
       // Shield (wand, when a shield is owned), else Block
       interactLabel = st.interactMode ? (st.interact || null) : null;
       // (nothing in hand: the bar is only for interacting)
-      const nextMode = st.waterMode ? 'water'
+      const nextMode = st.heldBar === 'water' ? 'water'
         : st.interactMode || st.equipped === 'none' ? 'interact'
         : st.blockOnly ? 'block'
         : st.equipped === 'pistol' ? 'fire'

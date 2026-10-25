@@ -6189,8 +6189,8 @@ async function initCore(runtimeContext) {
   };
   const _handlePhoneAction = (action) => {
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
-    if (action === 'waterUp') { town?.setWatering(false); return; }
-    if (action === 'waterDown') { if (!_gamePaused) town?.setWatering(true); return; }
+    if (action === 'heldUp') { town?.useHeld(false); return; } // (always let go)
+    if (action === 'heldDown') { if (!_gamePaused) town?.useHeld(true); return; }
     if (action === 'recalibrate') { window.phoneSwordRecalibrate?.(); return; } // phone's ⟲ button (any mode)
     if (action === 'interact') {
       // The Block bar as an interact button: the calibration popup's Okay, a boss's talk, the village
@@ -6228,9 +6228,9 @@ async function initCore(runtimeContext) {
       else equipInventoryItem(FISHING_ROD_ITEM_ID);
       playerControls?.refreshActionButtons?.();
     } else if (action === 'sword') {
-      // Town: 🗡 Sword out ↔ ✋ Hands (nothing in hand); the hose in hand: put it down
+      // Town: 🗡 Sword out ↔ ✋ Hands (nothing in hand); something grabbed: drop it
       if (!_townLoadout) return;
-      if (town?.hoseHeld()) { town.dropHose(); return; }
+      if (town?.holding()) { town.dropHeld(); return; }
       if (_heldWeaponId()) _putWeaponsAway();
       else equipInventoryItem(FOAM_SWORD_ITEM_ID);
       playerControls?.refreshActionButtons?.();
@@ -6254,8 +6254,8 @@ async function initCore(runtimeContext) {
     // Town fishing, the line out: the bar is a reel (cranked round on the phone's screen)
     const fishing = town?.isActive() ? town.fishingHud() : null;
     if (fishing?.reel) return { ...status, reelMode: true, fishCue: fishing.cue, fishText: fishing.text };
-    // Town farming, the hose in hand: the bar is 💧 Water (held)
-    if (town?.isActive() && town.hoseHeld()) return { ...status, waterMode: true };
+    // Town, something grabbed (the hose): the bar is its mode (💧 Water — held), 🗡/✋ drops it
+    if (town?.isActive() && town.holding()) return { ...status, holding: true, heldBar: town.heldBar() };
     const interact = _phoneInteract();
     return interact === undefined ? status : { ...status, interactMode: true, interact };
   };
@@ -6883,9 +6883,10 @@ async function initCore(runtimeContext) {
     // Town's fishing rod (bought at the shop): equipped like the sword / wand
     isRodAllowed: () => isRodAllowed(),
     isRodEquipped: () => isRodEquipped(),
-    // Town farming: the hose in hand — the Block bar is 💧 Water (held: setWatering(true), let go: false)
-    isHoseHeld: () => !!town?.isActive() && town.hoseHeld(),
-    setWatering: (on) => town?.setWatering(on),
+    // Town: something grabbed — the Block bar is its mode (the hose's 'water'; null: none), held
+    // down: useTownHeld(true), let go: false
+    getTownHeldBar: () => (town?.isActive() ? town.heldBar() : null),
+    useTownHeld: (on) => town?.useHeld(on),
     setWandShieldHold: (down) => setWandShieldHold(down),
     isWandShieldHeld: () => _wandShieldHold,
     getMana: () => getMana(),
@@ -8673,7 +8674,7 @@ async function initCore(runtimeContext) {
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
     // A phone controller (it shows its own reel) — not "Use This Device", which needs the on-screen one
     isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
-    // The hose picked up / put down: the Block bar (here and on the phone) becomes / stops being 💧 Water
+    // Something grabbed / dropped: the Block bar (here and on the phone) becomes / stops being its mode
     refreshButtons: () => { _refreshGearUI(); _phoneSwordStatusNow?.(); },
     // Phone buzz on a fishing cue (status → the phone vibrates when its fishCue changes)
     refreshPhone: () => _phoneSwordStatusNow?.(),

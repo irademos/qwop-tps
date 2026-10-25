@@ -175,9 +175,9 @@ export function installTownActs(T, ctx) {
       out.push(...T.cookActs());
       return out;
     }
-    // The hose in hand (townFarming.js): water / put it back, and the farming buttons
-    if (T.hose) {
-      out.push(...T.hoseActs(), ...T.farmActs());
+    // Something in hand (townGrab.js — the hose): ✋ Drop it, and the farming buttons
+    if (T.held) {
+      out.push(...T.grabActs(), ...T.farmActs());
       return out.slice(0, 3);
     }
     const calm = T.calmNow();
@@ -224,7 +224,7 @@ export function installTownActs(T, ctx) {
     if (calm) out.push(...T.introActs());
     if (calm) {
       out.push(...T.cookActs());
-      out.push(...T.hoseActs());
+      out.push(...T.grabActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
       out.push(...T.fishingActs(true));
     }

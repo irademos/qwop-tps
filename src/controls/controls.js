@@ -628,7 +628,7 @@ export class PlayerControls {
       pressMode = this.getBlockBarMode();
       if (pressMode === 'water') {
         // (Town: the hose in hand — water while held)
-        if (this.enabled) getAppState()?.setWatering?.(true);
+        if (this.enabled) getAppState()?.useTownHeld?.(true);
         this.punchButton.classList.add('ps-blocking-active');
       } else if (pressMode === 'block') {
         setBlocking(true);
@@ -645,7 +645,7 @@ export class PlayerControls {
       pressMode = null;
       if (mode === 'water') {
         this.punchButton.classList.remove('ps-blocking-active');
-        getAppState()?.setWatering?.(false);
+        getAppState()?.useTownHeld?.(false);
       } else if (mode === 'block') {
         setBlocking(false);
       } else if (mode === 'shield') {
@@ -692,10 +692,11 @@ export class PlayerControls {
 
   // What the Block bar does for the weapon in hand: 'block' (sword; the wand with no shield),
   // 'fire' (gun), 'sword' (shield: back to the sword), 'shield' (wand: shield up while held),
-  // 'water' (Town: the hose in hand — water while held)
+  // 'water' (Town: the hose grabbed — water while held; townGrab.js `bar`)
   getBlockBarMode() {
     const appState = appContext.uiState.appState ?? window.appState;
-    if (appState?.isHoseHeld?.()) return 'water';
+    const heldBar = appState?.getTownHeldBar?.();
+    if (heldBar) return heldBar;
     const itemId = this.getEquippedItemId();
     if (itemId === 'pistol') return 'fire';
     if (itemId === 'shield') return appState?.isWandShieldHeld?.() ? 'shield' : 'sword';

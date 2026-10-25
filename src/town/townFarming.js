@@ -3,8 +3,9 @@
 // player's to pick from then on (no theft), and the farmer stops working it. Seeds come from the
 // shop (SHOP_GEAR 'seeds' → T.seeds) and are planted anywhere (🌱 Plant a seed — a little dirt
 // pile in front of the player); each grows one veg in a town day (VEG_DRY_S), or in VEG_WET_S
-// while its soil is wet, then 🥕 Pick your veg. The water: the hose at the tap (🚿 Grab the hose —
-// empty hands, the player can't walk further than HOSE_LENGTH from the tap meanwhile) is held in
+// while its soil is wet, then 🥕 Pick your veg. The water: the hose at the tap (a grabbable —
+// townGrab.js: ✋ Grab the hose with empty hands / ✋ Drop it; the player can't walk further than
+// HOSE_LENGTH from the tap meanwhile) is held in
 // the right hand and aimed with the gyro like the sword (no gyro: where the player faces);
 // 💧 Water — the Block bar's place on the game's screen and the phone (bootstrapGameApp.js:
 // isHoseHeld / setWatering) — or holding F sprays it, and the dirt piles the water lands on soak
@@ -247,48 +248,42 @@ export function installTownFarming(T, ctx) {
     controls.playerX = A.x + (dx / d) * HOSE_LENGTH;
     controls.playerZ = A.z + (dz / d) * HOSE_LENGTH;
   };
-  const nearTap = () => {
+  // The hose is a grabbable (townGrab.js — ✋ Grab the hose near its tap with empty hands, ✋ Drop
+  // it; while held the Block bar is 💧 Water)
+  const tapDistance = () => {
     const A = tapSpot();
-    if (!A || T.inRoom) return false;
+    if (!A || !farm) return Infinity;
     const p = T.playerPos();
-    return dist2(p.x, p.z, A.x, A.z) < HOSE_GRAB_DIST;
+    return dist2(p.x, p.z, A.x, A.z);
   };
-  const grabHose = () => {
-    if (T.hose || !farm || ctx.isPlayerDead() || T.sequence || T.jail) return;
-    T.fishing = null;
-    T.stopFishingRig?.();
-    ctx.putWeaponsAway?.();
-    T.hose = { watering: false, dropAt: 0 };
-    ctx.setPositionConstraint(hoseConstraint);
-    T.feedLine(ctx.hasGyro()
-      ? '🚿 Got the hose. Point it with the phone and hold 💧 Water.'
-      : '🚿 Got the hose. Face the beds and hold 💧 Water (or F).');
-    ctx.refreshButtons?.();
-    T.actsAt = 0;
-  };
-  // (keepConstraint: something else has set the player's constraint since — a room, the jail)
-  const dropHose = ({ keepConstraint = false, quiet = false } = {}) => {
-    if (!T.hose) return;
-    T.hose = null;
-    keyDown = false;
-    if (!keepConstraint) ctx.setPositionConstraint(null);
-    if (farm) {
-      farm.hose.visible = false;
-      farm.nozzle.visible = false;
-    }
-    if (!quiet) T.feedLine('🚿 The hose winds back onto its reel.');
-    ctx.refreshButtons?.();
-    T.actsAt = 0;
-  };
-  const hoseActs = () => {
-    if (T.hose) {
-      // (a tap turns the water on / off — the Block bar's 💧 Water and F are held)
-      const out = [{ key: 'water', label: T.hose.watering ? '💧 Stop' : '💧 Water', onClick: () => setWatering(!T.hose?.watering) }];
-      out.push({ key: 'hose', label: nearTap() ? '🚿 Hang up the hose' : '✖ Drop the hose', onClick: () => dropHose() });
-      return out;
-    }
-    return nearTap() ? [{ key: 'hose', label: '🚿 Grab the hose', onClick: grabHose }] : [];
-  };
+  T.addGrabbable({
+    name: 'the hose',
+    reach: HOSE_GRAB_DIST,
+    distance: tapDistance,
+    bar: 'water',
+    use: (on) => setWatering(on),
+    grab: () => {
+      T.fishing = null;
+      T.stopFishingRig?.();
+      T.hose = { watering: false, dropAt: 0 };
+      ctx.setPositionConstraint(hoseConstraint);
+      T.feedLine(ctx.hasGyro()
+        ? '🚿 Got the hose. Point it with the phone and hold 💧 Water.'
+        : '🚿 Got the hose. Face the beds and hold 💧 Water (or F).');
+      return true;
+    },
+    drop: ({ keepConstraint = false, quiet = false } = {}) => {
+      if (!T.hose) return;
+      T.hose = null;
+      keyDown = false;
+      if (!keepConstraint) ctx.setPositionConstraint(null);
+      if (farm) {
+        farm.hose.visible = false;
+        farm.nozzle.visible = false;
+      }
+      if (!quiet) T.feedLine(tapDistance() < HOSE_GRAB_DIST ? '🚿 Hose hung back on the tap.' : '🚿 The hose winds back onto its reel.');
+    },
+  });
   const setWatering = (on) => {
     if (!T.hose) return;
     T.hose.watering = !!on;
@@ -319,7 +314,7 @@ export function installTownFarming(T, ctx) {
     // Let go: down, arrested, gone in somewhere, a weapon out, too far (a teleport)
     if (ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom || ctx.isPlayerArmed() || ctx.isRodEquipped()
       || dist2(p.x, p.z, A.x, A.z) > HOSE_LENGTH + 3) {
-      dropHose({ keepConstraint: !!(T.jail || T.inRoom), quiet: !!(T.jail || T.sequence || ctx.isPlayerDead()) });
+      T.dropHeld({ keepConstraint: !!(T.jail || T.inRoom), quiet: !!(T.jail || T.sequence || ctx.isPlayerDead()) });
       return;
     }
     if (!aim(_from, _dir)) return;
@@ -473,14 +468,13 @@ export function installTownFarming(T, ctx) {
     veg: T.veg.map((v) => ({ x: Math.round(v.x * 100) / 100, z: Math.round(v.z * 100) / 100, g: Math.round(v.g * 1000) / 1000, w: Math.round(v.w) })),
   });
   const resetFarm = () => {
-    dropHose({ quiet: true });
+    T.dropHeld({ quiet: true });
     if (farm) { farm.live = []; farm.drops.count = 0; }
   };
 
   Object.assign(T, {
-    buildFarm, dropHose, farmActs, farmSnapshot, fieldOwner, handleFarmNet, hoseActs, resetFarm, restoreFarm, setWatering,
+    buildFarm, farmActs, farmSnapshot, fieldOwner, handleFarmNet, resetFarm, restoreFarm,
     updateFarm,
     applyFieldOwners: (f) => { T.fieldOwners = cleanOwners(f); renderSigns(); },
-    hoseHeld: () => !!T.hose,
   });
 }

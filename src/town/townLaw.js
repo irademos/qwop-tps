@@ -307,7 +307,7 @@ export function installTownLaw(T, ctx) {
     T.closeMarket();
     T.fishing = null;
     T.stopFishingRig();
-    T.dropHose({ quiet: true });
+    T.dropHeld({ quiet: true });
     T.lockpick.stop();
     T.jobTalk.close();
     for (const f of T.followers()) T.dismiss(f, FOLLOW_LINES.wanted);
@@ -347,7 +347,7 @@ export function installTownLaw(T, ctx) {
     T.closeMarket();
     T.fishing = null;
     T.stopFishingRig();
-    T.dropHose({ quiet: true });
+    T.dropHeld({ quiet: true });
     const lost = Math.floor(ctx.getCoins() * KO_COIN_SHARE);
     ctx.showBanner('KNOCKED OUT', 'You wake up by the fire…', 2400);
     later(token, 1800, () => {
