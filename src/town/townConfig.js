@@ -169,21 +169,23 @@ export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, s
 
 // Canoe (townCanoe.js): moored by the fishing spot; standing in it the oar comes out (held by
 // its handle, pointing down — the phone up holds it straight down) and the blade moving through
-// the water beside the hull pushes it forward (forward only — no backing up) — off its side, so
-// it turns too: paddling on the left goes forward and a little right, on the right a little left
+// the water beside the hull pushes it the other way — off its side, so it turns too: paddling
+// on the left goes forward and a little right, on the right a little left, a stroke forward
+// backs it up (weaker)
 export const CANOE_BOARD_DIST = 3;          // m from its middle: 🛶 Get in
 export const CANOE_SHORE_DIST = 4;          // m — 🛶 Get out with dry ground this close
 export const CANOE_STAND_Z = -0.35;         // m along it (bow = +): where the player stands
 export const CANOE_MIN_DEPTH = 0.25;        // m of water it needs under it (else it runs aground)
-export const CANOE_PADDLE_PUSH = 4;         // per s: the push from the blade's speed back through the water…
-export const CANOE_PADDLE_TURN = 0.3;       // …and how much of its turning moment turns it
+export const CANOE_PADDLE_PUSH = 3.8;       // per s: the push from the blade's speed past the canoe…
+export const CANOE_PADDLE_BACK = 0.6;       // …a stroke forward (backing up) this much as hard…
+export const CANOE_PADDLE_TURN = 0.06;      // …and how much of its turning moment turns it
 export const CANOE_BLADE_DEPTH = 0.12;      // m under the water: the blade's full bite (a quarter just at the surface)
 export const CANOE_BLADE_MAX_SPEED = 6;     // m/s — a faster stroke counts as this fast
 export const CANOE_DRAG = 0.3;              // per s, along it
 export const CANOE_SIDE_DRAG = 3.5;         // per s, sideways (the hull won't slide)
 export const CANOE_TURN_DRAG = 1.8;         // per s
-export const CANOE_MAX_SPEED = 5;           // m/s
-export const CANOE_STEER_ACCEL = 2.5;       // m/s² — no gyro: the joystick / WASD paddle for you (forward)…
+export const CANOE_MAX_SPEED = 12;          // m/s
+export const CANOE_STEER_ACCEL = 2.5;       // m/s² — no gyro: the joystick / WASD paddle for you (back: CANOE_PADDLE_BACK as hard)…
 export const CANOE_STEER_TURN = 1.4;        // rad/s² — …and turn it
 export const CANOE_BOB = 0.015;             // m up and down on the water
 
