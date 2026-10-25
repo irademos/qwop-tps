@@ -1,14 +1,14 @@
-// Town: the layout, built once from the map — the walkability grid (townNav.js), the shops (two
-// of the houses) and the homes (the rest; each house with a known door opens into a room —
-// townRooms.js), the campfire, the jail, fields, work spots, the patrol loop, the bandit camp —
-// and its props.
+// Town: the layout, built once from the map — the walkability grid (townNav.js), the shop and the
+// jail (two of the houses) and the homes (the rest; each house with a known door opens into a
+// room — townRooms.js), the campfire, fields (the player can buy them — townFarming.js), the hose's tap, work
+// spots, the patrol loop, the wizard's stall in the woods, the bandit camp — and its props.
 
 import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import {
   BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, TOWN_BOUNDS, TREE_RE,
-  TREE_TRUNK_RADIUS, TREE_WOOD, dist2,
+  TREE_TRUNK_RADIUS, TREE_WOOD, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -28,7 +28,8 @@ export function installTownLayout(T, ctx) {
     const trees = objects.filter((o) => TREE_RE.test(o.file));
     // Trees aren't ground (the height raycast skips them): walk round their trunks (out of
     // town too — the way to the bandit camp)
-    for (const t of ctx.getMapObjects(NAV_BOUNDS)) if (TREE_RE.test(t.file)) nav.block(t.x, t.z, TREE_TRUNK_RADIUS);
+    const woods = ctx.getMapObjects(NAV_BOUNDS).filter((t) => TREE_RE.test(t.file));
+    for (const t of woods) nav.block(t.x, t.z, TREE_TRUNK_RADIUS);
     nav.refresh();
     // Middle of town: the houses' centroid (or the nav start)
     const C = buildings.length
@@ -57,9 +58,9 @@ export function installTownLayout(T, ctx) {
       return false;
     };
 
-    // The shops: the house nearest the middle whose model's front door is known (HOUSE_DOORS)
-    // is the goods shop, the nearest other house of the same model the weapon shop (nobody
-    // lives there); the campfire a little way off the goods shop; the jail by a road further out
+    // The shop: the house nearest the middle whose model's front door is known (HOUSE_DOORS),
+    // the jail the nearest other house of the same model (nobody lives in either); the campfire
+    // a little way off the shop
     const offRoad = (i) => nav.kindAt(i) !== 2;
     // A house's front door: the spot just outside it, and the way out (null: model unknown, or
     // no walkable ground in front of it)
@@ -131,48 +132,32 @@ export function installTownLayout(T, ctx) {
       const exitYaw = dist2(door.x, door.z, C.x, C.z) > 0.1 ? Math.atan2(door.x - C.x, door.z - C.z) : 0;
       shopHouses.push({ building: null, door, exitYaw });
     }
-    // Every room a door opens into (townRooms.js): the shops, then the homes below
+    // Every room a door opens into (townRooms.js): the shop and the jail, then the homes below
     const rooms = {};
     const shops = {};
-    ['goods', 'gear'].forEach((key, k) => {
+    ['shop', 'jail'].forEach((key, k) => {
       // (a door on an open spot: walked into within DOOR_ENTER_DIST of it)
       const { building, door, doorway, out = 0, exitYaw, enterDist = DOOR_ENTER_DIST } = shopHouses[k];
-      shops[key] = { key, kind: 'shop', building, door, doorway, out, exitYaw, enterDist };
+      shops[key] = { key, kind: key, building, door, doorway, out, exitYaw, enterDist };
       rooms[key] = shops[key];
     });
-    const market = shops.goods.door;
+    const market = shops.shop.door;
+    const jailDoor = shops.jail.door;
     const fireCell = best(nav.cellsWhere((i) => {
       const d = dist2(nav.cellX(i), nav.cellZ(i), market.x, market.z);
       return offRoad(i) && d > 6 && d < 13 && nav.clearanceAt(i) >= 2.5
-        && dist2(nav.cellX(i), nav.cellZ(i), shops.gear.door.x, shops.gear.door.z) > 4;
+        && dist2(nav.cellX(i), nav.cellZ(i), jailDoor.x, jailDoor.z) > 4;
     }), (i) => nav.clearanceAt(i) - dC(i) * 0.1);
     const fire = fireCell >= 0 ? cellPos(fireCell) : { x: market.x + 6, z: market.z };
-    const jailCell = best(nav.cellsWhere((i) => {
-      const x = nav.cellX(i);
-      const z = nav.cellZ(i);
-      return offRoad(i) && dist2(x, z, market.x, market.z) > 14 && dist2(x, z, fire.x, fire.z) > 12 && dC(i) < 32
-        && nav.clearanceAt(i) >= 2.5 && nearRoad(i, 4);
-    }), (i) => nav.clearanceAt(i) - dC(i) * 0.05);
-    const jailPos = jailCell >= 0 ? cellPos(jailCell) : { x: market.x - 10, z: market.z };
 
-    // Inside the goods shop: the merchant behind the back counter, customers in front of it
-    const merchantSpot = T.stalls.spot('goods', 'merchant');
-    const customerSpot = T.stalls.spot('goods', 'customer');
-    // The jail's door faces the nearest road
-    let roadDir = null;
-    {
-      let bd = Infinity;
-      for (const i of nav.cellsWhere((j) => nav.kindAt(j) === 2)) {
-        const d = dist2(nav.cellX(i), nav.cellZ(i), jailPos.x, jailPos.z);
-        if (d > 2 && d < bd) { bd = d; roadDir = { x: nav.cellX(i) - jailPos.x, z: nav.cellZ(i) - jailPos.z }; }
-      }
-    }
-    const jailYaw = roadDir ? Math.atan2(roadDir.x, roadDir.z) : 0;
-    const jailFwd = { x: Math.sin(jailYaw), z: Math.cos(jailYaw) };
-    const officeSpot = { x: jailPos.x + jailFwd.x * 2.2 + jailFwd.z * 1.2, z: jailPos.z + jailFwd.z * 2.2 - jailFwd.x * 1.2 };
+    // Inside the shop: the merchant behind the back counter, customers in front of it
+    const merchantSpot = T.stalls.spot('shop', 'merchant');
+    const customerSpot = T.stalls.spot('shop', 'customer');
+    // Inside the jail: the cell (the prisoner faces out of it: +Z, yaw 0), the sheriff's desk
+    const { cell: jailPos, office: officeSpot } = T.rooms.jailSpots();
+    const jailYaw = 0;
 
     nav.block(fire.x, fire.z, 0.9);
-    nav.block(jailPos.x, jailPos.z, 1.7);
     nav.refresh();
 
     // Homes: a walkable spot by each house (not the shops); a house whose front door is known
@@ -210,7 +195,7 @@ export function installTownLayout(T, ctx) {
     for (const i of nav.cellsWhere((j) => nav.kindAt(j) === 0 && nav.clearanceAt(j) >= 3.5 && dC(j) > 16 && dC(j) < 46)
       .sort((a, b) => nav.clearanceAt(b) - nav.clearanceAt(a))) {
       const p = cellPos(i);
-      if (dist2(p.x, p.z, market.x, market.z) < 12 || dist2(p.x, p.z, jailPos.x, jailPos.z) < 8) continue;
+      if (dist2(p.x, p.z, market.x, market.z) < 12 || dist2(p.x, p.z, jailDoor.x, jailDoor.z) < 8) continue;
       if (fields.some((f) => dist2(f.x, f.z, p.x, p.z) < 11)) continue;
       fields.push(p);
       if (fields.length >= 3) break;
@@ -224,9 +209,22 @@ export function installTownLayout(T, ctx) {
       shore.push({ ...p, face: { x: nav.cellX(w), z: nav.cellZ(w) } });
       if (shore.length >= 4) break;
     }
+    // The hose's water tap (townFarming.js): an open patch of grass by the first field (or near
+    // the middle)
+    const anchor = fields[0] ?? C;
+    const tapCell = best(nav.cellsWhere((i) => {
+      const x = nav.cellX(i);
+      const z = nav.cellZ(i);
+      const d = dist2(x, z, anchor.x, anchor.z);
+      return offRoad(i) && nav.clearanceAt(i) >= 2 && dC(i) < 46 && d < 20 && d > 4
+        && fields.every((f) => dist2(x, z, f.x, f.z) > 4) && dist2(x, z, market.x, market.z) > 12
+        && dist2(x, z, jailDoor.x, jailDoor.z) > 8 && dist2(x, z, fire.x, fire.z) > 9;
+    }), (i) => Math.min(nav.clearanceAt(i), 6) - dist2(nav.cellX(i), nav.cellZ(i), anchor.x, anchor.z) * 0.12);
+    const tap = tapCell >= 0 ? cellPos(tapCell) : null;
     // Patrol: road spots spread around the middle (farthest-point picks), walked in a loop
+    // (from the jail's door)
     const roadCells = nav.cellsWhere((i) => nav.kindAt(i) === 2 && dC(i) < 34);
-    const patrol = [{ ...officeSpot }];
+    const patrol = [{ ...jailDoor }];
     for (let k = 0; k < 5 && roadCells.length; k++) {
       const i = best(roadCells, (j) => Math.min(...patrol.map((p) => dist2(nav.cellX(j), nav.cellZ(j), p.x, p.z))));
       patrol.push(cellPos(i));
@@ -251,12 +249,51 @@ export function installTownLayout(T, ctx) {
     nav.block(campFire.x, campFire.z, 0.8);
     nav.refresh();
 
+    // The wizard's stall: out in the woods — the open spot with the most trees round it, well away
+    // from the houses and the bandit camp — its front to the most open side; his tent behind it
+    const treesNear = (x, z, r) => {
+      let k = 0;
+      for (const t of woods) if (Math.abs(t.x - x) < r && Math.abs(t.z - z) < r && dist2(t.x, t.z, x, z) < r) k += 1;
+      return k;
+    };
+    const wizCells = nav.cellsWhere((i) => {
+      const d = dC(i);
+      const x = nav.cellX(i);
+      const z = nav.cellZ(i);
+      return d >= WIZARD_STALL_DIST[0] && d <= WIZARD_STALL_DIST[1] && offRoad(i) && nav.clearanceAt(i) >= 2.5
+        && dist2(x, z, camp.x, camp.z) > 40 && buildings.every((b) => dist2(x, z, b.x, b.z) > b.radius + 10);
+    });
+    let wizCell = best(wizCells.filter((i, k) => k % 2 === 0), (i) => treesNear(nav.cellX(i), nav.cellZ(i), 11)
+      + Math.min(nav.clearanceAt(i), 5) * 0.4 - Math.abs(dC(i) - 45) * 0.03);
+    if (wizCell < 0) wizCell = best(nav.cellsWhere((i) => offRoad(i) && nav.clearanceAt(i) >= 2 && dC(i) > 20 && dC(i) < 60), (i) => -Math.abs(dC(i) - 35));
+    const wizPos = wizCell >= 0 ? cellPos(wizCell) : { x: C.x + 30, z: C.z };
+    let wizYaw = Math.atan2(C.x - wizPos.x, C.z - wizPos.z);
+    {
+      let bestOpen = -Infinity;
+      for (let k = 0; k < 8; k++) {
+        const yaw = wizYaw + k * Math.PI / 4;
+        const j = nav.indexAt(wizPos.x + Math.sin(yaw) * 1.6, wizPos.z + Math.cos(yaw) * 1.6);
+        const open = j >= 0 && nav.walkableIndex(j) ? nav.clearanceAt(j) - k * 0.05 : -1;
+        if (open > bestOpen) { bestOpen = open; wizYaw = yaw; }
+      }
+    }
+    const wizard = { x: wizPos.x, z: wizPos.z, yaw: wizYaw };
+    T.stalls.setOutdoor('wizard', { ...wizard, y: groundAt(wizPos.x, wizPos.z) });
+    const hutAt = {
+      x: wizPos.x - Math.sin(wizYaw) * WIZARD_HUT_DIST + Math.cos(wizYaw) * 1.5,
+      z: wizPos.z - Math.cos(wizYaw) * WIZARD_HUT_DIST - Math.sin(wizYaw) * 1.5,
+    };
+    const hutCell = nav.nearestWalkable(hutAt.x, hutAt.z);
+    wizard.hut = hutCell >= 0 && dist2(nav.cellX(hutCell), nav.cellZ(hutCell), hutAt.x, hutAt.z) < 3 ? cellPos(hutCell) : { ...wizPos };
+    wizard.keeper = T.stalls.spot('wizard', 'merchant');
+    wizard.customer = T.stalls.spot('wizard', 'customer');
+
     // The fishing spot (one for now): the shore spot nearest the middle — the first fisher's too
     const fishSpot = shore[0] ?? null;
     const places = {
       center: C, market, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
-      homes, treeSpots, fields, shore, fishSpot, patrol, entrance, camp, campFire, strongbox,
-      // the player arrives between the goods shop and the fire
+      homes, treeSpots, fields, tap, shore, fishSpot, patrol, entrance, camp, campFire, strongbox, wizard,
+      // the player arrives between the shop and the fire
       spawn: (() => {
         const i = nav.nearestWalkable((market.x + fire.x) / 2, (market.z + fire.z) / 2);
         return i >= 0 ? cellPos(i) : { ...fire };
@@ -276,18 +313,19 @@ export function installTownLayout(T, ctx) {
   };
   const buildProps = (places) => {
     const group = new THREE.Group();
-    // The rooms (townRooms.js; async GLBs), under the map: the homes', then the shops' with their
-    // counters (townStalls.js); over each shop's door outside, its sign
+    // The rooms (townRooms.js; async GLBs), under the map: the homes', the jail's, then the shop's
+    // with its counters (townStalls.js); over the shop's / the jail's door outside, its sign
     for (const key of Object.keys(places.rooms)) if (places.rooms[key].kind === 'home') T.rooms.build(group, key);
-    for (const [key, label, sign] of [['goods', '🧺 Goods', '🧺 Goods Shop'], ['gear', '⚔️ Weapons', '⚔️ Weapon Shop']]) {
-      T.stalls.build(group, { key, label, keeper: key === 'gear' });
+    T.rooms.build(group, 'jail');
+    T.stalls.build(group, { key: 'shop', label: '🛒 Shop' });
+    for (const [key, text] of [['shop', '🛒 Shop'], ['jail', '⭐ Sheriff · Jail']]) {
       const { door, exitYaw } = places.shops[key];
       // (a little out from the door, away from the house)
-      const signSprite = makeTextSprite(sign, { height: 0.34 });
+      const signSprite = makeTextSprite(text, { height: 0.34 });
       signSprite.position.set(door.x + Math.sin(exitYaw) * 0.3, groundAt(door.x, door.z) + 2.5, door.z + Math.cos(exitYaw) * 0.3);
       group.add(signSprite);
     }
-    // A faint gold pane standing in each house's doorway (shops and homes): where to walk in
+    // A faint gold pane standing in each house's doorway (the shop, the jail, homes): where to walk in
     const paneGeo = new THREE.PlaneGeometry(0.9, 1.8).translate(0, 0.9, 0);
     const paneMat = new THREE.MeshBasicMaterial({
       color: 0xffd36b, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide,
@@ -309,38 +347,23 @@ export function installTownLayout(T, ctx) {
     const cookPot = T.makeCookPot();
     cookPot.position.copy(fire.group.position);
     group.add(cookPot);
-    // Jail: an iron cage with a door that swings open
-    const jailRoot = new THREE.Group();
-    jailRoot.position.set(places.jail.x, groundAt(places.jail.x, places.jail.z), places.jail.z);
-    jailRoot.rotation.y = places.jailYaw;
+    // The jail's cell door (townRooms.js builds the cell): swung open / shut in townMode.js
+    const door = T.rooms.cellDoor();
     const iron = new THREE.MeshStandardMaterial({ color: 0x2f2f35, roughness: 0.6, metalness: 0.3 });
     const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1, metalness: 0 });
-    const barGeo = new THREE.CylinderGeometry(0.025, 0.025, 2, 6);
-    barGeo.translate(0, 1, 0);
-    const half = 1.1;
-    const addBars = (parent, from, to, count) => {
-      for (let k = 0; k <= count; k++) {
-        const bar = new THREE.Mesh(barGeo, iron);
-        bar.position.lerpVectors(from, to, k / count);
-        bar.castShadow = true;
-        parent.add(bar);
-      }
-    };
-    addBars(jailRoot, new THREE.Vector3(-half, 0, -half), new THREE.Vector3(half, 0, -half), 10);
-    addBars(jailRoot, new THREE.Vector3(-half, 0, -half), new THREE.Vector3(-half, 0, half), 10);
-    addBars(jailRoot, new THREE.Vector3(half, 0, -half), new THREE.Vector3(half, 0, half), 10);
-    const door = new THREE.Group();
-    door.position.set(-half, 0, half); // hinge
-    addBars(door, new THREE.Vector3(0, 0, 0), new THREE.Vector3(half * 2, 0, 0), 10);
-    jailRoot.add(door);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.3, 0.12, half * 2 + 0.3), wood);
-    roof.position.y = 2.06;
-    roof.castShadow = true;
-    jailRoot.add(roof);
-    const sign = makeTextSprite('⭐ Sheriff · Jail', { height: 0.32 });
-    sign.position.set(0, 2.55, 0);
-    jailRoot.add(sign);
-    group.add(jailRoot);
+    // The wizard's stall (townStalls.js) and his tent behind it
+    T.stalls.buildOutdoor(group, { key: 'wizard', label: '🔮 Wizard' });
+    const robe = new THREE.MeshStandardMaterial({ color: 0x4b2f7a, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+    const hut = places.wizard.hut;
+    const wizTent = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1.9, 6, 1, true), robe);
+    wizTent.position.set(hut.x, groundAt(hut.x, hut.z) + 0.95, hut.z);
+    wizTent.castShadow = true;
+    group.add(wizTent);
+    const star = makeTextSprite('✨', { height: 0.3, size: 96, bg: null, pad: 10 });
+    star.position.set(hut.x, groundAt(hut.x, hut.z) + 2.1, hut.z);
+    group.add(star);
+    // The hose's tap, the fields' for-sale signs (townFarming.js)
+    T.buildFarm(group, places);
     // Fields: rows of crops on dark soil
     const soilMat = new THREE.MeshStandardMaterial({ color: 0x4a3420, roughness: 1, metalness: 0 });
     const cropMat = new THREE.MeshStandardMaterial({ color: 0x5f9e3a, roughness: 1, metalness: 0 });
@@ -402,7 +425,7 @@ export function installTownLayout(T, ctx) {
     const campSign = makeTextSprite('💀 Bandit camp', { height: 0.28 });
     campSign.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 2.3, places.camp.z);
     group.add(campSign);
-    return { group, fire, door, campFire, strongbox, cookPot };
+    return { group, fire, door, campFire, strongbox, cookPot, wizTent };
   };
 
   Object.assign(T, {

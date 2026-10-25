@@ -1,15 +1,16 @@
-// Town: the player's goods and gathering (chop, pick, eat — fishing is townFishing.js), going in
-// and out of the houses (townRooms.js: the shops and the homes), the market — the goods and
-// weapon shops' counters (townStalls.js), the sell panel — townsfolk buying food and delivering
-// goods, and the stand-ins bullets / bombs / spells hit townsfolk through.
+// Town: the player's goods and gathering (chop, pick, eat — fishing is townFishing.js, farming
+// townFarming.js), going in and out of the houses (townRooms.js: the shop, the jail and the
+// homes), the market — the shop's counters and the wizard's stall (townStalls.js), the sell
+// panel — townsfolk buying food and delivering goods, and the stand-ins bullets / bombs / spells
+// hit townsfolk through.
 
-import { GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR } from './townEconomy.js';
+import { GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR, WIZARD_WARES } from './townEconomy.js';
 import { SHOUT_EAT_BUY, firstName, shout } from './townPeople.js';
 import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
 import { createTownRooms } from './townRooms.js';
 import {
-  CHEST_PRICE, CHOP_HITS, LOCKPICK_MAX, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
+  CHEST_PRICE, CHOP_HITS, LOCKPICK_MAX, SEEDS_MAX, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
   DOOR_DIST, DOOR_ENTER_HALF_WIDTH, DOOR_ENTER_PAST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
@@ -82,7 +83,11 @@ export function installTownTrade(T, ctx) {
     crop.mesh.visible = false;
     gain('crops');
     T.feedLine(`🥕 +1 Veg (${T.goods.crops})`);
-    // (helping the farmer with the harvest on the first day: allowed — townIntro.js)
+    // (the player's own field — bought, townFarming.js — or helping the farmer with the harvest
+    // on the first day: allowed — townIntro.js)
+    const bought = T.fieldOwner(field);
+    if (bought === 'mine') return;
+    if (bought === 'theirs') { T.crime('theft', null); return; }
     if (T.introAllowsPick(field)) { T.introNote('pick'); return; }
     const owner = T.npcs.find((n) => n.alive && n.role === 'farmer' && n.work === field) ?? null;
     T.crime('theft', owner);
@@ -103,15 +108,15 @@ export function installTownTrade(T, ctx) {
   };
 
   // ── The houses' rooms (townRooms.js — under the map, entered through the houses' doors):
-  // the two shops and the homes ──
+  // the shop, the jail and the homes ──
   const rooms = createTownRooms({ camera: ctx.camera, getPlayerPosition: () => ctx.getPlayerPosition() });
   // The room the player's in (null: out in town)
   const playerRoom = () => { const p = T.playerPos(); return rooms.roomAt(p.x, p.z); };
-  // At that shop's back counter (its buttons, the sell panel)
+  // At the shop's back counter / the wizard's stall (its buttons, the sell panel)
   const nearStallKey = (key) => { const p = T.playerPos(); return T.stalls.atCounter(key, p.x, p.z, TRADE_DIST); };
-  // The shop whose back counter the player's at, or null
-  const nearestStall = () => (nearStallKey('gear') ? 'gear' : nearStallKey('goods') ? 'goods' : null);
-  const nearStall = () => nearStallKey('goods');
+  // The stall whose counter the player's at, or null
+  const nearestStall = () => (nearStallKey('shop') ? 'shop' : nearStallKey('wizard') ? 'wizard' : null);
+  const nearStall = () => nearStallKey('shop');
   // The door outside the player's at (its room's key), or null
   const nearDoor = (dist = DOOR_DIST) => {
     if (playerRoom()) return null;
@@ -145,6 +150,7 @@ export function installTownTrade(T, ctx) {
     if (!access.open && !forced) { T.lockedNote(key, access); return; }
     T.fishing = null;
     T.stopFishingRig?.();
+    T.dropHeld?.({ quiet: true });
     ctx.putWeaponsAway?.();
     const d = rooms.doorInside(key);
     // (turned the way the player faced the door: in the room, π faces in — the back wall;
@@ -155,7 +161,8 @@ export function installTownTrade(T, ctx) {
     rooms.setInside(key);
     T.actsAt = 0;
     if (T.layout.places.rooms[key].kind === 'home') T.feedLine(homeLine(key));
-    else if (!stallOpen(key)) T.feedLine(key === 'gear' ? '⚔️ The weapon shop\'s shut — back in the morning.' : '🧺 The merchant\'s not in.');
+    else if (key === 'jail') T.feedLine('⭐ The sheriff\'s office — and the cell.');
+    else if (!stallOpen(key)) T.feedLine('🛒 The merchant\'s not in.');
   };
   const leaveRoom = () => {
     const key = T.inRoom ?? playerRoom();
@@ -231,9 +238,8 @@ export function installTownTrade(T, ctx) {
       rooms.setInside(at);
     }
   };
-  // The weapon shop keeps the market's hours (its keeper isn't one of the townsfolk)
-  const gearOpen = () => inHours(T.hour(), MARKET_HOURS);
-  const stallOpen = (key) => (key === 'gear' ? gearOpen() : marketOpen());
+  // The shop: the merchant at the counter; the wizard's stall: the wizard behind it
+  const stallOpen = (key) => (key === 'wizard' ? !!workingWizard() : marketOpen());
   const calmNow = () => !T.npcs.some((n) => n.fighter && T.distToPlayer(n) < 8);
   const canShop = (key) => T.active && T.ready && !!key && !T.sequence && !T.jail && !T.fishing && !ctx.isPlayerDead()
     && !T.marketPanel.isOpen() && calmNow() && stallOpen(key);
@@ -246,6 +252,8 @@ export function installTownTrade(T, ctx) {
     if (id === 'wand') return items.wand;
     if (id === 'mana') return items.mana >= ctx.maxMana;
     if (id === 'lockpick') return T.lockpicks >= LOCKPICK_MAX;
+    if (id === 'seeds') return T.seeds >= SEEDS_MAX;
+    if (id === 'life') { const { health, max } = ctx.getHealth(); return health >= max; }
     return false;
   };
   const gearHave = (id, items) => {
@@ -257,11 +265,21 @@ export function installTownTrade(T, ctx) {
     if (id === 'bubble') return `You have ${items.bubbles}`;
     if (id === 'mana') return items.wand ? `Mana ${items.mana} / ${ctx.maxMana}` : '';
     if (id === 'lockpick') return T.lockpicks ? `You have ${T.lockpicks}` : '';
+    if (id === 'seeds') return T.seeds ? `You have ${T.seeds} seeds` : '';
+    if (id === 'life') { const { health, max } = ctx.getHealth(); return `Health ${health} / ${max}`; }
     return '';
+  };
+  // Who's selling (the merchant / the wizard, at their counter) and whether they'll sell to the player
+  const keeperOf = (key) => (key === 'wizard' ? workingWizard() : workingMerchant());
+  const keeperBlock = (key) => {
+    const k = keeperOf(key);
+    if (!k) return key === 'wizard' ? 'The wizard isn’t here' : 'The merchant isn’t here';
+    if (k.attitude < GRUDGE_ATTITUDE) return `${firstName(k.name)} won’t sell to you`;
+    return null;
   };
   // The buy card's contents for a thing on a counter
   const stallItemState = (key, id) => {
-    if (key === 'goods') {
+    if (key === 'shop' && GOODS[id]) {
       const g = GOODS[id];
       const merchant = workingMerchant();
       const friend = merchant && merchant.attitude >= FRIEND_ATTITUDE;
@@ -270,29 +288,30 @@ export function installTownTrade(T, ctx) {
         desc: `${T.market.stock[id]} in stock${g.food ? ` · eat it for +${g.heal} ❤️` : ''}${friend ? ' · friend\'s price' : ''}`,
         owned: `You have ${T.goods[id]}`,
         price: buyPrice(id),
-        blocked: !merchant ? 'The merchant isn’t here'
-          : merchant.attitude < GRUDGE_ATTITUDE ? `${firstName(merchant.name)} won’t sell to you`
-          : T.market.stock[id] <= 0 ? 'Sold out'
-          : T.bagRoom() <= 0 ? 'Your bag is full' : null,
+        blocked: keeperBlock(key)
+          ?? (T.market.stock[id] <= 0 ? 'Sold out' : T.bagRoom() <= 0 ? 'Your bag is full' : null),
       };
     }
     if (id === 'chest') {
       return {
         name: '🎁 Mystery Chest', desc: 'A random prize — coins, bombs, a shield, goods… maybe even a gun!',
-        price: CHEST_PRICE, verb: 'Open', blocked: gearOpen() ? null : 'Closed',
+        price: CHEST_PRICE, verb: 'Open', blocked: keeperBlock(key),
       };
     }
-    const item = SHOP_GEAR.find((x) => x.id === id);
+    const list = key === 'wizard' ? WIZARD_WARES : SHOP_GEAR;
+    const item = list.find((x) => x.id === id);
     const items = ctx.getItems();
     const missing = item.needs && !items?.[item.needs];
+    const needLabel = { gun: 'Gun', wand: 'Magic Wand' }[item.needs];
     return {
       name: `${item.emoji} ${item.label}`,
       desc: item.desc || '',
       owned: gearHave(id, items),
       price: item.price,
-      blocked: !gearOpen() ? 'Closed'
-        : gearOwned(id, items) ? (id === 'mana' ? 'Mana is full' : id === 'shield' ? 'Shield is full' : id === 'lockpick' ? `You can carry ${LOCKPICK_MAX}` : 'Owned')
-        : missing ? `Needs a ${SHOP_GEAR.find((x) => x.id === item.needs)?.label}` : null,
+      blocked: keeperBlock(key)
+        ?? (gearOwned(id, items) ? (id === 'mana' ? 'Mana is full' : id === 'shield' ? 'Shield is full' : id === 'lockpick' ? `You can carry ${LOCKPICK_MAX}`
+          : id === 'seeds' ? `You can carry ${SEEDS_MAX}` : id === 'life' ? 'You’re at full health' : 'Owned')
+        : missing ? `Needs a ${needLabel}` : null),
     };
   };
   const stalls = createTownStalls({
@@ -304,14 +323,14 @@ export function installTownTrade(T, ctx) {
     getState: stallItemState,
     buy: (key, id) => {
       if (!canShop(key) || stallItemState(key, id).blocked) return null;
-      if (key === 'goods') return { ok: buyGood(id) };
+      if (key === 'shop' && GOODS[id]) return { ok: buyGood(id) };
       if (id === 'chest') return openChest();
-      return { ok: buyGear(id) };
+      return { ok: buyGear(key, id) };
     },
     getPlayerPosition: () => ctx.getPlayerPosition(),
     setPlayerHidden: (hidden) => ctx.setPlayerHidden?.(hidden),
     canShop: (key) => canShop(key),
-    canTap: (key) => canShop(key) && playerRoom() === key,
+    canTap: (key) => canShop(key) && (key === 'wizard' ? nearStallKey('wizard') : playerRoom() === key),
   });
   const focusStall = (key) => {
     T.fishing = null;
@@ -381,19 +400,29 @@ export function installTownTrade(T, ctx) {
     T.remember(merchant, 'customer');
     T.introNote('sell');
   };
-  const buyGear = (id) => {
-    const item = SHOP_GEAR.find((x) => x.id === id);
+  // Gear from the shop / the wizard (the money goes to whoever's behind the counter)
+  const buyGear = (key, id) => {
+    const item = (key === 'wizard' ? WIZARD_WARES : SHOP_GEAR).find((x) => x.id === id);
     if (!item || ctx.getCoins() < item.price) return false;
-    // (a lock-pick is the town's own: single use — townHomes.js)
+    // (a lock-pick, seeds, a life potion are the town's own: townHomes.js, townFarming.js)
     if (item.kind === 'lockpick') {
       if (T.lockpicks >= LOCKPICK_MAX) return false;
       T.lockpicks += 1;
+    } else if (item.kind === 'seeds') {
+      if (T.seeds >= SEEDS_MAX) return false;
+      T.seeds = Math.min(SEEDS_MAX, T.seeds + (item.n ?? 1));
+    } else if (item.kind === 'life') {
+      const { health, max } = ctx.getHealth();
+      if (health >= max) return false;
+      ctx.heal(max);
     } else if (!ctx.grantItem(item.kind, item.n ?? 1)) return false;
     ctx.addCoins(-item.price);
+    const k = keeperOf(key);
+    if (k) T.npcMoney(k, item.price);
     T.feedLine(`${item.emoji} Bought: ${item.label}`);
     return true;
   };
-  // The weapon shop's mystery chest: one weighted random prize (what can't be used is left out)
+  // The shop's mystery chest: one weighted random prize (what can't be used is left out)
   const openChest = () => {
     if (ctx.getCoins() < CHEST_PRICE) return { ok: false };
     const items = ctx.getItems() ?? {};
@@ -414,6 +443,7 @@ export function installTownTrade(T, ctx) {
     ctx.addCoins(-CHEST_PRICE);
     const text = prize.give();
     if (!text) { ctx.addCoins(CHEST_PRICE); return { ok: false }; }
+    if (workingMerchant()) T.npcMoney(workingMerchant(), CHEST_PRICE);
     T.feedLine(`🎁 Mystery Chest: ${text}`);
     return { ok: true, emoji: prize.emoji };
   };
@@ -457,10 +487,13 @@ export function installTownTrade(T, ctx) {
       if (n.alive && !n.fighter) T.hurt(n, fromPlayer(n), b.element === 'fire' ? ctx.magicDamage.fire : ctx.magicDamage.ice);
     },
   })) : []);
-  // ── The market (townEconomy.js): the merchant behind the goods shop's counter buys and sells ──
+  // ── The market (townEconomy.js): the merchant behind the shop's counter buys and sells ──
   const marketOpen = () => inHours(T.hour(), MARKET_HOURS) && !!workingMerchant();
   // The merchant, if they're at the counter now
   const workingMerchant = () => T.npcs.find((m) => m.alive && !m.fighter && m.role === 'merchant'
+    && T.isWorking(m)) ?? null;
+  // The wizard, if he's behind his stall now
+  const workingWizard = () => T.npcs.find((m) => m.alive && !m.fighter && m.role === 'wizard'
     && T.isWorking(m)) ?? null;
   // (feed: a good running out / coming back)
   const noteStock = () => {
@@ -525,9 +558,9 @@ export function installTownTrade(T, ctx) {
   };
 
   Object.assign(T, {
-    buyFood, calmNow, closeMarket, deliverGoods, eat, enterRoom, focusStall, gain, gearOpen, getMagicTargets,
+    buyFood, calmNow, closeMarket, deliverGoods, eat, enterRoom, focusStall, gain, getMagicTargets,
     getWeaponTargets, leaveRoom, marketOpen, nearDoor, nearStall, nearestStall, noteStock,
     openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen, tryChop,
-    updateRegrowth, updateRooms, workingMerchant,
+    updateRegrowth, updateRooms, workingMerchant, workingWizard,
   });
 }

@@ -626,7 +626,11 @@ export class PlayerControls {
     const pressBar = () => {
       if (pressMode) return;
       pressMode = this.getBlockBarMode();
-      if (pressMode === 'block') {
+      if (pressMode === 'water') {
+        // (Town: the hose in hand — water while held)
+        if (this.enabled) getAppState()?.useTownHeld?.(true);
+        this.punchButton.classList.add('ps-blocking-active');
+      } else if (pressMode === 'block') {
         setBlocking(true);
       } else if (pressMode === 'shield') {
         if (this.enabled) getAppState()?.setWandShieldHold?.(true);
@@ -639,7 +643,10 @@ export class PlayerControls {
     const releaseBar = (cancel = false) => {
       const mode = pressMode;
       pressMode = null;
-      if (mode === 'block') {
+      if (mode === 'water') {
+        this.punchButton.classList.remove('ps-blocking-active');
+        getAppState()?.useTownHeld?.(false);
+      } else if (mode === 'block') {
         setBlocking(false);
       } else if (mode === 'shield') {
         this.punchButton.classList.remove('ps-blocking-active');
@@ -684,9 +691,12 @@ export class PlayerControls {
   }
 
   // What the Block bar does for the weapon in hand: 'block' (sword; the wand with no shield),
-  // 'fire' (gun), 'sword' (shield: back to the sword), 'shield' (wand: shield up while held)
+  // 'fire' (gun), 'sword' (shield: back to the sword), 'shield' (wand: shield up while held),
+  // 'water' (Town: the hose grabbed — water while held; townGrab.js `bar`)
   getBlockBarMode() {
     const appState = appContext.uiState.appState ?? window.appState;
+    const heldBar = appState?.getTownHeldBar?.();
+    if (heldBar) return heldBar;
     const itemId = this.getEquippedItemId();
     if (itemId === 'pistol') return 'fire';
     if (itemId === 'shield') return appState?.isWandShieldHeld?.() ? 'shield' : 'sword';
@@ -700,6 +710,7 @@ export class PlayerControls {
 
   getMobileAttackLabel() {
     const mode = this.getBlockBarMode();
+    if (mode === 'water') return '💧 Water';
     if (mode === 'fire') return 'Fire';
     if (mode === 'shield') return '🛡 Shield';
     if (mode === 'sword') return '🗡 Sword';

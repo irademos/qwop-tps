@@ -175,6 +175,11 @@ export function installTownActs(T, ctx) {
       out.push(...T.cookActs());
       return out;
     }
+    // Something in hand (townGrab.js — the hose): ✋ Drop it, and the farming buttons
+    if (T.held) {
+      out.push(...T.grabActs(), ...T.farmActs());
+      return out.slice(0, 3);
+    }
     const calm = T.calmNow();
     // (the strongbox can be snatched mid-fight: the gang guards it)
     if (!T.strongboxHeld && T.layout.props.strongbox.visible && T.activeJobs().some((j) => j.kind === 'fetchStrongbox')) {
@@ -194,11 +199,13 @@ export function installTownActs(T, ctx) {
     // A locked door (townHomes.js): buy the player's house, knock, pick the lock
     if (calm) out.push(...T.doorActs());
     const stall = calm ? T.nearestStall() : null;
-    if (stall === 'gear' && T.gearOpen()) out.push({ key: 'gear', label: '⚔️ Weapons', onClick: () => T.focusStall('gear') });
-    if (stall === 'goods' && T.marketOpen()) {
-      out.push({ key: 'goods', label: '🧺 Goods', onClick: () => T.focusStall('goods') });
+    if (stall === 'shop' && T.marketOpen()) {
+      out.push({ key: 'shop', label: '🛒 Shop', onClick: () => T.focusStall('shop') });
       out.push({ key: 'sell', label: '💰 Sell', onClick: T.openMarket });
     }
+    if (stall === 'wizard' && T.stallOpen('wizard')) out.push({ key: 'wizard', label: '🔮 Wizard\'s wares', onClick: () => T.focusStall('wizard') });
+    // Farming (townFarming.js): pick a grown veg, buy a field, plant a seed
+    if (calm) out.push(...T.farmActs());
     // A job's townsperson within reach (not only the nearest): its 📦 / 💰 first
     if (!ctx.isPlayerDead() && calm) {
       for (const o of T.npcs) {
@@ -217,6 +224,7 @@ export function installTownActs(T, ctx) {
     if (calm) out.push(...T.introActs());
     if (calm) {
       out.push(...T.cookActs());
+      out.push(...T.grabActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
       out.push(...T.fishingActs(true));
     }

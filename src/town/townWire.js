@@ -193,6 +193,7 @@ export function installTownWire(T, ctx) {
     if (Number.isFinite(s.minutes)) T.clock.minutes = s.minutes;
     if (Array.isArray(s.departed)) T.departed = s.departed;
     if (s.houses) T.applyHouses(s.houses);
+    if (s.fieldOwners) { T.applyFieldOwners(s.fieldOwners); T.assignWork(); }
     if (s.market) { for (const g of GOOD_IDS) if (Number.isFinite(s.market[g])) T.market.stock[g] = s.market[g]; T.noteStock(); }
     const ids = new Set();
     let added = false;
@@ -253,6 +254,7 @@ export function installTownWire(T, ctx) {
     const fromHost = from === T.net.hostId();
     // (who owns which house, a player asking for one / buying it — townHomes.js)
     if (T.handleHomesNet(from, d)) return;
+    if (T.handleFarmNet(from, d)) return;
     switch (d.op) {
       case 'hello':
         if (T.netMode === 'host' && T.ready) T.net.send(from, { w: 1, op: 'full', s: fullSnapshot() });

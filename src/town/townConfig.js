@@ -92,10 +92,11 @@ export const PRODUCE = { woodcutter: ['wood', 2, 3], farmer: ['crops', 2, 4], fi
 export const MERCHANT_START_CASH = 60;      // coins the merchant starts out with
 export const FIREWOOD_CHANCE = 0.35;        // a townsperson buying food takes some firewood home too
 export const MARKET_HOURS = [7, 20];
-export const TRADE_DIST = 3.4;              // m from a shop's back counter for its buttons (🧺 Goods / 💰 Sell, ⚔️ Weapons)
-// The rooms (townRooms.js): two of the town's houses are the goods shop and the weapon shop, the
-// rest homes; walking in through a door puts you inside its room — the shops' shop.glb, the
-// homes' home_interior.glb — each far off the island and under the seabed, out of sight: a grid
+export const TRADE_DIST = 3.4;              // m from the shop's back counter (the wizard's stall) for its buttons (🛒 Shop / 💰 Sell, 🔮 Wizard)
+// The rooms (townRooms.js): two of the town's houses are the shop and the jail (the sheriff's
+// office and a cell), the rest homes; walking in through a door puts you inside its room — the
+// shop's shop.glb, the jail's and the homes' home_interior.glb — each far off the island and
+// under the seabed, out of sight: a grid
 // from ROOMS_ORIGIN (world m: the middle of the first room's floor), ROOM_SPACING apart (further
 // than anyone sees across — WITNESS_DIST / LAW_SIGHT), every room's floor its own ground
 export const ROOMS_ORIGIN = { x: -250, y: -40, z: -40 };
@@ -104,15 +105,35 @@ export const ROOM_COLUMNS = 6;
 export const DOOR_DIST = 0.4;               // m from a door outside: stepped away from it after coming out
 export const DOOR_ENTER_DIST = 0.2;         // m from a door with no house (an open spot) where walking toward it goes in
 export const HOME_VISIT_CHANCE = 0.2;       // a stroll in the day: a while at home instead
-export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the weapon shop
-export const CHEST_PRICE = 30;              // the weapon shop's mystery chest
+export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the shop's gear
+export const CHEST_PRICE = 30;              // the shop's mystery chest
 export const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
 export const TREE_WOOD = 3;                 // 🪵 a tree gives before it needs to grow back…
 export const TREE_REGROW_S = 40;            // …one per this many seconds
 export const CHOP_REACH = 0.85;             // m from the sword tip to the trunk
 export const CROP_REGROW_S = 70;            // s until a picked crop is back
 export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
-// Fishing (townFishing.js): the rod is bought at the weapon shop and held like the sword; swing
+// The wizard's stall (townStalls.js 'wizard', the wizard townsperson behind it): out in the woods
+export const WIZARD_STALL_DIST = [30, 75];  // m from the middle of town
+export const WIZARD_HUT_DIST = 4;           // m from the stall: where the wizard sleeps (his tent)
+// Farming (townFarming.js): the farmers' fields can be bought (at the field, no talk needed);
+// seeds from the shop are planted anywhere — a dirt pile that grows one veg in a town day, or
+// in VEG_WET_S once the hose has soaked it
+export const FIELD_PRICE = 100;             // coins (to the field's farmer)
+export const FIELD_ACT_DIST = 4.5;          // m from a field's middle: 🌱 Buy this field
+export const VEG_DRY_S = 480;               // s for a seed to grow unwatered (a town day: 1440 min / MINUTES_PER_SEC)
+export const VEG_WET_S = 40;                // s while its soil is wet
+export const VEG_MAX = 24;                  // seeds planted at once
+export const VEG_PICK_DIST = 1.4;           // m — 🥕 Pick your veg
+export const VEG_GAP = 0.6;                 // m between dirt piles
+export const SEEDS_MAX = 30;
+export const SOIL_DRY_S = 60;               // s a soaked dirt pile stays wet
+export const WATER_SOAK_S = 1.2;            // s of hose on a pile to soak it
+export const HOSE_LENGTH = 16;              // m the hose reaches from the tap
+export const HOSE_GRAB_DIST = 1.8;          // m from the tap: 🚿 Grab the hose
+export const HOSE_SPEED = 6.5;              // m/s the water leaves the nozzle
+export const HOSE_SPLASH_R = 0.55;          // m round where the water lands: the dirt piles there get it
+// Fishing (townFishing.js): the rod is bought at the shop and held like the sword; swing
 // it forward to cast, wait for a bite, pull it back to hook the fish, then wear it out — pull
 // when it tires, ease off while it runs — and crank the reel to bring it in
 export const FISH_SPOT_RADIUS = 6;          // m — fish from this close to the fishing spot (one for now)
@@ -149,7 +170,7 @@ export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, s
 // ── Reactions ──
 export const ATTITUDE_FADE = 0.004;         // per second, toward 0 (fondness fades at half the rate)
 export const GRUDGE_ATTITUDE = -0.5;        // won't trade with the player, steps aside from them
-export const FRIEND_DISCOUNT = 0.15;        // friends pay this much less at the goods shop (and get more)
+export const FRIEND_DISCOUNT = 0.15;        // friends pay this much less at the shop (and get more)
 export const AVOID_DIST = 4.5;              // m
 export const RALLY_DIST = 15;               // m — the brave this close (family: further) come to help
 export const RALLY_MAX = 2;
@@ -199,6 +220,8 @@ export const MIN_TOWNSFOLK = 6;             // a player moving in never pushes t
 export const BAG_MAX = 15;                  // goods the player can carry (the rest stays in the chest at home)
 export const WALLET_MAX = 150;              // coins in the player's wallet (more stays on the ground / in the chest)
 export const LOCKPICK_MAX = 3;              // lock-picks carried (single use)
+// The jail (townRooms.js ROOM_TYPES.jail — home_interior.glb with a cell of bars and the
+// sheriff's desk) is one of the town's houses
 export const KNOCK_S = 2.2;                 // s from a knock to an answer
 export const KNOCK_AGAIN_S = 20;            // s before the same door can be knocked on again
 export const INVITE_S = 90;                 // s an invitation in stands

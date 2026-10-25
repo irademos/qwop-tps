@@ -9,7 +9,8 @@ export const TOWN_NAME = 'Brindlewick';
 // hp: sword hits to beat them; brave: chance they fight back instead of running when hit;
 // law: guards / the sheriff (they answer crimes and arrest); unhurt: a sword swing only scares them;
 // outlaw: bandits (live at the camp outside town, raid at night, attack the player on sight —
-// hurting them is no crime); gear: what they fight with (createBossFighter) — law gear grows
+// hurting them is no crime); hermit: lives out of town in a place of their own (the wizard, by
+// his stall in the woods) — no town house; gear: what they fight with (createBossFighter) — law gear grows
 // with the stars (townMode fighterGear)
 export const ROLES = {
   merchant:   { label: 'Merchant',   emoji: '🧺', work: 'market', hours: [7, 20], hp: 3, brave: 0.2 },
@@ -19,6 +20,7 @@ export const ROLES = {
   woodcutter: { label: 'Woodcutter', emoji: '🪓', work: 'tree',   hours: [7, 17], hp: 3, brave: 0.6 },
   farmer:     { label: 'Farmer',     emoji: '🌾', work: 'field',  hours: [6, 17], hp: 3, brave: 0.35 },
   fisher:     { label: 'Fisher',     emoji: '🎣', work: 'shore',  hours: [5, 15], hp: 3, brave: 0.3 },
+  wizard:     { label: 'Wizard',     emoji: '🧙', work: 'wizard', hours: [8, 21], hp: 4, brave: 0.5, hermit: true },
   townsfolk:  { label: 'Townsfolk',  emoji: '🏠', work: null,     hours: null,    hp: 2, brave: 0.15 },
   kid:        { label: 'Kid',        emoji: '🧒', work: null,     hours: null,    hp: 2, brave: 0, speed: 1.15, unhurt: true },
   drifter:    { label: 'Drifter',    emoji: '🍺', work: null,     hours: null,    hp: 3, brave: 0.5, nightOwl: true },
@@ -27,6 +29,8 @@ export const ROLES = {
 };
 // The bandit camp's gang (outside the town's roster — they come back after a while)
 export const BANDIT_ROLES = ['banditBoss', 'bandit', 'bandit', 'bandit'];
+// Out of town (the bandits, the wizard): no house of the town's (townHomes.js)
+export const livesOut = (def) => !!(def?.outlaw || def?.hermit);
 
 // Who lives here when the town is first founded, in the order the town needs them: one to a
 // house, so a town with fewer free houses takes the first ones, and a player moving into a full
@@ -42,13 +46,13 @@ const CIVILIAN_URLS = [
   glbCharacterConfig.pumpkinUrl,
   glbCharacterConfig.treeCreatureUrl,
   glbCharacterConfig.frogManUrl,
-  glbCharacterConfig.wizardUrl,
   glbCharacterConfig.villageBoyUrl,
 ];
 export const characterForRole = (role) => {
   if (role === 'guard' || role === 'nightGuard') return glbCharacterConfig.antlerGuyUrl;
   if (role === 'sheriff') return glbCharacterConfig.url; // gemhorn
-  if (role === 'merchant') return glbCharacterConfig.wizardUrl;
+  if (role === 'merchant') return glbCharacterConfig.pumpkinUrl;
+  if (role === 'wizard') return glbCharacterConfig.wizardUrl;
   if (role === 'kid') return glbCharacterConfig.villageBoyUrl;
   if (role === 'bandit') return glbCharacterConfig.frogManUrl;
   if (role === 'banditBoss') return glbCharacterConfig.treeCreatureUrl;
@@ -83,13 +87,14 @@ const TASK_LINES = {
     nightGuard: ['Strange folk about after dark.', 'Keep to the lamplight.', 'Nothing gets past the watch.'],
     sheriff: ['Brindlewick has laws. I keep them.', 'Cells are empty. Let\'s keep it that way.', 'Don\'t make me write you up.'],
     woodcutter: ['This old oak won\'t chop itself.', 'Mind your toes — timber!', 'Best wood on the island, this.'],
-    farmer: ['The carrots are coming along.', 'Rain soon, I can smell it.', 'Long rows today.'],
+    farmer: ['The carrots are coming along.', 'Rain soon, I can smell it.', 'Long rows today.', 'Fancy a field of your own? A hundred coins and it\'s yours.'],
+    wizard: ['Potions! Wands! Wonders!', 'The trees whisper prices to me. Reasonable ones.', 'Mind the wand — it bites.'],
     fisher: ['Fish are biting.', 'Shh — you\'ll scare them off.', 'Caught a big one this morning. Honest.'],
   },
   eat: ['Off to the market, I\'m starving.', 'Smells like fresh bread!', 'Just grabbing a bite.'],
   social: ['Nothing like a warm fire.', 'Pull up a log, friend.', 'Heard any good stories lately?'],
   sleep: ['Yawn… off to bed.', 'Long day. Goodnight.'],
-  browse: ['Just looking, thanks.', 'Fine blade, that one. Pricey, though.', 'A fishing rod… now there\'s an idea.'],
+  browse: ['Just looking, thanks.', 'Fine blade, that one. Pricey, though.', 'A fishing rod… now there\'s an idea.', 'Seeds! Maybe I\'ll grow my own.'],
   wander: ['Lovely day for a stroll.', 'Just stretching my legs.', 'Have you seen the ship off the coast?'],
   kid: ['Tag! You\'re it!', 'I\'m gonna be a guard when I grow up!', 'Mum says I can\'t talk to strangers.'],
   drifter: ['Got a coin to spare?', 'The fire\'s the only friend I need.', 'Hic. Lovely evening.'],

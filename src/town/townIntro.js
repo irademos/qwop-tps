@@ -61,7 +61,7 @@ const STEPS = [
     accept: '🌾 Happy to help',
     progress: 'Pick 3 veg 🥕 from {guide}\'s field',
     done: 'Good hands! That\'s the harvest in.',
-    next: 'Those veg are yours to keep — so let\'s turn them into coin. I\'ll walk you to the goods shop: go in through the door, up to the merchant\'s counter, and press 💰 Sell.',
+    next: 'Those veg are yours to keep — so let\'s turn them into coin. I\'ll walk you to the shop: go in through the door, up to the merchant\'s counter, and press 💰 Sell.',
     tips: [
       'Walk in among the crops and press 🌾 Pick.',
       'It grows back in a while. Only pick a field with the farmer\'s say-so, mind.',
@@ -69,7 +69,7 @@ const STEPS = [
   },
   {
     id: 'sell', guide: 'farmer', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'market',
-    progress: 'Sell your veg at the goods shop: in through the door, to the counter, 💰 Sell',
+    progress: 'Sell your veg at the shop: in through the door, to the counter, 💰 Sell',
     done: 'There — coins in your pocket! The less the merchant has of something, the more he pays for it.',
     tips: [
       'In through the door, up to the counter at the back, then 💰 Sell.',
@@ -293,8 +293,8 @@ export function installTownIntro(T, ctx) {
     if (s.at === 'guideWork' && g?.work) return { icon: '📍', x: g.work.x, z: g.work.z, h: 1.5 };
     if (s.at === 'fire') return { icon: '📍', ...P.fire, h: 1.9 };
     if (s.at === 'fishSpot' && P.fishSpot) return { icon: '📍', x: P.fishSpot.x, z: P.fishSpot.z, h: 1.5 };
-    // (the goods shop's counter — over its door while the player's outside)
-    if (s.at === 'market') return { icon: '📍', ...T.stalls.spot('goods', 'counter'), h: 1.6 };
+    // (the shop's counter — over its door while the player's outside)
+    if (s.at === 'market') return { icon: '📍', ...T.stalls.spot('shop', 'counter'), h: 1.6 };
     return null;
   };
   // The tracker's first line
@@ -345,7 +345,7 @@ export function installTownIntro(T, ctx) {
     if (s.at === 'fishSpot') at = P.fishSpot;
     else if (s.at === 'fire') at = P.fire;
     else if (s.at === 'guideWork') at = g.work;
-    else if (s.at === 'market') at = P.rooms.goods?.door ?? null;
+    else if (s.at === 'market') at = P.rooms.shop?.door ?? null;
     if (!at) return null;
     const spot = T.randomNear(at.x, at.z, 2.2);
     leadAt = { step: i, guideId: g.id, x: spot.x, z: spot.z, gx: at.x, gz: at.z };
@@ -471,10 +471,10 @@ export function installTownIntro(T, ctx) {
     // The goal itself
     let goal = null;
     if (s.at === 'market') {
-      if (inRoom === 'goods') goal = { ...T.stalls.spot('goods', 'counter'), stop: 2.2 };
-      else if (!inRoom && P.rooms.goods) {
+      if (inRoom === 'shop') goal = { ...T.stalls.spot('shop', 'counter'), stop: 2.2 };
+      else if (!inRoom && P.rooms.shop) {
         // (just past the door's spot, toward the house: walking there goes in — walkInDoor)
-        const r = P.rooms.goods;
+        const r = P.rooms.shop;
         goal = { x: r.door.x - Math.sin(r.exitYaw) * 0.6, z: r.door.z - Math.cos(r.exitYaw) * 0.6, stop: 0.05 };
       }
     } else if (inRoom) return null;

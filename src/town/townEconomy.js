@@ -1,7 +1,7 @@
 // Town mode economy: the goods townsfolk (and the player) make, buy and sell, the market's
 // stock, and prices that follow it — scarce goods cost more, a glut is cheap. The merchant's
 // cash is the merchant townsperson's money (townMode.js), so the market can run dry of money
-// as well as goods. Weapons are sold at a fixed price.
+// as well as goods. Gear (and seeds) is sold at a fixed price.
 
 // base: price (coins) at the target stock; heal: health a bite gives the player;
 // cooked: made at the campfire's pot (townCooking.js — RECIPES) — nobody else makes them, so
@@ -23,8 +23,9 @@ const PRICE_MAX = 1.7;     // price multiple when sold out…
 const PRICE_MIN = 0.5;     // …and at twice the target stock (or more)
 const SELL_SHARE = 0.6;    // what the merchant pays, as a share of the price
 
-// The weapon stall's gear (townStalls.js). kind = what ctx.grantItem gets; needs = a
-// weapon that must be owned first
+// The shop's gear (townStalls.js — one shop sells everything: the goods on the back counter, this
+// on the side ones). kind = what ctx.grantItem gets (seeds / lockpick are the town's own:
+// townTrade.js); needs = a weapon that must be owned first
 export const SHOP_GEAR = [
   { id: 'sword',  kind: 'sword',  label: 'Sword',      emoji: '🗡️', price: 30,  desc: 'Swing it with the phone. Chops trees too.' },
   { id: 'rod',    kind: 'rod',    label: 'Fishing Rod', emoji: '🎣', price: 25,  desc: 'Swing it forward to cast at the fishing spot, pull back to hook, reel it in.' },
@@ -33,9 +34,15 @@ export const SHOP_GEAR = [
   { id: 'ammo',   kind: 'ammo',   label: '10 Bullets', emoji: '🔶', price: 15,  n: 10, needs: 'gun' },
   { id: 'bomb',   kind: 'bomb',   label: 'Bomb',       emoji: '💣', price: 12,  n: 1 },
   { id: 'bubble', kind: 'bubble', label: 'Bubble',     emoji: '🫧', price: 20,  n: 1 },
-  { id: 'wand',   kind: 'wand',   label: 'Magic Wand', emoji: '🪄', price: 150, desc: 'Swipe to cast fire / ice. Runs on mana.' },
-  { id: 'mana',   kind: 'mana',   label: 'Mana',       emoji: '🧪', price: 20,  needs: 'wand' },
+  { id: 'seeds',  kind: 'seeds',  label: '3 Veg Seeds', emoji: '🌱', price: 6, n: 3, desc: 'Plant them anywhere: a veg by tomorrow, or in under a minute watered with the hose.' },
   { id: 'lockpick', kind: 'lockpick', label: 'Lock-pick', emoji: '🔧', price: 15, desc: 'Opens one locked door, then it breaks. A break-in is a crime if anyone sees.' },
+];
+// The town wizard's stall out in the woods (townStalls.js 'wizard'): the wand and the potions,
+// as at the Showdown village's stall. life = health back to full (townTrade.js)
+export const WIZARD_WARES = [
+  { id: 'life',   kind: 'life',   label: 'Life Potion', emoji: '❤️', price: 25,  desc: 'Drink it for full health.' },
+  { id: 'mana',   kind: 'mana',   label: 'Mana Potion', emoji: '🧪', price: 20,  needs: 'wand', desc: 'Fills the wand\'s mana.' },
+  { id: 'wand',   kind: 'wand',   label: 'Magic Wand', emoji: '🪄', price: 150, desc: 'Swipe to cast fire / ice. Runs on mana.' },
 ];
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
