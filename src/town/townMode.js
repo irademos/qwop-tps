@@ -92,7 +92,7 @@ import { isMiiCharacterUrl } from '../models/glbCharacterModel.js';
 import { updateCampfire } from '../village/villageMode.js';
 import {
   BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
-  BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, SAVE_EVERY_S, SAVE_PREFIX,
+  BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, RAID_NOTICE_DIST, SAVE_EVERY_S, SAVE_PREFIX,
   START_MINUTES, TALK_RANGE, WALLET_MAX, _v2, angleLerp, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
@@ -162,6 +162,9 @@ export function createTownMode(ctx) {
   const markers = new Map();  // job id → 📍 / ❗ / ❓ sprite
   const campWatch = { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 }; // the player at the bandit camp
   T.strongboxHeld = false;    // (chain: the sheriff's strongbox)
+  T.raidNight = null;         // the night (its evening's day) the bandits last raided the town (townBandits.js)
+  T.raidPlan = null;          // tonight's raid: { night, houses, hit, tally, reported }
+  T.nightKills = { n: 0, coins: 0 }; // bandits the player beat at night, for the sheriff's thanks
   T.lastItems = null;         // the town gear, as it was when the player last left
   // Shared town: 'off' (a town of your own), 'joining', 'host' (runs the townsfolk), 'client'
   const net = ctx.net ?? null;
@@ -333,6 +336,8 @@ export function createTownMode(ctx) {
     nextJobId: T.nextJobId,
     chainsDone: [...T.chainsDone],
     strongboxHeld: T.strongboxHeld,
+    raidNight: T.raidNight,
+    nightKills: { ...T.nightKills },
     pending: T.arrivals.map((a) => a.role),
     departed: T.departed,
     nextId: T.nextId,
@@ -361,6 +366,7 @@ export function createTownMode(ctx) {
     market: T.market.snapshot(),
     houses: T.houses,
     fieldOwners: T.fieldOwners,
+    raidNight: T.raidNight,
     at: Date.now(),
   });
   const personalSnapshot = () => ({
@@ -376,6 +382,7 @@ export function createTownMode(ctx) {
     nextJobId: T.nextJobId,
     chainsDone: [...T.chainsDone],
     strongboxHeld: T.strongboxHeld,
+    nightKills: { ...T.nightKills },
     ...T.homesSnapshot(),
     ...T.farmSnapshot(),
   });
@@ -522,6 +529,8 @@ export function createTownMode(ctx) {
     T.restoreHomes(state, own);
     // (the fields — whose they are — and the player's seeds / what they planted: townFarming.js)
     T.restoreFarm(state, own);
+    // (the last raid night, the bandits the player beat last night — townBandits.js)
+    T.restoreBandits(state, own);
     T.nextId = state?.nextId ?? 1;
     if (state) {
       clock.day = state.day ?? 1;
@@ -736,7 +745,7 @@ export function createTownMode(ctx) {
     if (marketPanel.isOpen() && (!T.marketOpen() || !T.nearStall())) T.closeMarket();
     for (const g of T.gossip) if (T.simT - g.at > 240) g.fresh = false;
     if (T.isHost()) updateArrivals();
-    if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateIntro(); T.updateJobs(); T.updateReputation(); }
+    if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateNightRaid(); T.updateIntro(); T.updateJobs(); T.updateReputation(); }
     T.updateMarkers();
     renderWallet();
     if (T.simT > T.lodAt) { T.lodAt = T.simT + 0.4; T.updateLod(); }
@@ -809,7 +818,8 @@ export function createTownMode(ctx) {
     sleep: 'Sleeping', wander: 'Out and about', chat: 'Chatting', talk: 'Talking', follow: 'Following you',
     jailed: 'In jail', lost: 'Lost', flee: 'Running away', hide: 'Hiding', fight: 'Fighting', brawl: 'Brawling',
     mug: 'Up to no good', raid: 'Raiding', raidHome: 'Raiding', camp: 'At camp', respond: 'On duty',
-    search: 'On duty', arrest: 'On duty', guide: 'Showing you around',
+    search: 'On duty', arrest: 'On duty', guide: 'Showing you around', burgle: 'Breaking in', prowl: 'Prowling',
+    seek: 'Looking for you',
   };
   const npcStatus = (n) => {
     if (n.fighter) return 'Fighting';
@@ -894,6 +904,22 @@ export function createTownMode(ctx) {
       ctx.showBanner('BOUNTY!', `${name} is off to jail · 🪙 +${coins}`, 2600);
     },
     isActive: () => T.active,
+    // Who's out to hurt the player, for the sword / wand's camera auto-aim (bootstrapGameApp.js):
+    // whoever's fighting them within `range` m, and raiding bandits close by at night — feet positions
+    threats: (range) => {
+      if (!T.active || !T.ready || T.inRoom || T.jail || T.sequence || T.stalls.focused() || T.jobTalk.isOpen()) return [];
+      const out = [];
+      for (const n of T.npcs) {
+        if (!n.alive || n.dying) continue;
+        if (n.fighter) {
+          if (!n.fighter.isDead && T.distToPlayer(n) < range) out.push(n.fighter.group.position);
+        } else if (n.def.outlaw && T.isNight && n.body && !n.inside && ['raid', 'burgle', 'prowl', 'mug'].includes(n.task?.type)
+          && T.distToPlayer(n) < Math.min(range, RAID_NOTICE_DIST + 3) && !T.rooms.roomAt(n.x, n.z)) {
+          out.push(new THREE.Vector3(n.x, T.groundY(n), n.z));
+        }
+      }
+      return out;
+    },
     // Something grabbed in hand (townGrab.js): its Block bar mode ('water' — the hose; null: none),
     // the bar held down / let go, dropping it (the phone's 🗡/✋ button)
     holding: () => !!(T.active && T.ready && T.held),

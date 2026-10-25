@@ -535,7 +535,7 @@ export function installTownHomes(T, ctx) {
   const applyHouses = (h) => { T.houses = cleanHouses(h); };
 
   Object.assign(T, {
-    applyHouses, bagCount, bagFullNote, bagRoom, bedActs, chestActs, doorAccess, doorActs, freeHome, handleHomesNet, homesSnapshot,
+    applyHouses, bagCount, bagFullNote, bagRoom, bedActs, chestActs, doorAccess, doorActs, freeHome, handleHomesNet, homeKey: myKey, homesSnapshot,
     lockedNote, myHome, reserveFirst, resetHomes, restoreHomes, settleAfterSpawn, storage, updateHomes,
   });
 }

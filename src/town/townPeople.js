@@ -147,6 +147,7 @@ export function chatLines(gossip, playerName) {
   if (g?.kind === 'assault') return [`${playerName} attacked ${g.who}!`, 'In broad daylight?!'];
   if (g?.kind === 'arrest') return [`The sheriff locked up ${playerName}.`, 'About time.'];
   if (g?.kind === 'theft') return [`${playerName} was nicking veg${g.who ? ` from ${g.who}'s field` : ''}!`, 'Lock up your carrots.'];
+  if (g?.kind === 'burgled') return [`Bandits broke into ${g.who}'s house in the night!`, 'Lock your doors, I say.'];
   if (g?.kind === 'newcomer') return [`Have you met ${g.who}? New in town.`, 'Seems nice enough.'];
   return pick(SMALL_TALK);
 }

@@ -201,9 +201,33 @@ export const CAMP_ROB = 12;                 // coins taken off an unarmed trespa
 export const CAMP_CHASE_DIST = 34;          // m from the camp: the gang gives up the chase
 export const BANDIT_RETURN_S = [180, 300];  // s until a beaten bandit's place in the gang is filled
 export const BANDIT_CAMP_R = 7;             // m they loiter around the camp
-export const RAID_CHANCE = 0.35;            // a bandit's night decision: raid a field…
-export const BANDIT_MUG_CHANCE = 0.2;       // …or rob someone
 export const RAID_TAKE = 2;                 // crops a raider takes
+// Night raids (townBandits.js): every night the gang comes into town — breaking into houses (the
+// player's too, now and then: its chest), robbing whoever's out, stripping the fields
+export const NIGHT_RAID_HOURS = [22, 4];    // the raid sets off at the first, nobody starts anything new after the second
+export const NIGHT_RAID_ACTS = 2;           // break-ins / robberies / fields each raider does in a night
+export const NIGHT_RAID_STAY = 1;           // bandits (the chief first) who stay to watch the camp
+export const RAID_PLAYER_HOUSE_CHANCE = 0.35; // a night a player's (bought) house is one of the break-ins
+export const BURGLE_S = [4, 7];             // s a burglar spends inside
+export const BURGLE_SHARE = 0.3;            // of a townsperson's money a break-in takes…
+export const BURGLE_MAX = 15;               // …at most
+export const BURGLE_CHEST_SHARE = 0.35;     // of the coins in the player's chest…
+export const BURGLE_CHEST_MAX = 60;         // …at most
+export const BURGLE_GOODS = 3;              // goods taken out of it
+export const RAID_NOTICE_DIST = 7;          // m — a raider who sees the player this close goes for them (armed) or robs them
+export const NIGHT_ROB = 10;                // coins a raider takes off an unarmed player…
+export const NIGHT_ROB_EVERY_S = 60;        // …at most once in this long
+// The gang grows as the days go on (newcomers at the camp)
+export const GANG_GROW_EVERY_DAYS = 1;      // one more bandit every this many days…
+export const GANG_MAX = 10;                 // …up to this many
+// The sheriff's thanks: the morning after the player beats bandits at night, he comes over with a
+// reward (a job ready to be paid — townMissions.js 'nightThanks'); he also asks an armed player
+// to stand watch some nights (job 'nightWatch')
+export const NIGHT_KILL_REWARD = 15;        // coins a bandit beaten at night (the chief: double)
+export const SHERIFF_SEEK_S = 120;          // s the sheriff looks for the player before leaving it to them (❓ / ❗ stays)
+export const NIGHT_WATCH_KILLS = [2, 4];    // bandits to beat for 'nightWatch'
+export const NIGHT_WATCH_PER_KILL = 18;     // its reward a bandit
+export const NIGHT_WATCH_CHANCE = 0.3;      // a round of new jobs (JOB_REFRESH_S): the sheriff asks
 
 // ── Missions ──
 export const JOB_REFRESH_S = 120;           // s between new jobs being handed out

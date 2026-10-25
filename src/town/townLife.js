@@ -160,6 +160,8 @@ export function installTownLife(T, ctx) {
     if (t.type === 'raid') T.raidField(n, t);
     if (t.type === 'raidHome') { n.loot = 0; T.onRaidHome(n); T.decide(n); return; }
     if (t.type === 'wander' && Math.random() < 0.35) tryStartChat(n);
+    // (a raider prowling the town at night: whoever's still out)
+    if (t.type === 'prowl') T.startMugging(n);
   };
   const doActivity = (n, t, dt) => {
     if (t.type === 'social') n.needs.social = Math.max(0, n.needs.social - dt / 25);
@@ -184,6 +186,7 @@ export function installTownLife(T, ctx) {
       if (made) n.carry[made[0]] += Math.round(rand(made[1], made[2]));
       else if (n.def.law) n.money += WORK_PAY; // (the town pays its guards)
     }
+    if (t.type === 'burgle') T.burgle(n, t);
     // (a guard who lost the player keeps looking round where they were last seen)
     if (t.type === 'search' && T.law.stars > 0) {
       T.setTask(n, { type: 'search', to: T.randomNear(T.law.lastKnown.x, T.law.lastKnown.z, 8), dur: rand(1, 3) });

@@ -6,8 +6,8 @@ import { GOODS, RAW_IDS } from './townEconomy.js';
 import { characterForRole, firstName, randomName } from './townPeople.js';
 import { makeTextSprite } from '../village/villageMode.js';
 import {
-  JOB_REFRESH_S, KID_FOUND_DIST, KID_HOME_DIST, KID_WITH_PLAYER_DIST, MINUTES_PER_SEC, RAID_HOUR,
-  dist2, heightScale, pickOf,
+  JOB_REFRESH_S, KID_FOUND_DIST, KID_HOME_DIST, KID_WITH_PLAYER_DIST, MINUTES_PER_SEC, NIGHT_RAID_HOURS,
+  NIGHT_WATCH_CHANCE, NIGHT_WATCH_KILLS, NIGHT_WATCH_PER_KILL, RAID_HOUR, dist2, heightScale, pickOf,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -58,6 +58,8 @@ export function installTownMissions(T, ctx) {
   const hasJob = (id) => T.jobs.some((j) => j.giverId === id);
   const offerJobs = () => {
     const offered = () => T.jobs.filter((j) => j.status === 'open' && !j.shady).length;
+    const watch = nightWatchJob();
+    if (watch) T.jobs.push(watch);
     // Chains first (one step at a time each)
     for (const chain of CHAINS) {
       if (offered() >= OPEN_JOBS) break;
@@ -74,11 +76,26 @@ export function installTownMissions(T, ctx) {
     const drifter = T.npcs.find((n) => n.alive && n.role === 'drifter' && n.jailedUntil <= T.simT && !hasJob(n.id));
     if (drifter) T.jobs.push(shadyJob(drifter));
   };
+  // Standing watch tonight (once the player has a weapon — some days): the sheriff comes over
+  // to ask (townBandits.js seekPlayer); offered before his chain's next step
+  const nightWatchJob = () => {
+    const h = T.hour();
+    const sheriff = chainCtx().byRole('sheriff');
+    if (!sheriff || hasJob(sheriff.id) || !ctx.hasWeapon() || h < 8 || h >= 20 || Math.random() > NIGHT_WATCH_CHANCE
+      || T.jobs.some((j) => j.kind === 'nightWatch')) return null;
+    const n = NIGHT_WATCH_KILLS[0] + Math.floor(Math.random() * (NIGHT_WATCH_KILLS[1] - NIGHT_WATCH_KILLS[0] + 1));
+    return makeJob({
+      kind: 'nightWatch', giverId: sheriff.id,
+      title: 'Stand watch tonight',
+      desc: `The bandits come into town every night now — breaking into houses, robbing whoever's out — and there are more of them every day. You've got a weapon. Help my guards keep watch tonight: beat ${n} of them before dawn.`,
+      reward: { coins: n * NIGHT_WATCH_PER_KILL, attitude: 0.2, town: 0.03 }, data: { n, kills: 0 },
+    });
+  };
   const lawJob = () => {
+    const h = T.hour();
     // A bounty on a bandit not already posted
     const posted = new Set(T.jobs.filter((j) => j.kind === 'bounty').map((j) => j.data.targetId));
     const bandit = T.npcs.find((n) => n.alive && n.def.outlaw && !posted.has(n.id));
-    const h = T.hour();
     const fields = T.layout.places.fields;
     if (Math.random() < 0.6 && bandit) {
       return makeJob({
@@ -193,6 +210,8 @@ export function installTownMissions(T, ctx) {
       case 'guardField': return 'saving my field from the raiders';
       case 'bounty': return 'dealing with that bandit';
       case 'killBandits': return 'taking on the bandits';
+      case 'nightWatch': return 'standing watch against the bandits';
+      case 'nightThanks': return 'fighting off the bandits in the night';
       case 'debt': return 'getting my money back';
       case 'returnTo': return 'bringing back the strongbox';
       default: return 'that job';
@@ -236,6 +255,8 @@ export function installTownMissions(T, ctx) {
   // Someone died: bounties pay, jobs for / about them end
   const onJobDeath = (n, byPlayer) => {
     const mine = byPlayer || T.distToPlayer(n) < 25;
+    // (a bandit the player beat at night: the sheriff's thanks in the morning — townBandits.js)
+    if (n.def.outlaw && byPlayer && T.isNight) T.noteNightKill(n);
     for (const j of [...T.jobs]) {
       if (j.kind === 'bounty' && j.data.targetId === n.id) {
         if (j.status === 'active' && mine) markDone(j, `💰 ${n.name} is down`);
@@ -243,6 +264,9 @@ export function installTownMissions(T, ctx) {
       } else if (j.kind === 'killBandits' && n.def.outlaw && j.status === 'active' && mine) {
         j.data.kills += 1;
         if (j.data.kills >= j.data.n) markDone(j);
+      } else if (j.kind === 'nightWatch' && n.def.outlaw && j.status === 'active' && mine && T.isNight) {
+        j.data.kills += 1;
+        if (j.data.kills >= j.data.n) markDone(j, '🌙 You kept the town safe tonight');
       } else if (j.kind === 'guardField' && (j.data.raiders ?? []).includes(n.id)) {
         // (checked in updateJobs: all raiders down)
       } else if (j.status === 'done' && n.id === j.giverId) {
@@ -395,6 +419,7 @@ export function installTownMissions(T, ctx) {
       case 'deliver': return `${Math.min(T.goods[d.good], d.n)} / ${d.n} ${GOODS[d.good].emoji} → ${who(d.toId)}`;
       case 'bounty': return 'Find them near the bandit camp';
       case 'killBandits': return `${d.kills} / ${d.n} bandits`;
+      case 'nightWatch': return T.isNight ? `${d.kills} / ${d.n} bandits — they're in town!` : `${d.kills} / ${d.n} bandits · tonight from ${NIGHT_RAID_HOURS[0]}:00`;
       case 'guardField': return d.raidStarted ? 'Raiders at the field!' : `Be at the field by ${RAID_HOUR}:00`;
       case 'findKid': return d.found ? `Walk ${who(d.kidId)} home` : `Look for ${who(d.kidId)} out of town`;
       case 'debt': return `Talk to ${who(d.debtorId)}`;
@@ -412,6 +437,7 @@ export function installTownMissions(T, ctx) {
       case 'deliver': case 'returnTo': return at(npcById(d.toId));
       case 'bounty': return at(npcById(d.targetId));
       case 'killBandits': return { ...P.camp, h: 2.6 };
+      case 'nightWatch': { const b = T.isNight ? T.nearestRaider() : null; return b ? at(b) : { ...P.center, h: 2.6 }; }
       case 'guardField': return { ...(P.fields[d.field] ?? P.fields[0]), h: 1.5 };
       case 'findKid': { const kid = npcById(d.kidId); return d.found && kid ? { ...kid.home, h: 2 } : at(kid); }
       case 'debt': return at(npcById(d.debtorId));
@@ -487,7 +513,10 @@ export function installTownMissions(T, ctx) {
     const who = `${n.def.emoji} ${firstName(n.name)}`;
     if (j.status === 'done') {
       const reward = rewardText(j.reward);
+      const beaten = j.data.beaten ?? 0;
       const lines = {
+        nightThanks: `${beaten === 1 ? 'That bandit' : `The ${beaten} bandits`} you took down in the night — word gets round, ${ctx.getPlayerName()}. Brindlewick owes you. Here.`,
+        nightWatch: `You stood watch and the bandits paid for it. Good work — here's what I promised${beaten ? ', and a little extra for the rest you took down' : ''}.`,
         bounty: 'You got them! The town sleeps easier tonight.',
         killBandits: 'That\'ll teach them. Well done.',
         guardField: 'You saved the harvest! I can\'t thank you enough.',

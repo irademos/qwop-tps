@@ -192,6 +192,7 @@ export function installTownWire(T, ctx) {
     if (Number.isFinite(s.day)) T.clock.day = s.day;
     if (Number.isFinite(s.minutes)) T.clock.minutes = s.minutes;
     if (Array.isArray(s.departed)) T.departed = s.departed;
+    if (Number.isFinite(s.raidNight)) T.raidNight = s.raidNight;
     if (s.houses) T.applyHouses(s.houses);
     if (s.fieldOwners) { T.applyFieldOwners(s.fieldOwners); T.assignWork(); }
     if (s.market) { for (const g of GOOD_IDS) if (Number.isFinite(s.market[g])) T.market.stock[g] = s.market[g]; T.noteStock(); }
@@ -255,6 +256,8 @@ export function installTownWire(T, ctx) {
     // (who owns which house, a player asking for one / buying it — townHomes.js)
     if (T.handleHomesNet(from, d)) return;
     if (T.handleFarmNet(from, d)) return;
+    // (the night raid's call, a player's house broken into — townBandits.js)
+    if (T.handleBanditNet(from, d)) return;
     switch (d.op) {
       case 'hello':
         if (T.netMode === 'host' && T.ready) T.net.send(from, { w: 1, op: 'full', s: fullSnapshot() });
