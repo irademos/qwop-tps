@@ -948,6 +948,20 @@ function buildSwordGyroPanel() {
   const gyroSensHint = createElement('div', 'settings-muted');
   gyroSensHint.textContent = 'How far the sword turns for each tilt of the phone. "This Device" is used when the game screen is also the sword — higher means smaller movements, so you can keep watching the screen.';
 
+  // Empty hands (Town's ✋ Hands): the gyro turns the player, leaning the phone walks
+  const handsSection = createElement('h3', 'settings-section-title', 'Empty Hands');
+  const handsGroup = createElement('div', 'settings-field');
+  const handsLabel = createElement('label', 'settings-label', 'Gyro Turn + Lean to Walk');
+  handsLabel.setAttribute('for', 'sg-hands-move');
+  const handsToggle = createElement('input', 'settings-checkbox');
+  handsToggle.id = 'sg-hands-move';
+  handsToggle.type = 'checkbox';
+  handsToggle.checked = window.phoneSwordHandsMove !== false;
+  handsToggle.addEventListener('change', () => window.setPhoneSwordHandsMove?.(handsToggle.checked));
+  const handsHint = createElement('div', 'settings-muted');
+  handsHint.textContent = 'With nothing in your hands (Town\'s ✋ Hands), turning the phone turns you like the shield, and leaning it forward / back walks forward / back. Holding it the way it was when your hands emptied (or you last recalibrated) stands still.';
+  handsGroup.append(handsLabel, handsToggle, handsHint);
+
   panelEl.append(
     calibSection,
     recalGroup,
@@ -955,7 +969,9 @@ function buildSwordGyroPanel() {
     gyroSensSection,
     localSensField.field,
     phoneSensField.field,
-    gyroSensHint
+    gyroSensHint,
+    handsSection,
+    handsGroup
   );
 
   elements.swordGyroFields = {
