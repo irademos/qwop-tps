@@ -29,7 +29,7 @@ export const HOUSE_DOORS = {
   'medieval_building_005.glb': { side: '+x', at: 0.36, inset: 0.55 },
   // (the door in the back corner wall — the front one's up a flight of stairs)
   'fantasy_house.glb': { point: [0.53, -0.5], normal: [1, -1] },
-  'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48, out: 0.3, enter: 0.2 },
+  'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48 },
 };
 export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)…
 export const HOUSE_DOOR_MAX_OUT = 3.5;      // …or further out (up to this), past a roof overhang the height ray lands on
