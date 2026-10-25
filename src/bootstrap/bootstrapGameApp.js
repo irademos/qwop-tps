@@ -5850,12 +5850,8 @@ async function initCore(runtimeContext) {
   const WEAPON_AIM_PITCH_MIN = THREE.MathUtils.degToRad(-50);
   const WEAPON_AIM_PITCH_MAX = THREE.MathUtils.degToRad(65);
   const WEAPON_AIM_SMOOTH = 18;          // 1/s — takes the edge off amplified sensor noise
-  // Empty hands (Town's ✋ Hands): the same turn as the shield, and the phone's tilt walks
-  // instead of aiming — lean it forward (top away / down) to walk forward, back to walk back,
-  // still within the big dead zone in the middle. Settings → Sword Gyro turns it off
-  // (`sq:handsGyroMove`, window.phoneSwordHandsMove).
-  const HANDS_LEAN_DEADZONE = THREE.MathUtils.degToRad(18);
-  const HANDS_LEAN_FULL = THREE.MathUtils.degToRad(42);   // full speed this far past neutral
+  // Empty hands (Town's ✋ Hands): the same turn as the shield (no aim pitch). Settings →
+  // Sword Gyro turns it off (`sq:handsGyroMove`, window.phoneSwordHandsMove).
   const HANDS_GYRO_MOVE_KEY = 'sq:handsGyroMove';
   window.phoneSwordHandsMove = (() => {
     try { return localStorage.getItem(HANDS_GYRO_MOVE_KEY) !== '0'; } catch (_) { return true; }
@@ -5863,13 +5859,6 @@ async function initCore(runtimeContext) {
   window.setPhoneSwordHandsMove = (on) => {
     window.phoneSwordHandsMove = !!on;
     try { localStorage.setItem(HANDS_GYRO_MOVE_KEY, on ? '1' : '0'); } catch (_) { /* ignore */ }
-  };
-  let _handsLeanForce = 0; // the joystick force the lean last set (0 = not driving it)
-  const _releaseHandsLean = () => {
-    if (_handsLeanForce > 0 && playerControls && playerControls.joystickForce === _handsLeanForce) {
-      playerControls.joystickForce = 0;
-    }
-    _handsLeanForce = 0;
   };
   const _handsGyroWanted = () => !!_townLoadout && window.phoneSwordHandsMove !== false
     && !!town?.isActive() && !town.handsBusy?.() && _heldWeaponId() == null
@@ -5891,7 +5880,6 @@ async function initCore(runtimeContext) {
   const _stopWeaponGyroAim = () => {
     _weaponAim.active = false;
     if (playerControls) playerControls.weaponAimPitch = null;
-    _releaseHandsLean();
   };
   const _updateWeaponGyroAim = (dt) => {
     const g = window.phoneSwordGyro;
@@ -5939,30 +5927,11 @@ async function initCore(runtimeContext) {
     const yawOffset = THREE.MathUtils.clamp(_weaponAim.phoneYaw * WEAPON_AIM_YAW_GAIN, -WEAPON_AIM_YAW_OFFSET_MAX, WEAPON_AIM_YAW_OFFSET_MAX);
     playerControls.yaw = _weaponAim.baseYaw + yawOffset;
     _weaponAim.lastYaw = playerControls.yaw;
-    if (hands) {
-      _updateHandsLean(_weaponAim.phonePitch);
-      return;
-    }
+    if (hands) return;
     // Read by PlayerControls (aim direction + camera pitch) and the pistol (arms + gun pitch)
     playerControls.weaponAimPitch = THREE.MathUtils.clamp(
       _weaponAim.phonePitch * WEAPON_AIM_PITCH_GAIN, WEAPON_AIM_PITCH_MIN, WEAPON_AIM_PITCH_MAX
     );
-  };
-
-  // Lean → the joystick, straight forward / back (left alone while the on-screen or the
-  // phone's joystick or WASD steers)
-  const _updateHandsLean = (pitch) => {
-    const pc = playerControls;
-    const othersSteer = (pc.joystickForce > 0 && pc.joystickForce !== _handsLeanForce)
-      || ['w', 'a', 's', 'd'].some((k) => pc.keysPressed.has(k));
-    if (othersSteer) { _handsLeanForce = 0; return; }
-    const past = Math.abs(pitch) - HANDS_LEAN_DEADZONE;
-    if (past <= 0) { _releaseHandsLean(); return; }
-    // (the controls ignore a force under 0.1 — start just above it)
-    const f = Math.min(1, 0.15 + 0.85 * past / (HANDS_LEAN_FULL - HANDS_LEAN_DEADZONE));
-    pc.joystickAngle = pitch < 0 ? Math.PI / 2 : -Math.PI / 2; // tipped down = forward
-    pc.joystickForce = f;
-    _handsLeanForce = f;
   };
 
   const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
