@@ -224,7 +224,7 @@ export function installTownFolk(T, ctx) {
     if (n.guiding) { setTask(n, { type: 'guide', dur: Infinity }); return; }
     // (a claim's over: back to the host's town)
     if (T.netMode === 'client') { release(n); return; }
-    if (def.outlaw) { T.decideBandit(n, h); return; }
+    if (def.outlaw) { T.decideBandit(n); return; }
     // A drifter out at night may go after someone's purse
     if (n.role === 'drifter' && (h >= 21 || h < 4) && Math.random() < MUG_CHANCE && T.startMugging(n)) return;
     const options = [];

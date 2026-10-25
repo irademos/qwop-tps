@@ -7762,6 +7762,13 @@ async function initCore(runtimeContext) {
   const _shieldHitFrom = { position: new THREE.Vector3() };
   let _duelCamLastYaw = null;
   let _duelCamManualUntil = 0;
+  // Town: the sword / wand's camera auto-aim at whoever's coming at the player (town.threats)
+  let _townCamLastYaw = null;
+  let _townCamManualUntil = 0;
+  let _townCamTarget = null;          // the threat tracked last frame (its feet)
+  const TOWN_AIM_RANGE = 12;          // m
+  const TOWN_AIM_MANUAL_MS = 2500;    // ms turning by hand pauses it
+  const TOWN_AIM_SWITCH_CLOSER = 2.5; // m another threat must be closer to take over
   const _teleportPlayer = (x, z, yaw) => {
     const groundY = getSpawnY(x, z, 0);
     const y = Number.isFinite(groundY) ? groundY : playerModel.position.y;
@@ -8683,6 +8690,8 @@ async function initCore(runtimeContext) {
     // Something in hand (the bandits at their camp rob an unarmed trespasser instead of fighting);
     // a fishing rod is no weapon
     isPlayerArmed: () => !!_heldWeaponId() && !isRodEquipped(),
+    // A weapon of the town's own, in hand or not (the sheriff asks such a player to stand watch at night)
+    hasWeapon: () => { const it = _townLoadout ? _townItems() : null; return !!(it && (it.sword || it.gun || it.wand)); },
     putWeaponsAway: () => _putWeaponsAway(),
     // Fishing (townTrade.js): the rod in hand, its model (the tip casts the line), the reel
     isRodEquipped: () => isRodEquipped(),
@@ -9592,6 +9601,41 @@ async function initCore(runtimeContext) {
           _psCamLastYaw = playerControls.yaw;
         }
       }
+    }
+
+    // ── Town: with the sword / wand out, the camera turns toward whoever's coming at the player
+    // (townsfolk / the law / bandits fighting them, raiding bandits close by at night); turning
+    // by hand pauses it ──
+    if (town?.isActive() && playerControls && !playerDead && foamSword?.holder === playerControls && !_rodActive && !_weaponAim.active) {
+      const _nowT = performance.now();
+      if (_townCamLastYaw !== null && Math.abs(wrapDeltaRad(playerControls.yaw - _townCamLastYaw)) > 0.01) {
+        _townCamManualUntil = _nowT + TOWN_AIM_MANUAL_MS;
+      }
+      const _pp = playerModel.position;
+      let _tgt = null;
+      let _tgtD = Infinity;
+      let _keep = null;
+      let _keepD = Infinity;
+      for (const _p of town.threats(TOWN_AIM_RANGE)) {
+        const _d = Math.hypot(_p.x - _pp.x, _p.z - _pp.z);
+        if (_d < _tgtD) { _tgtD = _d; _tgt = _p; }
+        // (the one tracked last frame: kept unless another is clearly closer)
+        if (_townCamTarget && Math.hypot(_p.x - _townCamTarget.x, _p.z - _townCamTarget.z) < 1 && _d < _keepD) { _keepD = _d; _keep = _p; }
+      }
+      if (_keep && _keepD - _tgtD < TOWN_AIM_SWITCH_CLOSER) _tgt = _keep;
+      _townCamTarget = _tgt ? { x: _tgt.x, z: _tgt.z } : null;
+      if (_tgt && _nowT >= _townCamManualUntil) {
+        const _dx = _tgt.x - _pp.x;
+        const _dz = _tgt.z - _pp.z;
+        if (Math.hypot(_dx, _dz) > 0.5) {
+          playerControls.yaw += wrapDeltaRad(Math.atan2(_dx, _dz) - playerControls.yaw) * Math.min(1, frameDelta * 4);
+        }
+        _aimCameraPitchAt(_tgt, frameDelta);
+      }
+      _townCamLastYaw = playerControls.yaw;
+    } else {
+      _townCamLastYaw = null;
+      _townCamTarget = null;
     }
 
     // ── Duel / battle: camera turns toward the (closest) opponent (keyboard / touch

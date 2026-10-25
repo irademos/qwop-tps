@@ -72,7 +72,7 @@ export function installTownReactions(T, ctx) {
       return;
     }
     if (n.attitude < GRUDGE_ATTITUDE && d < AVOID_DIST && T.simT > n.avoidAt && !n.def.law
-      && !['flee', 'sleep', 'brawl', 'arrest', 'mug', 'raid'].includes(n.task?.type)) {
+      && !['flee', 'sleep', 'brawl', 'arrest', 'mug', 'raid', 'burgle', 'prowl'].includes(n.task?.type)) {
       n.avoidAt = T.simT + 20;
       T.say(n, pickOf(SHOUT_STAY_BACK));
       T.flee(n);
@@ -263,6 +263,7 @@ export function installTownReactions(T, ctx) {
         return true;
       }
       case 'guide': return T.updateGuide(n, t, dt); // (the first day — townIntro.js)
+      case 'seek': return T.updateSeek(n, t, dt); // (the sheriff coming over — townBandits.js)
       case 'mug': {
         const v = t.target;
         if (!v?.alive || v.fighter || v.inside || v.jailedUntil > T.simT) { n.task = null; T.decide(n); return true; }
@@ -308,6 +309,7 @@ export function installTownReactions(T, ctx) {
           T.say(o, shout(SHOUT_THIEF));
           npcCrime(n, 'mug', o);
           T.flee(o, n);
+          if (n.def.outlaw) T.noteRaid('mugs');
           if (n.def.outlaw) T.setTask(n, { type: 'raidHome', to: T.randomNear(P.camp.x, P.camp.z, 3), dur: 2, run: true });
           else T.startTask(n, 'wander');
           return true;
@@ -325,7 +327,7 @@ export function installTownReactions(T, ctx) {
   };
 
   Object.assign(T, {
-    canRecruit, dismiss, endBrawl, family, fighterGear, followers, heroic, isOutlaw, npcCrime,
+    canRecruit, chase, dismiss, endBrawl, family, fighterGear, followers, heroic, isOutlaw, npcCrime,
     rally, reactToPlayer, recruit, startMugging, updateSpecialTask,
   });
 }
