@@ -5850,8 +5850,22 @@ async function initCore(runtimeContext) {
   const WEAPON_AIM_PITCH_MIN = THREE.MathUtils.degToRad(-50);
   const WEAPON_AIM_PITCH_MAX = THREE.MathUtils.degToRad(65);
   const WEAPON_AIM_SMOOTH = 18;          // 1/s — takes the edge off amplified sensor noise
+  // Empty hands (Town's ✋ Hands): the same turn as the shield (no aim pitch). Settings →
+  // Sword Gyro turns it off (`sq:handsGyroMove`, window.phoneSwordHandsMove).
+  const HANDS_GYRO_MOVE_KEY = 'sq:handsGyroMove';
+  window.phoneSwordHandsMove = (() => {
+    try { return localStorage.getItem(HANDS_GYRO_MOVE_KEY) !== '0'; } catch (_) { return true; }
+  })();
+  window.setPhoneSwordHandsMove = (on) => {
+    window.phoneSwordHandsMove = !!on;
+    try { localStorage.setItem(HANDS_GYRO_MOVE_KEY, on ? '1' : '0'); } catch (_) { /* ignore */ }
+  };
+  const _handsGyroWanted = () => !!_townLoadout && window.phoneSwordHandsMove !== false
+    && !!town?.isActive() && !town.handsBusy?.() && _heldWeaponId() == null
+    && !!playerControls?.enabled && !_gamePaused && !isPlayerFrozen() && !playerRoll;
   const _weaponAim = {
     active: false,
+    hands: false,
     neutralQ: new THREE.Quaternion(),
     earthToGameQ: new THREE.Quaternion(),
     baseYaw: 0,
@@ -5870,13 +5884,17 @@ async function initCore(runtimeContext) {
   const _updateWeaponGyroAim = (dt) => {
     const g = window.phoneSwordGyro;
     const holding = !!playerControls && (pistol?.holder === playerControls || shield?.holder === playerControls);
-    if (!holding || playerDead || !g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) {
+    const hands = !holding && _handsGyroWanted();
+    if ((!holding && !hands) || playerDead || !g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) {
       if (_weaponAim.active) _stopWeaponGyroAim();
       return;
     }
+    // Switching between a weapon and empty hands starts over from the current pose
+    if (_weaponAim.active && _weaponAim.hands !== hands) _stopWeaponGyroAim();
     _pswDeviceQuat(Number.isFinite(g.alpha) ? g.alpha : 0, g.beta, g.gamma, _weaponAimDevQ);
     if (!_weaponAim.active) {
       _weaponAim.active = true;
+      _weaponAim.hands = hands;
       _weaponAim.neutralQ.copy(_weaponAimDevQ);
       _pswEarthToGame(_weaponAim.neutralQ, _weaponAim.earthToGameQ);
       _weaponAim.baseYaw = playerControls.yaw;
@@ -5909,6 +5927,7 @@ async function initCore(runtimeContext) {
     const yawOffset = THREE.MathUtils.clamp(_weaponAim.phoneYaw * WEAPON_AIM_YAW_GAIN, -WEAPON_AIM_YAW_OFFSET_MAX, WEAPON_AIM_YAW_OFFSET_MAX);
     playerControls.yaw = _weaponAim.baseYaw + yawOffset;
     _weaponAim.lastYaw = playerControls.yaw;
+    if (hands) return;
     // Read by PlayerControls (aim direction + camera pitch) and the pistol (arms + gun pitch)
     playerControls.weaponAimPitch = THREE.MathUtils.clamp(
       _weaponAim.phonePitch * WEAPON_AIM_PITCH_GAIN, WEAPON_AIM_PITCH_MIN, WEAPON_AIM_PITCH_MAX
