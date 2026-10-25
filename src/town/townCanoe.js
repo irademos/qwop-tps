@@ -7,12 +7,12 @@
 //
 // Paddling is the oar's blade moving through the water: each frame its blade (`oar-blade`,
 // oar.js) is sampled in the world; while it is under the water and out past the hull, it pushes
-// the canoe against the way it moves (CANOE_PADDLE_PUSH × its speed), at the blade — so off to
-// the side it turns the canoe too (CANOE_PADDLE_TURN of the moment): a stroke back on the left
-// drives it forward and a little to the right, on the right forward and a little to the left,
-// a stroke forward backs it up, and a blade held still in the water as it moves drags (a
-// rudder). The hull slides along easily and hardly sideways (CANOE_DRAG / CANOE_SIDE_DRAG).
-// The joystick / WASD paddle too (forward / back, turn) — without a gyro that's the only way.
+// the canoe forward — only forward: the part of its push along the hull, against the way the
+// blade moves back (CANOE_PADDLE_PUSH × its speed; no backing up, no braking) — at the blade, so
+// off to the side it turns the canoe too (CANOE_PADDLE_TURN of the moment): a stroke back on the
+// left drives it forward and a little to the right, on the right forward and a little to the
+// left. The hull slides along easily and hardly sideways (CANOE_DRAG / CANOE_SIDE_DRAG).
+// The joystick / WASD paddle too (forward, turn) — without a gyro that's the only way.
 // It won't go where the water is shallower than CANOE_MIN_DEPTH (runs aground). 🛶 Get out
 // with dry ground within CANOE_SHORE_DIST: the player steps onto it, the canoe stays there
 // (back at its mooring the next time Town opens). Dying / an arrest / leaving Town gets them
@@ -191,14 +191,22 @@ export function installTownCanoe(T, ctx) {
         c.blade = { x: _b.x, y: _b.y, z: _b.z, t: now };
         const span = prev ? now - prev.t : 0;
         if (span > 1e-3 && span < 0.5) {
-          const bvx = (_b.x - prev.x) / span;
-          const bvz = (_b.z - prev.z) / span;
-          const bite = THREE.MathUtils.clamp((waterY(_b.x, _b.z) - _b.y) / CANOE_BLADE_DEPTH, 0, 1);
+          let bvx = (_b.x - prev.x) / span;
+          let bvz = (_b.z - prev.z) / span;
+          // (a quick flick of the phone still counts, at most this fast)
+          const bs = Math.hypot(bvx, bvz);
+          if (bs > CANOE_BLADE_MAX_SPEED) { bvx *= CANOE_BLADE_MAX_SPEED / bs; bvz *= CANOE_BLADE_MAX_SPEED / bs; }
+          const bite = THREE.MathUtils.clamp((waterY(_b.x, _b.z) - _b.y) / CANOE_BLADE_DEPTH + 0.25, 0, 1);
           const l = toLocal(c, _b.x, _b.z);
-          const outside = Math.abs(l.x) > CANOE_HALF_WIDTH * 0.85 || Math.abs(l.z) > CANOE_HALF_LENGTH - 0.2;
-          if (bite > 0 && outside && Math.hypot(bvx, bvz) < CANOE_BLADE_MAX_SPEED) {
-            const fx = -bvx * CANOE_PADDLE_PUSH * bite;
-            const fz = -bvz * CANOE_PADDLE_PUSH * bite;
+          const outside = Math.abs(l.x) > CANOE_HALF_WIDTH * 0.6 || Math.abs(l.z) > CANOE_HALF_LENGTH - 0.2;
+          // Only the stroke's push forward counts (no backing up, and a blade left in the water
+          // doesn't brake it): the blade moving back along the hull drives it on
+          const fwdX = Math.sin(c.yaw);
+          const fwdZ = Math.cos(c.yaw);
+          const push = -(bvx * fwdX + bvz * fwdZ) * CANOE_PADDLE_PUSH * bite;
+          if (outside && push > 0) {
+            const fx = fwdX * push;
+            const fz = fwdZ * push;
             c.vx += fx * dt;
             c.vz += fz * dt;
             // (pushed off its middle: it turns — the moment about the vertical)
@@ -212,7 +220,7 @@ export function installTownCanoe(T, ctx) {
       }
       // The joystick / WASD paddle for the player
       const steer = ctx.getSteer();
-      if (Math.abs(steer.fwd) > 0.05) {
+      if (steer.fwd > 0.05) { // (forward only)
         c.vx += Math.sin(c.yaw) * steer.fwd * CANOE_STEER_ACCEL * dt;
         c.vz += Math.cos(c.yaw) * steer.fwd * CANOE_STEER_ACCEL * dt;
       }
