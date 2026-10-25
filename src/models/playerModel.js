@@ -84,12 +84,17 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       const fst = playerGroup.userData.foamSwordHandTarget;
       if (fst) {
         for (const side of lantern ? ['left'] : ['left', 'right']) {
-          // Right tracking slot (support hand) sits slightly lower on the handle
-          const yOff = side === 'right' ? -0.08 : 0;
-          _fsHandTarget.set(fst.x, fst.y + yOff, fst.z).multiplyScalar(grip);
+          // Right tracking slot (support hand) sits slightly lower on the handle; a weapon held
+          // two hands apart (Town's canoe oar) gives the other hand its own spot this frame —
+          // foamSwordSupport (consumed like foamSwordMode)
+          const support = side === 'right' ? playerGroup.userData.foamSwordSupport : null;
+          const yOff = side === 'right' && !playerGroup.userData.foamSwordSupport ? -0.08 : 0;
+          if (support) _fsHandTarget.set(support.x, support.y, support.z).multiplyScalar(grip);
+          else _fsHandTarget.set(fst.x, fst.y + yOff, fst.z).multiplyScalar(grip);
           rig.floatingHands[side].position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
         }
       }
+      playerGroup.userData.foamSwordSupport = null;
     } else if (gyroLive) {
       _gyroArmDir.set(0, 0, 1).applyQuaternion(gyroQ);
       _fsHandTarget.set(

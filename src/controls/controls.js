@@ -133,6 +133,9 @@ export class PlayerControls {
     this.moveSpeedScale = 1;
     // (controls) => void, after each move: may pull playerX / playerZ back inside an area
     this.positionConstraint = null;
+    // Standing still wherever the game puts the player (Town's canoe): no walking, climbing or
+    // rolling — the joystick / WASD are the game's to read
+    this.holdStill = false;
     // () => bool: whether a quick swipe on this screen rolls (false: it stays a camera drag —
     // this device is the gyro sword, so swipes are sword moves; the QR phone page still rolls)
     this.swipeRollAllowed = () => true;
@@ -686,6 +689,7 @@ export class PlayerControls {
     const appState = appContext.uiState.appState ?? window.appState;
     if (appState?.isWandEquipped?.()) return 'magic_wand';
     if (appState?.isRodEquipped?.()) return 'fishing_rod';
+    if (appState?.isOarEquipped?.()) return 'canoe_oar';
     // (Town lets the player put everything away: then nothing is in hand)
     return this.getEquippedWeapon('right')?.itemId ?? (appState?.isUnarmedAllowed?.() ? null : 'foamSword');
   }
@@ -729,7 +733,9 @@ export class PlayerControls {
     // (Town: the sword is bought like the rest, and ✋ Hands puts everything away)
     const unarmedAllowed = !!appState?.isUnarmedAllowed?.();
     const hasSword = appState?.ownsSword?.() ?? true;
-    const weapons = [
+    // (in Town's canoe the oar is all there is: no weapon buttons)
+    const inCanoe = !!appState?.isInCanoe?.();
+    const weapons = inCanoe ? [] : [
       ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
       ...(hasWand ? [{ id: 'magic_wand', label: '🪄 Wand' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
@@ -739,7 +745,7 @@ export class PlayerControls {
     // Default to foamSword when nothing detected (unless nothing in hand is allowed)
     const equippedId = this.getEquippedItemId();
     const others = weapons.filter(w => w.id !== equippedId);
-    if (unarmedAllowed && equippedId) others.push({ id: HANDS_ID, label: '✋ Hands' });
+    if (unarmedAllowed && equippedId && !inCanoe) others.push({ id: HANDS_ID, label: '✋ Hands' });
     [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5].forEach((button, index) => {
       const w = others[index];
       button.dataset.psWeaponId = w ? w.id : '';
@@ -1088,7 +1094,7 @@ export class PlayerControls {
    * the clip. Returns false when it can't roll now.
    */
   startRoll(dx, dy) {
-    if (this._roll || this._climb || window.phoneSwordAirborne) return false;
+    if (this._roll || this._climb || this.holdStill || window.phoneSwordAirborne) return false;
     const len = Math.hypot(dx, dy);
     if (!(len > 1e-6)) return false;
     const forward = new THREE.Vector3();
@@ -1290,6 +1296,7 @@ export class PlayerControls {
       } else {
         movement.copy(moveDirection);
       }
+      if (this.holdStill) movement.set(0, 0, 0);
 
       const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
         ? this.deltaSeconds
@@ -1297,7 +1304,7 @@ export class PlayerControls {
       const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05 * (this.moveSpeedScale ?? 1);
 
       // Auto-walk counts as full forward input along its direction for wall climbing
-      const autoMove = this._autoMove;
+      const autoMove = this.holdStill ? null : this._autoMove;
       this._autoMove = null;
       let autoLen = autoMove ? Math.hypot(autoMove.x, autoMove.z) : 0;
       let climbInput = movement;

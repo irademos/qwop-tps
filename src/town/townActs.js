@@ -171,6 +171,8 @@ export function installTownActs(T, ctx) {
       out.push(...T.fishingActs(false)); // (the reel / the rod do the rest; no gyro: ⬆ Pull)
       return out;
     }
+    // In the canoe (townCanoe.js): 🛶 Get out by the shore, nothing else
+    if (T.inCanoe()) return T.canoeActs(false);
     if (T.cooking) {
       out.push(...T.cookActs());
       return out;
@@ -224,6 +226,7 @@ export function installTownActs(T, ctx) {
     if (calm) out.push(...T.introActs());
     if (calm) {
       out.push(...T.cookActs());
+      out.push(...T.canoeActs(true));
       out.push(...T.grabActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
       out.push(...T.fishingActs(true));
