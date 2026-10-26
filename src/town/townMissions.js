@@ -510,7 +510,7 @@ export function installTownMissions(T, ctx) {
   };
   // Talking to someone with a job: take it / how it's going / the reward
   const openJobTalk = (n, j) => {
-    const who = `${n.def.emoji} ${firstName(n.name)}`;
+    const who = firstName(n.name);
     if (j.status === 'done') {
       const reward = rewardText(j.reward);
       const beaten = j.data.beaten ?? 0;

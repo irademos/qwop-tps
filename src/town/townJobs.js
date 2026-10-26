@@ -65,14 +65,16 @@ export const CHAINS = [
   },
 ];
 
-// ── The talk box: every conversation with a townsperson — small talk, a job offered / taken
-// back done, the first day's goals (bottom centre, the Showdown village's talk box) ──
+// ── The talk: every conversation with a townsperson — small talk, a job offered / taken
+// back done, the first day's goals — shown as a subtitle at the bottom of the screen (their
+// name, coloured by their mood toward the player, and the line) with the player's replies under it ──
 // open({ who, sub, text, reward, choices: [{ label, primary, onClick }] }) / close() /
-// isOpen() / pressFirst() (E / Enter / the phone's interact). top(): a node above the text (the
-// mood row). onEnd: the talk's over — closed, or a choice picked that didn't open another line.
-export function createJobTalk(parent, { onEnd, top } = {}) {
+// isOpen() / pressFirst() (E / Enter / the phone's interact). mood(): 'bad' | 'low' | 'mid' |
+// 'good' for the name's colour. onEnd: the talk's over — closed, or a choice picked that didn't
+// open another line. (`sub` — what it's about — is left off: the line says it.)
+export function createJobTalk(parent, { onEnd, mood } = {}) {
   let model = null;
-  const box = el('div', 'village-talk town-talk ui-panel hidden');
+  const box = el('div', 'town-talk hidden');
   box.addEventListener('pointerdown', (e) => e.stopPropagation());
   parent.append(box);
   const hide = () => {
@@ -93,11 +95,14 @@ export function createJobTalk(parent, { onEnd, top } = {}) {
   };
   const open = (m) => {
     model = m;
-    const head = el('div', 'village-talk-head');
-    head.append(el('span', 'village-talk-who', m.who), el('span', 'village-talk-quest', m.sub ?? ''));
-    const choices = el('div', 'village-talk-choices');
+    const line = el('div', 'town-talk-line');
+    const who = el('span', 'town-talk-who', m.who);
+    const key = mood?.();
+    if (key) who.dataset.mood = key;
+    line.append(who, document.createTextNode(m.text));
+    const choices = el('div', 'town-talk-choices');
     for (const c of m.choices) {
-      const b = el('button', `${c.primary ? 'ui-btn' : 'ui-btn-secondary'} village-talk-choice`, c.label);
+      const b = el('button', `town-talk-choice${c.primary ? ' is-primary' : ''}`, c.label);
       b.type = 'button';
       b.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -105,10 +110,7 @@ export function createJobTalk(parent, { onEnd, top } = {}) {
       });
       choices.append(b);
     }
-    const parts = [head];
-    const row = top?.();
-    if (row) parts.push(row);
-    parts.push(el('div', 'village-talk-text', m.text));
+    const parts = [line];
     if (m.reward) parts.push(el('div', 'town-talk-reward', m.reward));
     parts.push(choices);
     box.replaceChildren(...parts);

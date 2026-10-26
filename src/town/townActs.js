@@ -12,7 +12,7 @@ import {
 export function installTownActs(T, ctx) {
   // ── Talking with the player: the talk box at the bottom (townJobs.js createJobTalk) with what
   // they say and what the player can say back; speech bubbles are for townsfolk among themselves ──
-  const whoOf = (n) => `${n.def.emoji} ${firstName(n.name)}`;
+  const whoOf = (n) => firstName(n.name);
   // A line of small talk (something they remember the player did, now and then — townMemory.js)
   const smallTalk = (n) => {
     const taskType = n.task?.type === 'talk' ? n.task.prevType : n.task?.type;

@@ -236,7 +236,7 @@ export function installTownIntro(T, ctx) {
       const text = T.intro.debrief;
       T.intro.debrief = null;
       T.jobTalk.open({
-        who: `${n.def.emoji} ${firstName(n.name)}`, sub: `🌱 First day: ${s.title}`, text,
+        who: firstName(n.name), sub: `🌱 First day: ${s.title}`, text,
         reward: s.coins ? `Next: ${fill(s.progress ?? s.title, s, n)} · 🪙 ${s.coins}` : null,
         choices: [
           { label: '👍 Lead the way', primary: true, onClick: () => { if (T.intro) T.intro.autoWalk = true; } },
@@ -253,7 +253,7 @@ export function installTownIntro(T, ctx) {
         const choices = [{ label: n.guiding ? '👍 Lead on' : '👍 Thanks', primary: true }];
         if (tips.length > 1) choices.push({ label: '💡 Another tip', onClick: () => { if (n.alive) show(k + 1); } });
         T.jobTalk.open({
-          who: `${n.def.emoji} ${firstName(n.name)}`, sub: `🌱 First day: ${s.title}`,
+          who: firstName(n.name), sub: `🌱 First day: ${s.title}`,
           text: tips.length ? tipLine(k) : fill(s.progress ?? s.title, s, n),
           reward: fill(s.progress ?? s.title, s, n), choices,
         });
@@ -274,7 +274,7 @@ export function installTownIntro(T, ctx) {
     if (s.skippable) choices.push({ label: 'I know my way around', primary: false, onClick: skip });
     else choices.push({ label: 'Later', primary: false, onClick: () => { snoozeUntil = T.simT + GUIDE_SNOOZE_S; } });
     T.jobTalk.open({
-      who: `${n.def.emoji} ${firstName(n.name)}`, sub: `🌱 First day: ${s.title}`, text: fill(s.talk, s, n),
+      who: firstName(n.name), sub: `🌱 First day: ${s.title}`, text: fill(s.talk, s, n),
       reward: s.coins ? `Reward: 🪙 ${s.coins}` : null, choices,
     });
     return true;

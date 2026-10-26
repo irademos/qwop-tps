@@ -331,25 +331,34 @@ export function makeTextSprite(text, { height = 0.24, font = 600, size = 64, bg 
   const canvas = document.createElement('canvas');
   const g = canvas.getContext('2d');
   const fontCss = `${font} ${size}px Outfit, Inter, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+  // (emoji drawn as the pixel icons — public/assets/ui/icons/pixelIcons.js — when it's loaded)
+  const icons = window.pixelIcons?.has(text) ? window.pixelIcons : null;
   g.font = fontCss;
-  const w = Math.ceil(g.measureText(text).width + pad * 2);
+  const w = Math.ceil((icons ? icons.measureText(g, text, size) : g.measureText(text).width) + pad * 2);
   const h = Math.ceil(size * 1.5);
   canvas.width = w;
   canvas.height = h;
-  g.font = fontCss;
-  if (bg) {
-    const r = h / 2.4;
-    g.fillStyle = bg;
-    g.beginPath();
-    g.roundRect(3, 3, w - 6, h - 6, r);
-    g.fill();
-    if (border) { g.lineWidth = 4; g.strokeStyle = border; g.stroke(); }
-  }
-  g.fillStyle = color;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(text, w / 2, h / 2 + size * 0.04);
-  const tex = new THREE.CanvasTexture(canvas);
+  let tex = null;
+  const draw = () => {
+    g.clearRect(0, 0, w, h);
+    g.font = fontCss;
+    if (bg) {
+      const r = h / 2.4;
+      g.fillStyle = bg;
+      g.beginPath();
+      g.roundRect(3, 3, w - 6, h - 6, r);
+      g.fill();
+      if (border) { g.lineWidth = 4; g.strokeStyle = border; g.stroke(); }
+    }
+    g.fillStyle = color;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    // (the icon sheet still loading: drawn again once it's in)
+    if (icons) icons.drawText(g, text, w / 2, h / 2 + size * 0.04, size, () => { draw(); if (tex) tex.needsUpdate = true; });
+    else g.fillText(text, w / 2, h / 2 + size * 0.04);
+  };
+  draw();
+  tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
   const sprite = new THREE.Sprite(mat);

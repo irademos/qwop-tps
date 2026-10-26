@@ -115,32 +115,14 @@ export function installTownMemory(T, ctx) {
     repEl.title = 'What the town thinks of you';
   };
 
-  // ── Who the player's talking to: their mood toward the player (a row in the talk box) ──
-  const relationNote = (n) => {
-    if (n.vendetta) return 'Wants revenge';
-    if (n.attitude <= GRUDGE_ATTITUDE) return 'Won\'t trade with you';
-    if (n.following) return 'Following you';
-    if (n.attitude >= FRIEND_ATTITUDE) return n.role === 'merchant' ? 'Won\'t tell the guards · gives you a discount' : 'Won\'t tell the guards on you';
-    return '';
-  };
-  const relationRow = (n) => {
-    const mood = moodOf(n.attitude);
-    const row = el('div', 'town-relation');
-    const bar = el('div', 'town-relation-bar');
-    const fill = el('div', 'town-relation-fill');
-    fill.style.width = `${Math.round((n.attitude + 1) * 50)}%`;
-    fill.dataset.mood = n.attitude <= GRUDGE_ATTITUDE ? 'bad' : n.attitude < -0.15 ? 'low' : n.attitude < FRIEND_ATTITUDE ? 'mid' : 'good';
-    bar.append(fill);
-    const note = relationNote(n);
-    row.append(el('span', 'town-relation-who', `${mood.emoji} ${mood.label}`), bar);
-    if (note) row.append(el('span', 'town-relation-note', note));
-    return row;
-  };
+  // ── Who the player's talking to: their mood toward the player, as the colour of their name
+  // over the talk's subtitle (bad / low / mid / good) ──
+  const moodKey = (n) => (n.attitude <= GRUDGE_ATTITUDE ? 'bad' : n.attitude < -0.15 ? 'low' : n.attitude < FRIEND_ATTITUDE ? 'mid' : 'good');
   const resetMemoryHud = () => {
     repTitle = null;
   };
 
   Object.assign(T, {
-    forget, memBiasOf: biasOf, memoryLine, moodOf, relationRow, remember, reputation, resetMemoryHud, updateReputation,
+    forget, memBiasOf: biasOf, memoryLine, moodKey, moodOf, remember, reputation, resetMemoryHud, updateReputation,
   });
 }

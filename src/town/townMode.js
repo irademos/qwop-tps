@@ -93,7 +93,7 @@ import { updateCampfire } from '../village/villageMode.js';
 import {
   BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
   BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, RAID_NOTICE_DIST, SAVE_EVERY_S, SAVE_PREFIX,
-  START_MINUTES, TALK_RANGE, WALLET_MAX, ARRIVAL_SNAP_DIST, _v2, angleLerp, dist2, el, heightScale, rand,
+  START_MINUTES, SUBTITLE_S, SUBTITLES_SHOWN, TALK_RANGE, WALLET_MAX, ARRIVAL_SNAP_DIST, _v2, angleLerp, dist2, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
 import { installTownFolk } from './townFolk.js';
@@ -192,6 +192,7 @@ export function createTownMode(ctx) {
   const jailChip = el('div', 'town-jail ui-panel hidden');
   const campChip = el('div', 'town-jail town-camp ui-panel hidden');
   const feed = el('div', 'town-feed');
+  const subs = el('div', 'town-subs');
   const actsEl = el('div', 'town-acts hidden');
   const fade = el('div', 'town-fade');
   // What the player carries; the food can be eaten (tap) for health
@@ -253,7 +254,7 @@ export function createTownMode(ctx) {
     walletEl.textContent = text;
     walletEl.classList.toggle('town-wallet-full', coins >= WALLET_MAX || carried >= BAG_MAX);
   };
-  hud.append(top, stars, jailChip, campChip, feed, goodsEl, actsEl, logBtn, logPanel);
+  hud.append(top, stars, jailChip, campChip, feed, subs, goodsEl, actsEl, logBtn, logPanel);
   document.body.append(hud, fade);
   (document.getElementById('health-display') ?? hud).append(walletEl);
   const renderGoods = () => {
@@ -273,7 +274,7 @@ export function createTownMode(ctx) {
   // The talk box with a townsperson (townJobs.js; townActs.js), the quest tracker, the jailbreak lock
   const jobTalk = createJobTalk(hud, {
     onEnd: () => T.endTalk(),
-    top: () => (T.talking?.npc ? T.relationRow(T.talking.npc) : null),
+    mood: () => (T.talking?.npc ? T.moodKey(T.talking.npc) : null),
   });
   const tracker = createQuestTracker(hud);
   const lockpick = createLockpick(hud);
@@ -304,6 +305,18 @@ export function createTownMode(ctx) {
     feedLog.unshift({ text, when: clockText().replace(/ [☀️🌙]+$/u, '') });
     if (feedLog.length > FEED_LOG_MAX) feedLog.length = FEED_LOG_MAX;
     if (logPanel.classList.contains('hidden')) { unread += 1; renderBadge(); } else renderLog();
+  };
+
+  // What the townsfolk near the player say: subtitles at the bottom of the screen ("Name: line"),
+  // the newest under the older, SUBTITLES_SHOWN at a time (townFolk.js say)
+  const subtitle = (who, text, { big = false } = {}) => {
+    const line = el('div', `town-sub${big ? ' town-sub-big' : ''}`);
+    line.append(el('span', 'town-sub-who', firstName(who)), document.createTextNode(text));
+    subs.append(line);
+    while (subs.childElementCount > SUBTITLES_SHOWN) subs.firstElementChild.remove();
+    const ms = (SUBTITLE_S + (big ? 1.4 : 0) + text.length * 0.03) * 1000;
+    setTimeout(() => line.classList.add('town-sub-out'), ms);
+    setTimeout(() => line.remove(), ms + 600);
   };
 
   const renderStars = () => {
@@ -692,6 +705,7 @@ export function createTownMode(ctx) {
     actsEl.replaceChildren();
     actsEl.classList.add('hidden');
     feed.replaceChildren();
+    subs.replaceChildren();
     feedQueue.length = 0;
     feedShown = 0;
     feedGen += 1;
@@ -800,6 +814,7 @@ export function createTownMode(ctx) {
   };
 
   Object.assign(T, {
+    subtitle,
     actsEl, advanceClock, campChip, campWatch, clock, fade, feedLine, goods, hour, hud, jailChip,
     jobTalk, law, loadPersonal, lockpick, markers, marketPanel, net, netT, pool, renderGoods,
     renderStars, root, save, soldOut, spawnTown, top, topPlace, tracker, usedNames, worldSnapshot,
