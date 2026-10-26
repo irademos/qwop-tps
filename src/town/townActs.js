@@ -12,7 +12,7 @@ import {
 export function installTownActs(T, ctx) {
   // ── Talking with the player: the talk box at the bottom (townJobs.js createJobTalk) with what
   // they say and what the player can say back; speech bubbles are for townsfolk among themselves ──
-  const whoOf = (n) => `${n.def.emoji} ${firstName(n.name)}`;
+  const whoOf = (n) => firstName(n.name);
   // A line of small talk (something they remember the player did, now and then — townMemory.js)
   const smallTalk = (n) => {
     const taskType = n.task?.type === 'talk' ? n.task.prevType : n.task?.type;
@@ -28,27 +28,27 @@ export function installTownActs(T, ctx) {
     T.talking = { npc: n };
     const choices = [];
     if (n.fear > 0) {
-      choices.push({ label: '👋 Leave them be', primary: true });
+      choices.push({ label: 'Leave them be', primary: true });
     } else {
-      choices.push({ label: '💬 Chat', primary: true, onClick: () => { if (n.alive) chat(n, smallTalk(n)); } });
+      choices.push({ label: 'Chat', primary: true, onClick: () => { if (n.alive) chat(n, smallTalk(n)); } });
       if (n.following) {
-        choices.push({ label: '👋 Go home', onClick: () => {
+        choices.push({ label: 'Go home', onClick: () => {
           const said = T.dismiss(n, undefined, { quiet: true });
           if (said) farewell(n, said);
         } });
       } else if (T.canRecruit(n)) {
-        choices.push({ label: '🤝 Join me', onClick: () => {
+        choices.push({ label: 'Join me', onClick: () => {
           const said = T.recruit(n, { quiet: true });
-          if (said) farewell(n, said, '👍 Let\'s go');
+          if (said) farewell(n, said, 'Let\'s go');
         } });
       }
-      choices.push({ label: `🪙 Give ${GIFT_COINS}`, onClick: () => gift(n) });
-      choices.push({ label: '👋 Goodbye' });
+      choices.push({ label: `Give ${GIFT_COINS}`, onClick: () => gift(n) });
+      choices.push({ label: 'Goodbye' });
     }
     T.jobTalk.open({ who: whoOf(n), sub: n.def.label, text, choices });
   };
   // Their last word (joining the player / heading home), one button to close
-  const farewell = (n, text, label = '👋 Bye') => {
+  const farewell = (n, text, label = 'Bye') => {
     T.talking = { npc: n };
     T.jobTalk.open({ who: whoOf(n), sub: n.def.label, text, choices: [{ label, primary: true }] });
   };
@@ -85,7 +85,7 @@ export function installTownActs(T, ctx) {
     if (n.task?.type === 'talk') n.task.t = 0;
     if (n.attitude >= FRIEND_ATTITUDE && !n.friendNoted) {
       n.friendNoted = true;
-      T.feedLine(`🤝 ${firstName(n.name)} is your friend now — they won't tell the guards on you.`);
+      T.feedLine(`${firstName(n.name)} is your friend now — they won't tell the guards on you.`);
     }
     chat(n, giftLine(n, ctx.getPlayerName()));
   };
@@ -132,11 +132,11 @@ export function installTownActs(T, ctx) {
     const out = [];
     if (T.sequence) return out;
     if (T.marketPanel.isOpen()) {
-      out.push({ key: 'close', label: '✖ Close market', onClick: T.closeMarket });
+      out.push({ key: 'close', label: 'Close market', onClick: T.closeMarket });
       return out;
     }
     if (T.storage.isOpen()) {
-      out.push({ key: 'closechest', label: '✖ Close chest', onClick: () => T.storage.close() });
+      out.push({ key: 'closechest', label: 'Close chest', onClick: () => T.storage.close() });
       return out;
     }
     if (T.stalls.focused()) {
@@ -144,26 +144,26 @@ export function installTownActs(T, ctx) {
       const buy = T.stalls.buyLabel();
       if (buy) out.push({ key: 'buy', label: buy, onClick: () => { T.stalls.buySelected(); T.actsAt = 0; } });
       out.push({ key: 'next', label: '› Next', onClick: () => { T.stalls.step(1); T.actsAt = 0; } });
-      out.push({ key: 'back', label: '⬅ Back', onClick: () => { T.stalls.unfocus(); T.actsAt = 0; } });
+      out.push({ key: 'back', label: 'Back', onClick: () => { T.stalls.unfocus(); T.actsAt = 0; } });
       return out;
     }
     if (T.lockpick.isOpen()) {
-      out.push({ key: 'pin', label: '🔧 Now!', onClick: () => T.lockpick.press() });
-      out.push({ key: 'unpick', label: '✖ Stop', onClick: () => T.lockpick.stop() });
+      out.push({ key: 'pin', label: 'Now!', onClick: () => T.lockpick.press() });
+      out.push({ key: 'unpick', label: 'Stop', onClick: () => T.lockpick.stop() });
       return out;
     }
     if (T.jail) {
-      out.push({ key: 'bail', label: `🔓 Bail (${BAIL} 🪙)`, onClick: T.payBail });
-      out.push({ key: 'bribe', label: `🤝 Bribe (${BRIBE} 🪙)`, onClick: T.bribe });
-      out.push({ key: 'pick', label: '🔧 Pick the lock', onClick: T.startLockpick });
-      out.push({ key: 'sleep', label: '😴 Sleep it off', onClick: T.sleepItOff });
+      out.push({ key: 'bail', label: `Bail (${BAIL} 🪙)`, onClick: T.payBail });
+      out.push({ key: 'bribe', label: `Bribe (${BRIBE} 🪙)`, onClick: T.bribe });
+      out.push({ key: 'pick', label: 'Pick the lock', onClick: T.startLockpick });
+      out.push({ key: 'sleep', label: 'Sleep it off', onClick: T.sleepItOff });
       return out;
     }
     if (T.jobTalk.isOpen()) return out; // (the talk box has its own answers)
     if (T.law.stars > 0) {
       const p = T.playerPos();
       if (T.npcs.some((n) => n.fighter && n.def.law && dist2(n.x, n.z, p.x, p.z) < GIVE_UP_DIST)) {
-        out.push({ key: 'giveup', label: '🙌 Give up', onClick: () => T.busted({ surrendered: true }) });
+        out.push({ key: 'giveup', label: 'Give up', onClick: () => T.busted({ surrendered: true }) });
         return out;
       }
     }
@@ -187,14 +187,14 @@ export function installTownActs(T, ctx) {
     if (!T.strongboxHeld && T.layout.props.strongbox.visible && T.activeJobs().some((j) => j.kind === 'fetchStrongbox')) {
       const p = T.playerPos();
       const sb = T.layout.places.strongbox;
-      if (dist2(p.x, p.z, sb.x, sb.z) < 2) out.push({ key: 'strongbox', label: '📦 Take the strongbox', onClick: T.takeStrongbox });
+      if (dist2(p.x, p.z, sb.x, sb.z) < 2) out.push({ key: 'strongbox', label: 'Take the strongbox', onClick: T.takeStrongbox });
     }
     // The houses (walked into through the door — updateRooms): inside, 🚪 Leave by the doorway;
     // the shops' back counter buttons
     if (T.inRoom) {
       const p = T.playerPos();
       const d = T.rooms.doorInside(T.inRoom);
-      if (dist2(p.x, p.z, d.x, d.z) < 1.8) out.push({ key: 'leave', label: '🚪 Leave', onClick: T.leaveRoom });
+      if (dist2(p.x, p.z, d.x, d.z) < 1.8) out.push({ key: 'leave', label: 'Leave', onClick: T.leaveRoom });
       out.push(...T.chestActs());
       out.push(...T.bedActs());
     }
@@ -202,10 +202,10 @@ export function installTownActs(T, ctx) {
     if (calm) out.push(...T.doorActs());
     const stall = calm ? T.nearestStall() : null;
     if (stall === 'shop' && T.marketOpen()) {
-      out.push({ key: 'shop', label: '🛒 Shop', onClick: () => T.focusStall('shop') });
-      out.push({ key: 'sell', label: '💰 Sell', onClick: T.openMarket });
+      out.push({ key: 'shop', label: 'Shop', onClick: () => T.focusStall('shop') });
+      out.push({ key: 'sell', label: 'Sell', onClick: T.openMarket });
     }
-    if (stall === 'wizard' && T.stallOpen('wizard')) out.push({ key: 'wizard', label: '🔮 Wizard\'s wares', onClick: () => T.focusStall('wizard') });
+    if (stall === 'wizard' && T.stallOpen('wizard')) out.push({ key: 'wizard', label: 'Wizard\'s wares', onClick: () => T.focusStall('wizard') });
     // Farming (townFarming.js): pick a grown veg, buy a field, plant a seed
     if (calm) out.push(...T.farmActs());
     // A job's townsperson within reach (not only the nearest): its 📦 / 💰 first
@@ -218,9 +218,8 @@ export function installTownActs(T, ctx) {
     if (n) {
       // (❗ a job to give, ❓ a reward waiting — as the marker over them)
       const j = T.jobOf(n);
-      const icon = T.isIntroGuide(n) ? '❗' : j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : '💬';
-      // (and how they feel about the player — townMemory.js)
-      out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)} ${T.moodOf(n.attitude).emoji}`, onClick: () => talkTo(n) });
+      const icon = T.isIntroGuide(n) ? '❗' : j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : null;
+      out.push({ key: `talk:${n.id}`, label: icon ? `${icon} ${firstName(n.name)}` : `Talk to ${firstName(n.name)}`, onClick: () => talkTo(n) });
     }
     // (the first day: walk the player to the goal again — townIntro.js)
     if (calm) out.push(...T.introActs());
@@ -228,7 +227,7 @@ export function installTownActs(T, ctx) {
       out.push(...T.cookActs());
       out.push(...T.canoeActs(true));
       out.push(...T.grabActs());
-      if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
+      if (T.ripeCropNear()) out.push({ key: 'pick', label: 'Pick veg', onClick: T.pickCrop });
       out.push(...T.fishingActs(true));
     }
     return out.slice(0, 3);

@@ -38,9 +38,9 @@ const TURN = Math.PI * 2;
 // The hint at each moment once the player's been getting it wrong (the HUD, the phone's reel);
 // the cue itself is the phone's buzz either way
 const HINTS = {
-  bite: '⬆ Pull the rod!',
-  pull: '⬆ Pull the rod!',
-  reel: '🌀 Reel in!',
+  bite: 'Pull the rod!',
+  pull: 'Pull the rod!',
+  reel: 'Reel in!',
 };
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -180,13 +180,13 @@ export function installTownFishing(T, ctx) {
   const cast = (power) => {
     if (T.fishing || !ctx.isRodEquipped() || T.sequence || ctx.isPlayerDead()) return false;
     if (!atSpot()) {
-      if (T.simT - awayHintAt > 5) { awayHintAt = T.simT; say('🎣 Fish at the 🎣 Fishing spot by the water.'); }
+      if (T.simT - awayHintAt > 5) { awayHintAt = T.simT; say('Fish at the fishing spot by the water.'); }
       return false;
     }
     if (T.bagRoom() <= 0) { T.bagFullNote(); return false; }
     const rod = ctx.getRodModel();
     const at = rod && castTarget(FISH_CAST_DIST[0] + (FISH_CAST_DIST[1] - FISH_CAST_DIST[0]) * power);
-    if (!at) { say('🎣 No water in reach — face the water.'); return false; }
+    if (!at) { say('No water in reach — face the water.'); return false; }
     const p = T.playerPos();
     const d = Math.hypot(at.x - p.x, at.z - p.z);
     T.fishing = {
@@ -206,7 +206,7 @@ export function installTownFishing(T, ctx) {
       f.nibbled = false;
       f.left = rand(...FISH_WAIT_S) + 2;
       miss();
-      say('🐟 Scared it off.');
+      say('Scared it off.');
     } else if (f.phase === 'bite') {
       const size = pickSize();
       f.phase = 'fight';
@@ -262,7 +262,7 @@ export function installTownFishing(T, ctx) {
       const p = T.playerPos();
       if (dist2(p.x, p.z, f.x, f.z) > FISH_CANCEL_DIST * FISH_CANCEL_DIST || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
         if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.stop(); }
-        else { if (f.fish) say('🐟 It got away.'); finish(); }
+        else { if (f.fish) say('It got away.'); finish(); }
         refreshHud();
         return;
       }
@@ -289,7 +289,7 @@ export function installTownFishing(T, ctx) {
           f.left = rand(...FISH_WAIT_S);
           f.nibbled = Math.random() < FISH_NIBBLE_CHANCE;
           miss();
-          say('🐟 It stole the bait.');
+          say('It stole the bait.');
         }
       } else if (f.phase === 'fight') {
         const fish = f.fish;
@@ -317,17 +317,17 @@ export function installTownFishing(T, ctx) {
         if (fish.tension >= 1) {
           miss();
           finish();
-          say('💥 The line snapped!');
+          say('The line snapped!');
         } else if (f.d > FISH_LINE_MAX) {
           miss();
           finish();
-          say('🐟 It got away.');
+          say('It got away.');
         } else if (f.d <= FISH_LAND_DIST) {
           const n = fish.size.n;
           misses = 0;
           finish(true);
           const got = T.gain('fish', n);
-          say(`🐟 Caught ${fish.size.label}! ${got > 1 ? `+${got} fish` : '+1 fish'} (${T.goods.fish})${got < n ? ' — no room in your bag for the other' : ''}`);
+          say(`Caught ${fish.size.label}! ${got > 1 ? `+${got} fish` : '+1 fish'} (${T.goods.fish})${got < n ? ' — no room in your bag for the other' : ''}`);
           T.introNote('fish');
         }
       }
@@ -384,10 +384,10 @@ export function installTownFishing(T, ctx) {
     const out = [];
     if (ctx.hasGyro()) return out;
     if (T.fishing) {
-      out.push({ key: 'fishpull', label: '⬆ Pull', onClick: pull });
+      out.push({ key: 'fishpull', label: 'Pull', onClick: pull });
       return out;
     }
-    if (calm && atSpot() && ctx.isRodEquipped()) out.push({ key: 'fishcast', label: '🎣 Cast', onClick: () => cast(0.55) });
+    if (calm && atSpot() && ctx.isRodEquipped()) out.push({ key: 'fishcast', label: 'Cast', onClick: () => cast(0.55) });
     return out;
   };
   const hideFishingHud = () => {

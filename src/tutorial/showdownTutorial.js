@@ -269,7 +269,7 @@ export function createShowdownTutorial(ctx) {
     });
     frameHandler = null;
     overlay.clearGuides();
-    overlay.setHint('Hit! ✔', 'ok');
+    overlay.setHint('Hit!', 'ok');
     await delay(1300);
     healSwordsman();
   }));
@@ -281,7 +281,7 @@ export function createShowdownTutorial(ctx) {
     healSwordsman();
     const article = /^[AEIOU]/.test(lesson.name) ? 'AN' : 'A';
     panel(5 + i, TOTAL, `BLOCK ${article} ${lesson.name} SWING`,
-      `The enemy is winding up ${article.toLowerCase()} ${lesson.name} swing. Hold 🛡 BLOCK with your blade PERPENDICULAR to the swing — the bar shows how. ${lesson.block} It swings when your block is right.`);
+      `The enemy is winding up ${article.toLowerCase()} ${lesson.name} swing. Hold BLOCK with your blade PERPENDICULAR to the swing — the bar shows how. ${lesson.block} It swings when your block is right.`);
     const preset = SWING_PRESETS[lesson.preset];
     const swingDir = new THREE.Vector3();
     const viewDir = new THREE.Vector3();
@@ -344,7 +344,7 @@ export function createShowdownTutorial(ctx) {
     frameHandler = null;
     overlay.clearGuides();
     setHighlight(null);
-    overlay.setHint('Blocked! ✔', 'ok');
+    overlay.setHint('Blocked!', 'ok');
     if (swordsman) swordsman.script = { mode: 'passive' };
     await delay(1400);
   }));
@@ -422,7 +422,7 @@ export function createShowdownTutorial(ctx) {
     await waitFor(() => bomber.isDead);
     frameHandler = null;
     removeMarker(beam);
-    overlay.setHint('Deflected! ✔', 'ok');
+    overlay.setHint('Deflected!', 'ok');
     await delay(1800);
   });
 
@@ -468,7 +468,7 @@ export function createShowdownTutorial(ctx) {
     frameHandler = null;
     setHighlight(null);
     removeMarker(ring);
-    overlay.setHint('Boom! ✔', 'ok');
+    overlay.setHint('Boom!', 'ok');
     await delay(1800);
   });
 
@@ -479,7 +479,7 @@ export function createShowdownTutorial(ctx) {
     await collectCoins(await ctx.getPrice('shield'));
     await ctx.buy('shield');
     ctx.weakenShield(TUTORIAL_SHIELD_HEALTH);
-    panel(11, TOTAL, 'EQUIP THE SHIELD', 'Tap 🛡 Shield to equip it.');
+    panel(11, TOTAL, 'EQUIP THE SHIELD', 'Tap Shield to equip it.');
     frameHandler = () => setHighlight('shield');
     await waitFor(() => ctx.isEquipped('shield'));
     const shieldsBefore = ctx.getShieldCount();
@@ -490,7 +490,7 @@ export function createShowdownTutorial(ctx) {
     frameHandler = () => {
       const equipped = ctx.isEquipped('shield');
       setHighlight(equipped ? null : 'shield');
-      overlay.setHint(equipped ? '' : 'Equip your shield (🛡) to block!', 'warn');
+      overlay.setHint(equipped ? '' : 'Equip your shield to block!', 'warn');
     };
     await waitFor(() => ctx.getShieldCount() < shieldsBefore);
     frameHandler = null;
@@ -549,7 +549,7 @@ export function createShowdownTutorial(ctx) {
     if (!ownsGun) await ctx.buy('pistol');
     await ctx.buy('gun bullets');
     if (ctx.getAmmo() < 5) ctx.addAmmo(5 - ctx.getAmmo());
-    panel(13, TOTAL, 'EQUIP THE GUN', 'Tap 🔫 Gun to equip it.');
+    panel(13, TOTAL, 'EQUIP THE GUN', 'Tap Gun to equip it.');
     frameHandler = () => setHighlight('gun');
     await waitFor(() => ctx.isEquipped('pistol'));
 
@@ -562,7 +562,7 @@ export function createShowdownTutorial(ctx) {
     });
     onCleanup(() => { if (!target.isDead) removeEnemy(target); });
     panel(13, TOTAL, 'SHOOT!',
-      'The gun is aimed with your phone’s gyro — point it at the enemy, then tap 🔥 Fire.');
+      'The gun is aimed with your phone’s gyro — point it at the enemy, then tap Fire.');
     frameHandler = () => {
       const equipped = ctx.isEquipped('pistol');
       setHighlight(equipped ? 'fire' : 'gun');
@@ -574,7 +574,7 @@ export function createShowdownTutorial(ctx) {
     await waitFor(() => target.isDead);
     frameHandler = null;
     setHighlight(null);
-    overlay.setHint('Got him! ✔', 'ok');
+    overlay.setHint('Got him!', 'ok');
     await delay(1500);
   });
 
@@ -585,7 +585,7 @@ export function createShowdownTutorial(ctx) {
     ctx.lendWand();
     onCleanup(() => ctx.returnWand());
     panel(14, TOTAL, 'MAGIC WAND',
-      'The market sells a Magic Wand. Here’s one to try — tap 🪄 Wand to take it out.');
+      'The market sells a Magic Wand. Here’s one to try — tap Wand to take it out.');
     frameHandler = () => setHighlight('wand');
     await waitFor(() => ctx.isEquipped('magic_wand'));
     setHighlight(null);
@@ -594,7 +594,7 @@ export function createShowdownTutorial(ctx) {
     enemy.stationary = true;
     healSwordsman();
     panel(14, TOTAL, 'CAST A SPELL',
-      'Swipe the wand like a sword: the blast flies forward in the SHAPE of your swipe — randomly 🔥 fire (knocks back) or 🧊 ice (freezes). Spells use mana. This enemy blocks HORIZONTALLY, so a horizontal blast is blocked — swipe UP or DOWN to blast past it.');
+      'Swipe the wand like a sword: the blast flies forward in the SHAPE of your swipe — randomly fire (knocks back) or ice (freezes). Spells use mana. This enemy blocks HORIZONTALLY, so a horizontal blast is blocked — swipe UP or DOWN to blast past it.');
     const presetDir = BLOCK_PRESETS[WAND_BLOCK_PRESET].dir;
     frameHandler = () => {
       if (!swordsman) return;
@@ -623,7 +623,7 @@ export function createShowdownTutorial(ctx) {
     frameHandler = null;
     overlay.clearGuides();
     setHighlight(null);
-    overlay.setHint('Zap! ✔', 'ok');
+    overlay.setHint('Zap!', 'ok');
     await delay(1800);
   });
 
@@ -636,7 +636,7 @@ export function createShowdownTutorial(ctx) {
     const caster = ctx.spawnWandCaster({ position: pointFromPlayer(dir, WAND_CASTER_DISTANCE), hearts: 5 });
     onCleanup(() => { if (!caster.isDead) removeEnemy(caster); });
     panel(15, TOTAL, 'BLOCK A MAGIC BLAST',
-      'Wand enemies cast from a distance. A blast is only blocked by a blade lying ALONG it. This one will be HORIZONTAL: hold 🛡 BLOCK with your sword FLAT — it casts when your block is right.');
+      'Wand enemies cast from a distance. A blast is only blocked by a blade lying ALONG it. This one will be HORIZONTAL: hold BLOCK with your sword FLAT — it casts when your block is right.');
     const line = new THREE.Vector3();
     const forward = new THREE.Vector3();
     const bladeDir = new THREE.Vector3();
@@ -685,7 +685,7 @@ export function createShowdownTutorial(ctx) {
     frameHandler = null;
     overlay.clearGuides();
     setHighlight(null);
-    overlay.setHint('Blocked! ✔', 'ok');
+    overlay.setHint('Blocked!', 'ok');
     await delay(1500);
   });
 
@@ -698,7 +698,7 @@ export function createShowdownTutorial(ctx) {
     onCleanup(() => { if (!caster.isDead) removeEnemy(caster); });
     onCleanup(() => { if (ctx.isPlayerFrozen()) ctx.thawPlayer(); }); // (skipped while frozen)
     panel(16, TOTAL, 'FROZEN!',
-      'An 🧊 ice blast freezes you solid — you can’t move, swing or block. Your sword is put away: let this one hit you.');
+      'An ice blast freezes you solid — you can’t move, swing or block. Your sword is put away: let this one hit you.');
     let castAt = -Infinity;
     frameHandler = () => {
       if (caster.isDead || ctx.isPlayerFrozen()) return;
@@ -716,7 +716,7 @@ export function createShowdownTutorial(ctx) {
         'You’re frozen! The ice melts on its own after a few seconds — SHAKE your phone hard to crack out of it much faster.');
       await waitFor(() => !ctx.isPlayerFrozen());
     }
-    overlay.setHint('Free! ✔', 'ok');
+    overlay.setHint('Free!', 'ok');
     await delay(1500);
   });
 

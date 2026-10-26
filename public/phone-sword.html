@@ -453,7 +453,7 @@ Rod</button>
     </div>
     <div id="block-row">
       <div class="block-side" id="block-side-left"></div>
-      <button id="block-btn">🛡️ BLOCK</button>
+      <button id="block-btn">BLOCK</button>
       <div class="block-side" id="block-side-right"></div>
     </div>
     <div id="joy-row">
@@ -464,6 +464,7 @@ Rod</button>
     <div id="swipe-hint">Swipe the screen to roll</div>
   </div>
 
+  <script src="/assets/ui/icons/pixelIcons.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script>
     const params = new URLSearchParams(location.search);
@@ -614,7 +615,7 @@ Rod</button>
     // ── Action buttons: one 'action' message per press ────────────────────
     let recalibTimer = null;
     function flashRecalibrated(btn) {
-      btn.textContent = '✓ Calibrated';
+      btn.textContent = 'Calibrated';
       btn.classList.add('done');
       clearTimeout(recalibTimer);
       recalibTimer = setTimeout(() => {
@@ -743,12 +744,12 @@ Rod</button>
       barMode = nextMode;
       ['fire', 'sword', 'shield', 'interact', 'water'].forEach((m) => blockBtn.classList.toggle(`mode-${m}`, barMode === m));
       blockBtn.classList.toggle('idle', barMode === 'interact' && !interactLabel);
-      blockBtn.textContent = barMode === 'interact' ? (interactLabel || '✋ Interact')
-        : barMode === 'fire' ? `🔥 FIRE ${st.ammo ?? 0}`
-        : barMode === 'sword' ? '🗡️ SWORD'
-        : barMode === 'shield' ? '🛡 SHIELD'
-        : barMode === 'water' ? '💧 WATER'
-        : '🛡️ BLOCK';
+      blockBtn.textContent = barMode === 'interact' ? (interactLabel || 'Interact')
+        : barMode === 'fire' ? `FIRE ${st.ammo ?? 0}`
+        : barMode === 'sword' ? 'SWORD'
+        : barMode === 'shield' ? 'SHIELD'
+        : barMode === 'water' ? 'WATER'
+        : 'BLOCK';
       // Tutorial: ring the button the game is asking for
       const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, wand: btnWand };
       Object.entries(highlightTargets).forEach(([name, el]) => {

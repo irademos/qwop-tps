@@ -4,11 +4,10 @@
 import { FOLLOW_LINES, ROLES, firstName, livesOut } from './townPeople.js';
 import { FOOD_IDS, GOOD_IDS } from './townEconomy.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
-import { makeTextSprite } from '../village/villageMode.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
-  BODY_DIST, BODY_RELEASE_DIST, BUBBLE_S, CAMERA_CLEAR_DIST, LABEL_DIST, MERCHANT_START_CASH,
-  HOME_VISIT_CHANCE, MUG_CHANCE, SHOP_BROWSE_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, heightScale, inHours, pickOf, rand,
+  BODY_DIST, BODY_RELEASE_DIST, MERCHANT_START_CASH, SUBTITLE_DIST, SUBTITLE_SHOUT_DIST,
+  HOME_VISIT_CHANCE, MUG_CHANCE, SHOP_BROWSE_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, inHours, pickOf, rand,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -214,7 +213,7 @@ export function installTownFolk(T, ctx) {
       if ((h >= 23 || h < 6) && !n.escort) {
         n.following = false;
         say(n, pickOf(FOLLOW_LINES.late));
-        T.feedLine(`🌙 ${firstName(n.name)} went home for the night.`);
+        T.feedLine(`${firstName(n.name)} went home for the night.`);
       } else {
         setTask(n, { type: 'follow', dur: Infinity });
         return;
@@ -318,34 +317,23 @@ export function installTownFolk(T, ctx) {
       if (T.netMode === 'host') T.net.broadcast(msg);
       else T.net.send(T.net.hostId(), msg);
     }
-    if (!n.body || !text) return;
-    if (n.bubble) { n.body.container.remove(n.bubble.sprite); n.bubble.sprite.material.map?.dispose(); n.bubble.sprite.material.dispose(); }
-    const sprite = makeTextSprite(text, { height: big ? 0.26 : 0.2, bg: 'rgba(255, 255, 255, 0.92)', color: '#1a1d29', border: 'rgba(14, 17, 27, 0.25)' });
-    sprite.position.set(0, 1.55 * heightScale(n.url) + (big ? 0.1 : 0), 0);
-    sprite.renderOrder = 7;
-    n.body.container.add(sprite);
-    n.bubble = { sprite, until: T.simT + BUBBLE_S + (big ? 1.4 : 0) };
+    // (heard, not drawn over their heads: a subtitle at the bottom of the screen — only from
+    // someone drawn near the player, further for a shout)
+    if (!n.body || !text || n.dying) return;
+    if (distToPlayer(n) > (big ? SUBTITLE_SHOUT_DIST : SUBTITLE_DIST)) return;
+    T.subtitle?.(n.name, text, { big });
   };
-  const clearBubble = (n) => {
-    if (!n.bubble) return;
-    n.bubble.sprite.parent?.remove(n.bubble.sprite);
-    n.bubble.sprite.material.map?.dispose();
-    n.bubble.sprite.material.dispose();
-    n.bubble = null;
-  };
+  // (speech is a subtitle now — townMode.js — nothing hangs over anyone's head)
+  const clearBubble = () => {};
 
   // ── Bodies (level of detail) ──
   const attachBody = (n, inst) => {
-    const label = makeTextSprite(`${n.def.emoji} ${n.name}`, { height: 0.17 });
-    label.position.set(0, 1.25 * heightScale(n.url), 0);
-    label.visible = false;
-    inst.container.add(label);
     inst.container.visible = true;
     // (yaw first: a sleeper lies down — rotation.x — facing whichever way that left them)
     inst.container.rotation.order = 'YXZ';
     inst.character.revive();
     inst.character.setMoving(false);
-    n.body = { ...inst, label };
+    n.body = { ...inst };
     T.root.add(inst.container);
     syncBody(n, 0);
   };
@@ -369,11 +357,7 @@ export function installTownFolk(T, ctx) {
   };
   const releaseBody = (n) => {
     if (!n.body) return;
-    clearBubble(n);
-    const { container, character, label } = n.body;
-    container.remove(label);
-    label.material.map?.dispose();
-    label.material.dispose();
+    const { container, character } = n.body;
     n.body = null;
     toPool(n.url, { container, character });
   };
@@ -402,11 +386,7 @@ export function installTownFolk(T, ctx) {
     const shop = T.stalls.view();
     const chest = _v.copy(b.container.position).setY(b.container.position.y + 0.6);
     const inFront = !!shop && shop.camera.distanceTo(chest) < shop.camera.distanceTo(shop.stall) - 0.3;
-    const nearCamera = inFront || ctx.camera.position.distanceTo(b.container.position) < CAMERA_CLEAR_DIST;
     b.container.visible = !inFront;
-    b.label.visible = !n.dying && !nearCamera && distToPlayer(n) < LABEL_DIST;
-    if (n.bubble && T.simT > n.bubble.until) clearBubble(n);
-    if (n.bubble) n.bubble.sprite.visible = !nearCamera;
   };
   // Drawn at all: out and about where the player is — in town, or in the same room (where
   // those at home are seen too: asleep on the bed, hiding)

@@ -714,11 +714,11 @@ export class PlayerControls {
 
   getMobileAttackLabel() {
     const mode = this.getBlockBarMode();
-    if (mode === 'water') return '💧 Water';
+    if (mode === 'water') return 'Water';
     if (mode === 'fire') return 'Fire';
-    if (mode === 'shield') return '🛡 Shield';
-    if (mode === 'sword') return '🗡 Sword';
-    if (mode === 'block') return '🛡 Block';
+    if (mode === 'shield') return 'Shield';
+    if (mode === 'sword') return 'Sword';
+    if (mode === 'block') return 'Block';
     return 'Attack';
   }
 
@@ -737,15 +737,15 @@ export class PlayerControls {
     const inCanoe = !!appState?.isInCanoe?.();
     const weapons = inCanoe ? [] : [
       ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
-      ...(hasWand ? [{ id: 'magic_wand', label: '🪄 Wand' }] : []),
+      ...(hasWand ? [{ id: 'magic_wand', label: 'Wand' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
-      ...(hasRod ? [{ id: 'fishing_rod', label: '🎣 Rod' }] : []),
+      ...(hasRod ? [{ id: 'fishing_rod', label: 'Rod' }] : []),
     ];
     // Default to foamSword when nothing detected (unless nothing in hand is allowed)
     const equippedId = this.getEquippedItemId();
     const others = weapons.filter(w => w.id !== equippedId);
-    if (unarmedAllowed && equippedId && !inCanoe) others.push({ id: HANDS_ID, label: '✋ Hands' });
+    if (unarmedAllowed && equippedId && !inCanoe) others.push({ id: HANDS_ID, label: 'Hands' });
     [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5].forEach((button, index) => {
       const w = others[index];
       button.dataset.psWeaponId = w ? w.id : '';

@@ -115,7 +115,7 @@ export function talkLine(npc, { playerName = 'friend', taskType = null, market =
   if (npc.attitude > 0.55 && Math.random() < 0.5) return fill(pick(FRIEND_LINES));
   // How the market's doing
   if (npc.role === 'merchant' && market?.scarce && Math.random() < 0.6) {
-    return `${market.scarce.emoji} ${market.scarce.label} is scarce — ${market.scarce.price} coins a piece!`;
+    return `${market.scarce.label} is scarce — ${market.scarce.price} coins a piece!`;
   }
   if (npc.needs.hunger > 0.6 && market?.foodOut) return 'The market\'s out of food… I\'m starving.';
   if (market?.merchantGone && Math.random() < 0.4) return 'With the merchant gone, where do we buy bread?';

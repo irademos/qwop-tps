@@ -269,7 +269,7 @@ const STALL_BLOCK_BACK = 0.35;     // m behind the stall's origin
 const FIRE_BLOCK_RADIUS = 0.55;
 const VILLAGER_BLOCK_RADIUS = 0.45;
 const WALK_STUCK_MS = 600;         // a tap-walk that stops getting closer (a prop in the way) ends there
-const STATION_NAMES = { shop: '🛒 Shop', villager: '🧑‍🌾 Villager', fire: '🔥 Campfire' };
+const STATION_NAMES = { shop: 'Shop', villager: 'Villager', fire: 'Campfire' };
 const NPC_SWITCH_RANGE = 1.4;      // m: an idling character's 🔄 Switch button shows this close
 const NPC_VIEW_RANGE = 2.3;        // m: the camera starts easing round to it
 const FINAL_BOSS_MARKER_BG = 'rgba(220, 38, 38, 0.92)';
@@ -304,8 +304,8 @@ const SHOP_ITEMS = [
 
 // Sitting by the campfire: until night / until morning
 const SIT_CHOICES = {
-  night: { pref: 'night', button: '🌙 Sit until night', fade: '🌙 Night falls…', label: '🌙 Night' },
-  day: { pref: 'day', button: '☀️ Sit until morning', fade: '☀️ Morning comes…', label: '☀️ Day' },
+  night: { pref: 'night', button: 'Sit until night', fade: 'Night falls…', label: 'Night' },
+  day: { pref: 'day', button: 'Sit until morning', fade: 'Morning comes…', label: 'Day' },
 };
 
 const _UP = new THREE.Vector3(0, 1, 0);
@@ -331,25 +331,34 @@ export function makeTextSprite(text, { height = 0.24, font = 600, size = 64, bg 
   const canvas = document.createElement('canvas');
   const g = canvas.getContext('2d');
   const fontCss = `${font} ${size}px Outfit, Inter, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+  // (emoji drawn as the pixel icons — public/assets/ui/icons/pixelIcons.js — when it's loaded)
+  const icons = window.pixelIcons?.has(text) ? window.pixelIcons : null;
   g.font = fontCss;
-  const w = Math.ceil(g.measureText(text).width + pad * 2);
+  const w = Math.ceil((icons ? icons.measureText(g, text, size) : g.measureText(text).width) + pad * 2);
   const h = Math.ceil(size * 1.5);
   canvas.width = w;
   canvas.height = h;
-  g.font = fontCss;
-  if (bg) {
-    const r = h / 2.4;
-    g.fillStyle = bg;
-    g.beginPath();
-    g.roundRect(3, 3, w - 6, h - 6, r);
-    g.fill();
-    if (border) { g.lineWidth = 4; g.strokeStyle = border; g.stroke(); }
-  }
-  g.fillStyle = color;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText(text, w / 2, h / 2 + size * 0.04);
-  const tex = new THREE.CanvasTexture(canvas);
+  let tex = null;
+  const draw = () => {
+    g.clearRect(0, 0, w, h);
+    g.font = fontCss;
+    if (bg) {
+      const r = h / 2.4;
+      g.fillStyle = bg;
+      g.beginPath();
+      g.roundRect(3, 3, w - 6, h - 6, r);
+      g.fill();
+      if (border) { g.lineWidth = 4; g.strokeStyle = border; g.stroke(); }
+    }
+    g.fillStyle = color;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    // (the icon sheet still loading: drawn again once it's in)
+    if (icons) icons.drawText(g, text, w / 2, h / 2 + size * 0.04, size, () => { draw(); if (tex) tex.needsUpdate = true; });
+    else g.fillText(text, w / 2, h / 2 + size * 0.04);
+  };
+  draw();
+  tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
@@ -834,7 +843,7 @@ export function createVillage(ctx) {
   const ui = document.createElement('div');
   ui.className = 'village-ui hidden';
   ui.innerHTML = `
-    <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">⬅ Lobby</button>
+    <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">Lobby</button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
     <div class="village-acts hidden" data-v="acts"></div>
     <div class="village-talk ui-panel hidden" data-v="talk">
@@ -934,7 +943,7 @@ export function createVillage(ctx) {
         ? textSprite('⚔️', { height: 0.42, bg: FINAL_BOSS_MARKER_BG, border: 'rgba(255,255,255,0.9)', pad: 14 })
         : textSprite(quest.done ? '🔁' : '❗', { height: 0.42, bg: 'rgba(244, 196, 84, 0.92)', border: 'rgba(255,255,255,0.9)', pad: 14 });
       marker.position.copy(pos).add(_v2.set(0, 1.45 * sc, 0));
-      const label = textSprite(`${quest.emoji} ${quest.title}`, { height: 0.3 });
+      const label = textSprite(quest.title, { height: 0.3 });
       label.position.copy(pos).add(_v2.set(0, 1.45 * sc + 0.4, 0));
       const ring = makeRing(0.6 * sc);
       ring.position.set(pos.x, pos.y + 0.03, pos.z);
@@ -982,7 +991,7 @@ export function createVillage(ctx) {
       const lockedCount = Object.entries(ctx.characters.roster)
         .filter(([k, c]) => !c.story && !c.starter && !unlocked.includes(k)).length;
       if (lockedCount > 0) {
-        const sign = textSprite(`🔒 ${lockedCount} more — beat stage bosses`, { height: 0.2, border: 'rgba(255,255,255,0.25)' });
+        const sign = textSprite(`${lockedCount} more — beat stage bosses`, { height: 0.2, border: 'rgba(255,255,255,0.25)' });
         sign.position.copy(groupCenter).add(_v2.set(0, 1.42, 0));
         root.add(sign);
         overviewLabels.push(sign);
@@ -1000,7 +1009,7 @@ export function createVillage(ctx) {
       hit.position.y = 0.2;
       campfire.group.add(hit);
       makeClickable(campfire.group, { station: 'fire' });
-      const fireLabel = textSprite('🔥 Campfire', { height: 0.22 });
+      const fireLabel = textSprite('Campfire', { height: 0.22 });
       fireLabel.position.copy(campfire.group.position).add(_v.set(0, 0.85, 0));
       root.add(fireLabel);
       overviewLabels.push(fireLabel);
@@ -1086,13 +1095,13 @@ export function createVillage(ctx) {
         }
       });
 
-      const label = textSprite('🛒 Shop', { height: 0.36 });
+      const label = textSprite('Shop', { height: 0.36 });
       label.position.copy(stallRoot.position).add(_v2.set(0, 2.35, 0));
       root.add(label);
       overviewLabels.push(label);
       makeClickable(label, { station: 'shop' });
       const chestEntry = itemEntries.find((e) => e.def.chest);
-      const chestLabel = textSprite('🎁 Mystery Chest', { height: 0.24 });
+      const chestLabel = textSprite('Mystery Chest', { height: 0.24 });
       chestLabel.position.copy(chestEntry.object.position).add(_v2.set(0, 0.95, 0));
       root.add(chestLabel);
       overviewLabels.push(chestLabel);
@@ -1147,7 +1156,7 @@ export function createVillage(ctx) {
       container.rotation.y = yawToward(container.position, stations.characters?.facing
         ? _v.copy(container.position).add(stations.characters.facing) : faceToward);
       character.setMoving(false);
-      const label = textSprite(`${def.emoji} ${def.label}`, { height: 0.15, border: 'rgba(255,255,255,0.3)' });
+      const label = textSprite(def.label, { height: 0.15, border: 'rgba(255,255,255,0.3)' });
       label.position.set(0, 1.22, 0);
       container.add(label);
       npc.label = label;
@@ -1256,8 +1265,8 @@ export function createVillage(ctx) {
 
   // Buttons for the stations in reach (bottom centre; E / Enter = the first). An idling
   // character in reach comes first: "🔄 <name>" swaps with it.
-  const actLabel = (key) => (key === 'villager' ? (finalBoss ? '⚔️ Confront' : '💬 Talk') : STATION_NAMES[key]);
-  const switchLabel = (npc) => `🔄 ${ctx.characters.roster[npc.key]?.label ?? npc.key}`;
+  const actLabel = (key) => (key === 'villager' ? (finalBoss ? 'Confront' : 'Talk') : STATION_NAMES[key]);
+  const switchLabel = (npc) => `${ctx.characters.roster[npc.key]?.label ?? npc.key}`;
   function refreshActs(near) {
     const free = active && !leaving && !approaching && !sitting && !focus && !intro;
     const inRange = free ? near.filter((n) => n.inRange) : [];
@@ -1412,13 +1421,13 @@ export function createVillage(ctx) {
       el.panel.classList.add('hidden');
     } else if (focus === 'shop') {
       if (selectedItem >= 0) el.panel.classList.add('hidden');
-      else show('🛒 Shop', 'Tap an item on the stall — or the chest for a mystery prize.');
+      else show('Shop', 'Tap an item on the stall — or the chest for a mystery prize.');
     } else if (focus === 'fire') {
       // Offer the one that changes the time
       const night = ctx.time.get() === 'night';
       const cur = night ? SIT_CHOICES.night : SIT_CHOICES.day;
       const next = night ? SIT_CHOICES.day : SIT_CHOICES.night;
-      show('🔥 Campfire', `Next stage: ${cur.label}. Sit by the fire to pass the time.`,
+      show('Campfire', `Next stage: ${cur.label}. Sit by the fire to pass the time.`,
         [btn(next.button, () => sitUntil(next))]);
     }
   }
@@ -1445,7 +1454,7 @@ export function createVillage(ctx) {
     lines.push(...quest.lines);
     if (reward > 0 && quest.payLine) lines.push(['them', quest.payLine]);
     return {
-      who: `${quest.emoji} ${quest.speaker}`,
+      who: quest.speaker,
       title: reward > 0 ? `${quest.title} · 🪙 ${reward}` : quest.title,
       lines: lines.map(([w, text, opts]) => [w, fillTalk(text, vars), opts]),
       cancel: TALK_CANCEL,
@@ -1455,7 +1464,7 @@ export function createVillage(ctx) {
   function introScript() {
     const vars = talkVars();
     return {
-      who: `${INTRO_TALK.emoji} ${INTRO_TALK.speaker}`,
+      who: INTRO_TALK.speaker,
       title: INTRO_TALK.title,
       lines: INTRO_TALK.lines.map(([w, text]) => [w, fillTalk(text, vars)]),
       cancel: null,
@@ -1951,9 +1960,9 @@ export function createVillage(ctx) {
   }
   function interactLabel() {
     if (!canInteract()) return null;
-    if (focus === 'villager' && talk) return talk.done && talk.choices ? talk.choices[0][0] : '▶ Next';
-    if (focus === 'fire') return '🔥 Sit';
-    if (focus) return '⬅ Back';
+    if (focus === 'villager' && talk) return talk.done && talk.choices ? talk.choices[0][0] : 'Next';
+    if (focus === 'fire') return 'Sit';
+    if (focus) return 'Back';
     if (extraAct) return extraAct.label;
     if (switchNpc) return switchLabel(switchNpc);
     if (nearKeys) return actLabel(nearKeys.split(',')[0]);
@@ -2384,7 +2393,7 @@ export function createVillage(ctx) {
     const { controls } = ctx.getPlayer();
     if (controls) controls.moveSpeedScale = 1;
     for (const spot of roam.spots) {
-      const sprite = makeTextSprite(`❗ ${spot.quest.emoji} ${spot.quest.speaker}`, { height: ROAM_BEACON_HEIGHT });
+      const sprite = makeTextSprite(`❗ ${spot.quest.speaker}`, { height: ROAM_BEACON_HEIGHT });
       sprite.position.set(spot.center.x, groundY(spot.center.x, spot.center.z, 0) + ROAM_BEACON_LIFT, spot.center.z);
       scene.add(sprite);
       roam.beacons.push({ spot, sprite, w: sprite.scale.x, h: sprite.scale.y });

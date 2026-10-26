@@ -4277,6 +4277,8 @@ body.mobile-block-bar .classic-combo {
 /* Unseen: the stars blink while the guards search */
 .town-stars:not(.town-stars-hunted) { animation: town-stars-blink 0.9s steps(2, start) infinite; }
 .town-stars-hunted { color: var(--danger); }
+/* (the stars are icons — pixelIcons.js: hunted = a red glow) */
+.town-stars-hunted px-icon { filter: drop-shadow(0 0 3px var(--danger)) drop-shadow(0 0 6px var(--danger)); }
 @keyframes town-stars-blink { to { opacity: 0.35; } }
 .town-jail {
   position: absolute;
@@ -4423,29 +4425,6 @@ body.town-reeling .ps-block-btn { display: none !important; }
   }
   body.town-reeling #joystick-container { visibility: hidden !important; }
 }
-/* Who the player's talking to: their mood toward the player — a row in the talk box (townMemory.js relationRow) */
-.town-relation {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  margin-top: 4px;
-}
-.town-relation-who { font-size: 12px; font-weight: 700; color: var(--text-muted); white-space: nowrap; }
-.town-relation-bar {
-  flex: 1 1 60px;
-  max-width: 120px;
-  height: 6px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-hover);
-  overflow: hidden;
-}
-.town-relation-fill { height: 100%; border-radius: inherit; background: var(--text-dim); transition: width 0.3s var(--ease); }
-.town-relation-fill[data-mood='bad'] { background: var(--danger); }
-.town-relation-fill[data-mood='low'] { background: var(--accent-lo); }
-.town-relation-fill[data-mood='mid'] { background: var(--accent); }
-.town-relation-fill[data-mood='good'] { background: var(--success); }
-.town-relation-note { font-size: 11px; color: var(--text-dim); }
 @media (max-width: 520px) {
   .town-top { gap: 6px; padding: 6px 10px; font-size: 13px; }
   .town-top-rep-title { display: none; }
@@ -4619,10 +4598,102 @@ body.town-shop-open #action-buttons { visibility: hidden; }
 /* At a market stall's counter (townStalls.js): the village's buy card over the picked thing */
 .town-hud .town-card { z-index: 1; }
 
-/* A townsperson's job talk (src/town/townJobs.js createJobTalk): the village's talk box */
-.town-hud .town-talk { pointer-events: auto; cursor: default; z-index: 2; }
+/* Talking with a townsperson (src/town/townJobs.js createJobTalk) and what townsfolk nearby say
+   (townMode.js subtitle): subtitles at the bottom of the screen — light text on a faint dark
+   band, their name coloured by their mood toward the player; the player's replies under it */
+.town-talk,
+.town-subs {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(640px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  font-family: var(--font-ui);
+}
+.town-talk {
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  pointer-events: auto;
+  z-index: 2;
+  animation: town-sub-in 0.2s var(--ease);
+}
 .town-hud .town-talk.hidden { display: none; }
-.town-talk-reward { margin-top: 6px; font-size: 13px; font-weight: 700; color: var(--accent-hi); }
+.town-subs {
+  bottom: calc(150px + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+/* (no ambient lines over a conversation, a panel or a counter) */
+body.town-market-open .town-subs,
+body.town-shop-open .town-subs { display: none; }
+.town-talk-line,
+.town-sub {
+  max-width: 100%;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: rgba(6, 8, 14, 0.42);
+  color: #f6f3ea;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+.town-sub {
+  font-size: 15px;
+  animation: town-sub-in 0.2s var(--ease);
+  transition: opacity 0.6s var(--ease);
+}
+.town-sub-big { font-weight: 800; }
+.town-sub-out { opacity: 0; }
+.town-talk-who,
+.town-sub-who {
+  margin-right: 0.45em;
+  font-weight: 800;
+  color: var(--accent-hi);
+}
+.town-talk-who::after,
+.town-sub-who::after { content: ':'; }
+.town-talk-who[data-mood='bad'] { color: #ff8a7a; }
+.town-talk-who[data-mood='low'] { color: #f0b37a; }
+.town-talk-who[data-mood='good'] { color: #9be39b; }
+.town-talk-reward {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-hi);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+.town-talk-choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+.town-talk-choices:empty { display: none; }
+.town-talk-choice {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--radius-pill);
+  background: rgba(6, 8, 14, 0.38);
+  color: rgba(246, 243, 234, 0.85);
+  font: 700 14px var(--font-ui);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  cursor: pointer;
+}
+.town-talk-choice.is-primary { color: var(--accent-hi); border-color: rgba(255, 210, 120, 0.4); }
+@media (hover: hover) {
+  .town-talk-choice:hover { background: rgba(6, 8, 14, 0.6); color: #fff; }
+}
+@keyframes town-sub-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@media (max-width: 520px) {
+  .town-talk-line { font-size: 15px; }
+  .town-sub { font-size: 13px; }
+}
 /* The quest tracker: the jobs on, top right under the goods */
 .town-quests {
   position: absolute;

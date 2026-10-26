@@ -28,16 +28,16 @@ const STEPS = [
   {
     id: 'welcome', guide: 'merchant', title: 'Say hello at the market', talkOnly: true, coins: 3, skippable: true,
     talk: 'Welcome to Brindlewick, {name}! New in town, and not a coin to your name, by the look of you. Here — a few to start. Folk around here will show you how we live: fishing, farming, the market. Shall I send someone round?',
-    accept: '👍 Show me around',
+    accept: 'Show me around',
     done: '{next} will come and find you — they\'ll show you the ropes.',
   },
   {
     id: 'fish', guide: 'fisher', title: 'Go fishing', goal: 'fish', n: 1, coins: 4, at: 'fishSpot', gives: 'rod',
-    talk: 'Come fishing, {name}! Here — my old rod, it\'s yours. At the 🎣 fishing spot, swing it forward to cast. When the bobber goes under, pull the rod back sharp to hook it. Let it run, pull when it tires, then reel it in. Catch one and it\'s yours.',
-    accept: '🎣 Let\'s fish',
-    progress: 'Catch a fish 🐟 at the 🎣 fishing spot',
+    talk: 'Come fishing, {name}! Here — my old rod, it\'s yours. At the fishing spot, swing it forward to cast. When the bobber goes under, pull the rod back sharp to hook it. Let it run, pull when it tires, then reel it in. Catch one and it\'s yours.',
+    accept: 'Let\'s fish',
+    progress: 'Catch a fish at the fishing spot',
     done: 'Ha, a fine catch! You\'re a natural, {name}.',
-    next: 'Now let\'s cook it. Raw fish won\'t do you much good — grilled over the town campfire it heals far more, and sells for more too. Follow me to the fire, then press 🍳 by the pot and stay close while it grills.',
+    next: 'Now let\'s cook it. Raw fish won\'t do you much good — grilled over the town campfire it heals far more, and sells for more too. Follow me to the fire, then press Grill by the pot and stay close while it grills.',
     tips: [
       'Swing the rod forward to cast — the harder the swing, the further it goes.',
       'Watch the bobber. When it goes right under, pull the rod back sharp — a little nibble first is just teasing.',
@@ -47,32 +47,32 @@ const STEPS = [
   },
   {
     id: 'cook', guide: 'fisher', noTalk: true, title: 'Cook your catch', goal: 'cook', n: 1, coins: 3, at: 'fire',
-    progress: 'Grill a fish at the campfire 🍳',
+    progress: 'Grill a fish at the campfire',
     done: 'Smells good! Cooked food heals more, and the merchant pays more for it too.',
     tips: [
-      'Walk up to the fire with your fish and press 🍳.',
+      'Walk up to the fire with your fish and press Grill.',
       'Stay by the pot a few seconds while it cooks — wander off and it\'s ruined.',
       'Two veg make a stew, if you\'ve no fish.',
     ],
   },
   {
     id: 'harvest', guide: 'farmer', title: 'Help with the harvest', goal: 'pick', n: 3, coins: 3, at: 'guideWork',
-    talk: 'Give me a hand with the harvest, {name}? Pick 3 veg from my field — 🌾 Pick — and keep them, they\'re yours. Just don\'t go picking anyone\'s field without asking: that\'s stealing.',
-    accept: '🌾 Happy to help',
-    progress: 'Pick 3 veg 🥕 from {guide}\'s field',
+    talk: 'Give me a hand with the harvest, {name}? Pick 3 veg from my field — press Pick — and keep them, they\'re yours. Just don\'t go picking anyone\'s field without asking: that\'s stealing.',
+    accept: 'Happy to help',
+    progress: 'Pick 3 veg from {guide}\'s field',
     done: 'Good hands! That\'s the harvest in.',
-    next: 'Those veg are yours to keep — so let\'s turn them into coin. I\'ll walk you to the shop: go in through the door, up to the merchant\'s counter, and press 💰 Sell.',
+    next: 'Those veg are yours to keep — so let\'s turn them into coin. I\'ll walk you to the shop: go in through the door, up to the merchant\'s counter, and press Sell.',
     tips: [
-      'Walk in among the crops and press 🌾 Pick.',
+      'Walk in among the crops and press Pick.',
       'It grows back in a while. Only pick a field with the farmer\'s say-so, mind.',
     ],
   },
   {
     id: 'sell', guide: 'farmer', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'market',
-    progress: 'Sell your veg at the shop: in through the door, to the counter, 💰 Sell',
+    progress: 'Sell your veg at the shop: in through the door, to the counter, Sell',
     done: 'There — coins in your pocket! The less the merchant has of something, the more he pays for it.',
     tips: [
-      'In through the door, up to the counter at the back, then 💰 Sell.',
+      'In through the door, up to the counter at the back, then Sell.',
       'Cooked food fetches more than raw.',
       'The merchant\'s only there in the day — no selling at night.',
     ],
@@ -80,7 +80,7 @@ const STEPS = [
   {
     id: 'camp', guide: 'sheriff', title: 'Meet the sheriff', talkOnly: true, coins: 3,
     talk: 'A word, {name}. I keep the law in Brindlewick — keep your blade sheathed in town, and the guards won\'t trouble you. And stay away from the bandit camp, way out past the edge of town. They\'ll warn you once. Then it\'s swords.',
-    accept: '👍 Understood',
+    accept: 'Understood',
     done: 'Good. Folk with a ❗ over them have work, if you want to earn your keep.',
   },
   {
@@ -186,8 +186,8 @@ export function installTownIntro(T, ctx) {
     // (the same guide carrying on: they come over and say what's next in the talk box)
     if (carriesOn) { /* (said in the debrief) */ }
     else if (line && g?.body && T.distToPlayer(g) < GUIDE_REACH) T.say(g, line, { big: true });
-    else if (line) T.feedLine(`${g ? `${g.def.emoji} ${firstName(g.name)}: ` : ''}${line}`);
-    T.feedLine(`🌱 ${s.title} ✔${s.coins ? ` · +${s.coins} 🪙` : ''}`);
+    else if (line) T.feedLine(`${g ? `${firstName(g.name)}: ` : ''}${line}`);
+    T.feedLine(`${s.title} — done${s.coins ? ` · +${s.coins} coins` : ''}`);
     // (the next step's guide picked fresh, unless it's the same one carrying on)
     if (STEPS[next]?.guide !== s.guide) T.intro.guideId = null;
     begin(next);
@@ -198,13 +198,13 @@ export function installTownIntro(T, ctx) {
     unguideAll();
     T.intro = null;
     ctx.showBanner('SETTLED IN!', 'You know your way around Brindlewick now', 2800);
-    T.feedLine('🏡 That\'s your first day done. The town\'s yours to make a living in — or trouble.');
+    T.feedLine('That\'s your first day done. The town\'s yours to make a living in — or trouble.');
     T.save();
   };
   const skip = () => {
     unguideAll();
     T.intro = null;
-    T.feedLine('🌱 Skipped the first day. Folk with a ❗ have work for you.');
+    T.feedLine('Skipped the first day. Folk with a ❗ have work for you.');
     T.save();
   };
 
@@ -236,10 +236,10 @@ export function installTownIntro(T, ctx) {
       const text = T.intro.debrief;
       T.intro.debrief = null;
       T.jobTalk.open({
-        who: `${n.def.emoji} ${firstName(n.name)}`, sub: `🌱 First day: ${s.title}`, text,
+        who: firstName(n.name), sub: `First day: ${s.title}`, text,
         reward: s.coins ? `Next: ${fill(s.progress ?? s.title, s, n)} · 🪙 ${s.coins}` : null,
         choices: [
-          { label: '👍 Lead the way', primary: true, onClick: () => { if (T.intro) T.intro.autoWalk = true; } },
+          { label: 'Lead the way', primary: true, onClick: () => { if (T.intro) T.intro.autoWalk = true; } },
           { label: 'I\'ll find my own way', primary: false, onClick: () => { if (T.intro) T.intro.autoWalk = false; } },
         ],
       });
@@ -250,10 +250,10 @@ export function installTownIntro(T, ctx) {
       const tips = s.tips ?? [];
       const tipLine = (k) => `${fill(tips[k % tips.length], s, n)}`;
       const show = (k) => {
-        const choices = [{ label: n.guiding ? '👍 Lead on' : '👍 Thanks', primary: true }];
-        if (tips.length > 1) choices.push({ label: '💡 Another tip', onClick: () => { if (n.alive) show(k + 1); } });
+        const choices = [{ label: n.guiding ? 'Lead on' : 'Thanks', primary: true }];
+        if (tips.length > 1) choices.push({ label: 'Another tip', onClick: () => { if (n.alive) show(k + 1); } });
         T.jobTalk.open({
-          who: `${n.def.emoji} ${firstName(n.name)}`, sub: `🌱 First day: ${s.title}`,
+          who: firstName(n.name), sub: `First day: ${s.title}`,
           text: tips.length ? tipLine(k) : fill(s.progress ?? s.title, s, n),
           reward: fill(s.progress ?? s.title, s, n), choices,
         });
@@ -263,10 +263,10 @@ export function installTownIntro(T, ctx) {
       return true;
     }
     const choices = [{
-      label: s.accept ?? '👍 Okay', primary: true,
+      label: s.accept ?? 'Okay', primary: true,
       onClick: () => {
         if (T.intro?.step !== STEPS.indexOf(s)) return;
-        if (s.gives && !ctx.getItems()?.[s.gives] && ctx.grantItem(s.gives)) T.feedLine(`🎁 ${firstName(n.name)} gave you a ${s.gives === 'rod' ? 'fishing rod 🎣' : s.gives}.`);
+        if (s.gives && !ctx.getItems()?.[s.gives] && ctx.grantItem(s.gives)) T.feedLine(`${firstName(n.name)} gave you a ${s.gives === 'rod' ? 'fishing rod' : s.gives}.`);
         if (s.talkOnly) complete();
         else { T.intro.phase = 'do'; T.intro.count = 0; T.intro.autoWalk = true; T.save(); }
       },
@@ -274,7 +274,7 @@ export function installTownIntro(T, ctx) {
     if (s.skippable) choices.push({ label: 'I know my way around', primary: false, onClick: skip });
     else choices.push({ label: 'Later', primary: false, onClick: () => { snoozeUntil = T.simT + GUIDE_SNOOZE_S; } });
     T.jobTalk.open({
-      who: `${n.def.emoji} ${firstName(n.name)}`, sub: `🌱 First day: ${s.title}`, text: fill(s.talk, s, n),
+      who: firstName(n.name), sub: `First day: ${s.title}`, text: fill(s.talk, s, n),
       reward: s.coins ? `Reward: 🪙 ${s.coins}` : null, choices,
     });
     return true;
@@ -363,7 +363,7 @@ export function installTownIntro(T, ctx) {
     // (back after a while: they ask again)
     if (T.intro.phase === 'talk') greetedStep = -1;
     if (T.intro.phase === 'talk' && T.distToPlayer(g) > 8) {
-      T.feedLine(`👋 ${firstName(g.name)} the ${g.def.label.toLowerCase()} is coming to find you.`);
+      T.feedLine(`${firstName(g.name)} the ${g.def.label.toLowerCase()} is coming to find you.`);
     }
   };
   // A guide's frame (the 'guide' task — townReactions.js updateSpecialTask); true: handled
@@ -534,7 +534,7 @@ export function installTownIntro(T, ctx) {
     const p = T.playerPos();
     if (dist2(p.x, p.z, tgt.x, tgt.z) <= tgt.stop + 1) return [];
     const g = T.npcById(T.intro.guideId);
-    return [{ key: 'introwalk', label: g?.guiding ? `🚶 Follow ${firstName(g.name)}` : '🚶 Walk me there', onClick: () => { if (T.intro) { T.intro.autoWalk = true; T.actsAt = 0; } } }];
+    return [{ key: 'introwalk', label: g?.guiding ? `Follow ${firstName(g.name)}` : 'Walk me there', onClick: () => { if (T.intro) { T.intro.autoWalk = true; T.actsAt = 0; } } }];
   };
 
   // Upkeep: a guide who's gone (dead, jailed) is replaced; a talk with nobody to give it, skipped

@@ -89,7 +89,7 @@ export function installTownCooking(T, ctx) {
     if (T.cooking || !canMake(r)) return;
     const p = T.playerPos();
     T.cooking = { recipe: r, left: r.secs, x: p.x, z: p.z };
-    T.feedLine(`🔥 ${GOODS[r.id].label} on the fire…`);
+    T.feedLine(`${GOODS[r.id].label} on the fire…`);
   };
   const stopCooking = () => { T.cooking = null; };
   const updateCooking = (dt) => {
@@ -121,16 +121,16 @@ export function installTownCooking(T, ctx) {
     T.goods[r.id] += 1;
     T.renderGoods();
     const G = GOODS[r.id];
-    T.feedLine(`${G.emoji} ${G.label}! Heals +${G.heal} ❤️ — and sells for more than it's made of.`);
+    T.feedLine(`${G.label}! Heals +${G.heal} health — and sells for more than it's made of.`);
     T.introNote('cook', { good: r.id });
   };
   // The fire's buttons: what can be cooked with what the player carries
   const cookActs = () => {
-    if (T.cooking) return [{ key: 'cooking', label: `🔥 Cooking… ${Math.ceil(T.cooking.left)}s`, onClick: stopCooking }];
+    if (T.cooking) return [{ key: 'cooking', label: `Cooking… ${Math.ceil(T.cooking.left)}s`, onClick: stopCooking }];
     if (!nearFire()) return [];
     return RECIPES.filter(canMake).map((r) => ({
       key: `cook:${r.id}`,
-      label: `🍳 ${r.verb} ${fromText(r)} → ${GOODS[r.id].emoji}`,
+      label: `${r.verb} ${fromText(r)} → ${GOODS[r.id].emoji}`,
       onClick: () => startCooking(r),
     }));
   };

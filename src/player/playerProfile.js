@@ -372,7 +372,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   if (!profile) {
     profile = buildProfile(trimmedName);
     await set(profileRef, profile);
-    console.log('✅ Created missing profile for', trimmedName);
+    console.log('Created missing profile for', trimmedName);
     return profile;
   }
 
@@ -398,7 +398,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   profile.stats = mergedStats;
   profile.inventory = mergedInventory;
 
-  console.log('✅ Loaded profile for', trimmedName);
+  console.log('Loaded profile for', trimmedName);
   return profile;
 }
 
@@ -559,7 +559,7 @@ export async function loadOrCreateWithPin(playerName, options = {}) {
       const profile = buildProfile(trimmedName);
       await set(profileRef, profile);
       rememberPinHash(nameKey, pinHash);
-      console.log('✅ Created new profile for', trimmedName);
+      console.log('Created new profile for', trimmedName);
       return { nameKey, profile };
     }
   }
@@ -588,11 +588,11 @@ export async function loadOrCreateWithPin(playerName, options = {}) {
     const latestClaimSnap = await get(claimRef);
     const latestClaim = latestClaimSnap.val();
     if (!latestClaim?.pinHash) {
-      console.warn('⚠️ Name claim missing for', trimmedName);
+      console.warn('Name claim missing for', trimmedName);
     }
 
     if (latestClaim?.pinHash !== pinHash) {
-      console.warn('❌ Incorrect PIN for', trimmedName);
+      console.warn('Incorrect PIN for', trimmedName);
       if (useAlerts) {
         alert('Incorrect PIN. Try again.');
       }

@@ -30,11 +30,11 @@ export function installTownTrade(T, ctx) {
   const eat = (g) => {
     if (!GOODS[g]?.food || T.goods[g] <= 0 || T.sequence || ctx.isPlayerDead()) return;
     const { health, max } = ctx.getHealth();
-    if (health >= max) { T.feedLine('❤️ You\'re not hungry.'); return; }
+    if (health >= max) { T.feedLine('You\'re not hungry.'); return; }
     T.goods[g] -= 1;
     ctx.heal(GOODS[g].heal);
     T.renderGoods();
-    T.feedLine(`😋 Ate a ${GOODS[g].label.toLowerCase()}. +${GOODS[g].heal} ❤️`);
+    T.feedLine(`Ate a ${GOODS[g].label.toLowerCase()}. +${GOODS[g].heal} health`);
   };
   // Chop: the sword tip in a trunk (CHOP_HITS hits a log)
   const tryChop = (tip) => {
@@ -49,7 +49,7 @@ export function installTownTrade(T, ctx) {
       ctx.playSfx('chop');
       if (T.bagRoom() <= 0) { T.bagFullNote(); return true; }
       if (t.wood <= 0) {
-        T.feedLine('🌳 This tree needs time to grow back.');
+        T.feedLine('This tree needs time to grow back.');
         return true;
       }
       t.hits += 1;
@@ -58,7 +58,7 @@ export function installTownTrade(T, ctx) {
         t.wood -= 1;
         if (t.growAt <= T.simT) t.growAt = T.simT + TREE_REGROW_S; // (grows back one at a time)
         gain('wood');
-        T.feedLine(`🪵 +1 Wood (${T.goods.wood})`);
+        T.feedLine(`+1 Wood (${T.goods.wood})`);
       }
       return true;
     }
@@ -82,7 +82,7 @@ export function installTownTrade(T, ctx) {
     crop.growAt = T.simT + CROP_REGROW_S;
     crop.mesh.visible = false;
     gain('crops');
-    T.feedLine(`🥕 +1 Veg (${T.goods.crops})`);
+    T.feedLine(`+1 Veg (${T.goods.crops})`);
     // (the player's own field — bought, townFarming.js — or helping the farmer with the harvest
     // on the first day: allowed — townIntro.js)
     const bought = T.fieldOwner(field);
@@ -132,18 +132,18 @@ export function installTownTrade(T, ctx) {
   const homeLine = (key) => {
     const home = T.layout.places.rooms[key].home;
     const house = T.houses[home];
-    if (house) return T.doorAccess(key).mine ? '🏠 Home. Your chest is in the corner.' : `🏠 ${house.n || 'Another player'}'s home.`;
+    if (house) return T.doorAccess(key).mine ? 'Home. Your chest is in the corner.' : `${house.n || 'Another player'}'s home.`;
     const names = T.npcs.filter((n) => n.alive && n.homeIndex === home && !n.def.outlaw).map((n) => firstName(n.name));
-    if (!names.length) return '🏠 An empty house — nobody lives here yet.';
+    if (!names.length) return 'An empty house — nobody lives here yet.';
     const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-    return `🏠 ${who}'s home.`;
+    return `${who}'s home.`;
   };
   // In through the door (weapons away: no fighting indoors); out again by walking back through
   // it or 🚪 Leave
   // (forced: the lock picked — townHomes.js; otherwise a locked door says why)
   const enterRoom = (key, { forced = false } = {}) => {
     if (!canEnterRoom()) {
-      if (T.law.stars > 0) T.feedLine('🚪 Not with the guards after you!');
+      if (T.law.stars > 0) T.feedLine('Not with the guards after you!');
       return;
     }
     const access = T.doorAccess(key);
@@ -161,8 +161,8 @@ export function installTownTrade(T, ctx) {
     rooms.setInside(key);
     T.actsAt = 0;
     if (T.layout.places.rooms[key].kind === 'home') T.feedLine(homeLine(key));
-    else if (key === 'jail') T.feedLine('⭐ The sheriff\'s office — and the cell.');
-    else if (!stallOpen(key)) T.feedLine('🛒 The merchant\'s not in.');
+    else if (key === 'jail') T.feedLine('The sheriff\'s office — and the cell.');
+    else if (!stallOpen(key)) T.feedLine('The merchant\'s not in.');
   };
   const leaveRoom = () => {
     const key = T.inRoom ?? playerRoom();
@@ -284,8 +284,8 @@ export function installTownTrade(T, ctx) {
       const merchant = workingMerchant();
       const friend = merchant && merchant.attitude >= FRIEND_ATTITUDE;
       return {
-        name: `${g.emoji} ${g.label}`,
-        desc: `${T.market.stock[id]} in stock${g.food ? ` · eat it for +${g.heal} ❤️` : ''}${friend ? ' · friend\'s price' : ''}`,
+        name: g.label,
+        desc: `${T.market.stock[id]} in stock${g.food ? ` · eat it for +${g.heal} health` : ''}${friend ? ' · friend\'s price' : ''}`,
         owned: `You have ${T.goods[id]}`,
         price: buyPrice(id),
         blocked: keeperBlock(key)
@@ -294,7 +294,7 @@ export function installTownTrade(T, ctx) {
     }
     if (id === 'chest') {
       return {
-        name: '🎁 Mystery Chest', desc: 'A random prize — coins, bombs, a shield, goods… maybe even a gun!',
+        name: 'Mystery Chest', desc: 'A random prize — coins, bombs, a shield, goods… maybe even a gun!',
         price: CHEST_PRICE, verb: 'Open', blocked: keeperBlock(key),
       };
     }
@@ -304,7 +304,7 @@ export function installTownTrade(T, ctx) {
     const missing = item.needs && !items?.[item.needs];
     const needLabel = { gun: 'Gun', wand: 'Magic Wand' }[item.needs];
     return {
-      name: `${item.emoji} ${item.label}`,
+      name: item.label,
       desc: item.desc || '',
       owned: gearHave(id, items),
       price: item.price,
@@ -342,7 +342,7 @@ export function installTownTrade(T, ctx) {
     const merchant = workingMerchant();
     const cash = Math.floor(merchant?.money ?? 0);
     return {
-      title: `💰 Sell · ${merchant ? firstName(merchant.name) : 'closed'}`,
+      title: `Sell · ${merchant ? firstName(merchant.name) : 'closed'}`,
       coins: ctx.getCoins(),
       cash,
       note: !merchant ? 'The merchant isn\'t here.'
@@ -357,7 +357,7 @@ export function installTownTrade(T, ctx) {
     };
   };
   const openMarket = () => {
-    if (!marketOpen()) { T.feedLine('🧺 The market\'s closed.'); return; }
+    if (!marketOpen()) { T.feedLine('The market\'s closed.'); return; }
     T.fishing = null;
     stalls.unfocus();
     T.marketPanel.open(marketModel());
@@ -419,7 +419,7 @@ export function installTownTrade(T, ctx) {
     ctx.addCoins(-item.price);
     const k = keeperOf(key);
     if (k) T.npcMoney(k, item.price);
-    T.feedLine(`${item.emoji} Bought: ${item.label}`);
+    T.feedLine(`Bought: ${item.label}`);
     return true;
   };
   // The shop's mystery chest: one weighted random prize (what can't be used is left out)
@@ -444,7 +444,7 @@ export function installTownTrade(T, ctx) {
     const text = prize.give();
     if (!text) { ctx.addCoins(CHEST_PRICE); return { ok: false }; }
     if (workingMerchant()) T.npcMoney(workingMerchant(), CHEST_PRICE);
-    T.feedLine(`🎁 Mystery Chest: ${text}`);
+    T.feedLine(`Mystery Chest: ${text}`);
     return { ok: true, emoji: prize.emoji };
   };
 
@@ -500,10 +500,10 @@ export function installTownTrade(T, ctx) {
     for (const g of RAW_IDS) {
       if (T.market.stock[g] <= 0 && !T.soldOut.has(g)) {
         T.soldOut.add(g);
-        T.feedLine(`📉 The market's out of ${GOODS[g].label.toLowerCase()}! ${GOODS[g].emoji} ${T.market.price(g)}🪙 now`);
+        T.feedLine(`The market's out of ${GOODS[g].label.toLowerCase()}! ${T.market.price(g)} coins now`);
       } else if (T.market.stock[g] > 0 && T.soldOut.has(g)) {
         T.soldOut.delete(g);
-        T.feedLine(`📦 ${GOODS[g].label} is back at the market.`);
+        T.feedLine(`${GOODS[g].label} is back at the market.`);
       }
     }
     if (T.marketPanel.isOpen()) T.marketPanel.render(marketModel());
@@ -525,7 +525,7 @@ export function installTownTrade(T, ctx) {
     };
     if (!pay(food)) return;
     T.say(n, shout(SHOUT_EAT_BUY));
-    setTimeout(() => { if (T.active && merchant.alive) T.say(merchant, `${GOODS[food].emoji} That's ${T.market.price(food)} coins!`); }, 900);
+    setTimeout(() => { if (T.active && merchant.alive) T.say(merchant, `That's ${T.market.price(food)} coins!`); }, 900);
     n.needs.hunger = 0;
     if (Math.random() < FIREWOOD_CHANCE) pay('wood');
     noteStock();
