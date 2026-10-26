@@ -58,6 +58,18 @@ export function whenStyleReferenceReady(timeoutMs = 4000) {
   return Promise.race([_referenceReady, new Promise((r) => setTimeout(r, timeoutMs))]);
 }
 
+/**
+ * Sets the reference look from stats measured earlier (a map's setStyleReference values), so
+ * characters loaded before that map is in needn't wait on it. The map still measures its own
+ * once it loads (no change for characters stylized meanwhile).
+ */
+export function presetStyleReference(reference) {
+  if (_referenceSet || !reference) return;
+  artStyleConfig.reference = { ...reference };
+  _referenceSet = true;
+  _resolveReference();
+}
+
 // ── Pixel helpers (sRGB bytes, 0–1 maths) ───────────────────────────────────
 
 const lumOf = (r, g, b) => 0.2126 * r + 0.7152 * g + 0.0722 * b;

@@ -172,6 +172,7 @@ export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, s
 // the water beside the hull pushes it the other way — off its side, so it turns too: paddling
 // on the left goes forward and a little right, on the right a little left, a stroke forward
 // backs it up (weaker)
+export const ARRIVAL_SNAP_DIST = 8;         // m — Town entered from somewhere (the sea start's landing): the walkable spot this close, else the spawn
 export const CANOE_BOARD_DIST = 3;          // m from its middle: 🛶 Get in
 export const CANOE_SHORE_DIST = 4;          // m — 🛶 Get out with dry ground this close
 export const CANOE_STAND_Z = -0.35;         // m along it (bow = +): where the player stands

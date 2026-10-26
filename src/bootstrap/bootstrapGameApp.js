@@ -10,7 +10,7 @@ import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, registerWallProbe, setTerrainFloor } from '../environment/terrainHeight.js';
 import { registerMapMeshes } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
-import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
+import { presetStyleReference, setStyleReference, stylizeObject } from '../environment/artStyle.js';
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
 import { showFeatureLoading } from '../features/loadingState.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
@@ -61,6 +61,7 @@ import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
+import { createSeaStart } from '../town/seaStart.js';
 import { WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
@@ -585,7 +586,10 @@ function createArcadeOverlay(startOverlay) {
   // All modes are offered right away (the tutorial can't be remembered as done).
   // The app opens as a guest unless a signed-in player is remembered; the welcome
   // section's "Sign In" button (switchButton) reloads to the login form.
-  const startAsGuest = () => {
+  // `seaStart`: the app just opened (nobody remembered, no sign-in asked for) — the guest starts
+  // out on the sea in a canoe (src/town/seaStart.js) instead of on the start screen, which
+  // their ⬅ Lobby button brings up
+  const startAsGuest = ({ seaStart = false } = {}) => {
     if (authResolved) return;
     authToken += 1; // drop any login in progress
     authInProgress = false;
@@ -594,7 +598,11 @@ function createArcadeOverlay(startOverlay) {
     setMessage('');
     welcomeText.textContent = `Playing as guest ${currentName}`;
     const guestProfile = buildGuestProfile(currentName);
-    showModeSelect({ guest: true, nameKey: null, profile: guestProfile });
+    if (seaStart) {
+      hideOverlay();
+      pendingGameMode = 'sea'; // started by setModeHandler once the game is ready
+    }
+    showModeSelect({ guest: true, nameKey: null, profile: guestProfile, seaStart });
   };
 
   guestButton?.addEventListener('click', event => {
@@ -636,22 +644,26 @@ function createArcadeOverlay(startOverlay) {
       } else if (consumeShowLoginFlag()) {
         showLoginForm({ name: initialName }); // the player asked to sign in
       } else {
-        startAsGuest();
+        startAsGuest({ seaStart: true });
       }
       return authPromise;
     },
     setStartHandler(handler) {
       startHandler = handler;
     },
-    // Start a mode without the start screen's buttons (Settings → Dev → Free Roam)
+    // Start a mode without the start screen's buttons (Settings → Dev → Free Roam; the sea
+    // start's landing → Town)
     startMode: (gameMode) => chooseMode(gameMode),
+    // The sea start's Sign In: a fresh page load on the login form
+    signIn: () => reloadToLoginForm(),
     setModeHandler(handler) {
       modeHandler = handler;
       if (pendingGameMode) {
         const gameMode = pendingGameMode;
         pendingGameMode = null;
-        // Delay briefly so the rest of init completes first
-        setTimeout(() => handler(gameMode), 600);
+        // Delay briefly so the rest of init completes first (the sea start: just that — it's
+        // meant to be up as soon as possible)
+        setTimeout(() => handler(gameMode), gameMode === 'sea' ? 0 : 600);
       }
     },
     // Back to the start screen mid-session (e.g. after the tutorial)
@@ -753,6 +765,9 @@ async function initCore(runtimeContext) {
   // Guest (Play Without Signing In): profileNameKey is null, so nothing is saved
   const isGuest = !!profileResult.guest;
   let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
+  // A guest starting out on the sea (src/town/seaStart.js) until they land or go to the lobby —
+  // meanwhile the phone QR popup waits, as it does behind the start screen
+  let _seaStartPending = !!profileResult.seaStart;
 
   if (!isGuest) {
     setCookie("playerName", playerName);
@@ -771,6 +786,7 @@ async function initCore(runtimeContext) {
   let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
   let devRoam = null; // Dev: Free Roam (Settings → Dev; created further down)
   let town = null; // Town mode (src/town/townMode.js; created further down)
+  let seaStart = null; // The guest's sea start (src/town/seaStart.js; created with the town)
   let townNet = null; // Town's shared room (src/town/townNet.js; created with the town)
   // Multiplayer battle (Team Battle / Free For All): everyone starts with the sword and finds
   // the rest on the arena's pickups; the real inventory / stats are set aside meanwhile and
@@ -1808,6 +1824,17 @@ async function initCore(runtimeContext) {
         url: '/assets/props/pirate_ship.glb', at: [49, -77], yaw: 1.8, size: 1.3, deckMaxY: 1.5,
         deck: { minX: -0.9, maxX: 4.4, halfWidth: 1.3 },
       }],
+      // The guest's sea start (src/town/seaStart.js) runs before this map is in, so what it needs
+      // of it is written down here, measured from the pack (re-measure if the pack changes):
+      // the sea level (world Y), Town's fishing spot (`places.fishSpot`, townLayout.js) and the
+      // way its bank faces out to the water, and the art-style reference (artStyle.js —
+      // setStyleReference's numbers) so the player needn't wait on the map to be stylized
+      seaStart: {
+        seaLevel: -3.5,
+        fishSpot: { x: -66.1, z: -96.9 },
+        face: { x: -Math.SQRT1_2, z: -Math.SQRT1_2 },
+        styleReference: { lum: 0.322, lumStd: 0.151, sat: 0.234 },
+      },
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
@@ -1815,6 +1842,8 @@ async function initCore(runtimeContext) {
   const SEA_WADE_DEPTH = 0.6;   // m under the sea surface characters wade at
   const MAP_NOT_GROUND = new Set(['sea', 'seabed', 'water']);   // MapLoader water meshes
   const mapForMode = (gameMode) => (gameMode === 'classic' ? 'classic' : DEFAULT_MAP);
+  // The sea start doesn't wait on the map: the player is stylized with its measured look
+  if (_seaStartPending) presetStyleReference(MAPS[DEFAULT_MAP].seaStart.styleReference);
 
   // Build a BVH-accelerated mesh list for downward raycasting to get terrain height.
   const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = await import('three-mesh-bvh');
@@ -2063,8 +2092,10 @@ async function initCore(runtimeContext) {
   };
   // Flat Rapier ground (created after the first map load, below); moved to the map's floor
   let _physicsGroundRb = null;
+  // (before any map: _preMapFloor — the sea start sets it to the map's own, the sea's shallows)
+  let _preMapFloor = 0;
   function _syncPhysicsGround() {
-    _physicsGroundRb?.setTranslation({ x: 0, y: (_activeMap?.floor ?? 0) - 1, z: 0 }, true);
+    _physicsGroundRb?.setTranslation({ x: 0, y: (_activeMap?.floor ?? _preMapFloor) - 1, z: 0 }, true);
   }
   // The default map loads alongside the rest of the boot (weapons, physics, the settings panel)
   // and is awaited once the ⚙️ button is up (see `settings-ready`), so the settings button
@@ -2814,15 +2845,15 @@ async function initCore(runtimeContext) {
   const getMana = () => (Number.isFinite(statsState.mana) ? statsState.mana : MAX_MANA);
   const isWandAllowed = () => hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout);
   // Town's fishing rod: the sword weapon in rod form too (casts / hooks / reels instead of
-  // hitting — townTrade.js); Town only, once bought
+  // hitting — townTrade.js); Town only, once bought (and the guest's sea start, which begins with it)
   let _rodActive = false;
-  const isRodAllowed = () => !!_townLoadout?.hasRod;
+  const isRodAllowed = () => !!_townLoadout?.hasRod || !!seaStart?.isActive();
   const isRodEquipped = () => _rodActive && foamSword?.holder === playerControls;
   // Town's canoe oar: the sword weapon in oar form again (held upside down — the phone up holds
   // it pointing down; townCanoe.js paddles with it); only while standing in the canoe, and then
-  // nothing else comes out
+  // nothing else comes out (the sea start's canoe: the rod too — seaStart.js)
   let _oarActive = false;
-  const isOarAllowed = () => !!town?.inCanoe?.();
+  const isOarAllowed = () => !!town?.inCanoe?.() || !!seaStart?.isActive();
   const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
   // (in place) The oar's hold, its tilt from upright (player-local +Y) amplified — OAR_GYRO_GAIN —
   // and guided into the water / out of it (OAR_IN_TILT / OAR_OUT_TILT)
@@ -3064,7 +3095,7 @@ async function initCore(runtimeContext) {
       if (!inventoryState[FOAM_SWORD_ITEM_ID]) inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
     } else if (!itemId || !inventoryState[itemId]) return;
     // (in Town's canoe the oar is all there is)
-    if (isOarAllowed() && itemId !== OAR_ITEM_ID) return;
+    if (town?.inCanoe?.() && itemId !== OAR_ITEM_ID) return;
     // Town: the sword has to be bought (its inventory entry is also the wand's slot)
     if (_townLoadout && itemId === FOAM_SWORD_ITEM_ID && !_townLoadout.hasSword) return;
     // Multiplayer duels are sword only
@@ -6022,7 +6053,7 @@ async function initCore(runtimeContext) {
   // screen, so it would cover the mode buttons) — see the mode handler
   let _phoneSwordQrDeferred = false;
   const autoShowPhoneSwordQr = (peerId) => {
-    if (!startOverlay.classList.contains('hidden')) {
+    if (!startOverlay.classList.contains('hidden') || _seaStartPending) {
       _phoneSwordPeerId = peerId;
       _phoneSwordQrDeferred = true;
       return;
@@ -6272,6 +6303,7 @@ async function initCore(runtimeContext) {
       else if (bossTalk.isOpen()) bossTalk.interact();
       else if (village?.isOpen()) village.interact();
       else if (town?.isActive()) town.interact();
+      else if (seaStart?.isActive()) seaStart.interact();
       return;
     }
     if (!playerControls?.enabled || _classicMode || _gamePaused) return; // Classic: Block only
@@ -6295,6 +6327,8 @@ async function initCore(runtimeContext) {
       else equipInventoryItem(MAGIC_WAND_ITEM_ID);
       playerControls?.refreshActionButtons?.();
     } else if (action === 'rod') {
+      // The sea start: the rod (from the oar)
+      if (seaStart?.isActive()) { seaStart.pick('rod'); return; }
       // Town: fishing rod ↔ the sword (or empty hands)
       if (!isRodAllowed()) return;
       if (isRodEquipped()) _backToSword();
@@ -6320,6 +6354,8 @@ async function initCore(runtimeContext) {
     // Town: only with empty hands (✋ Hands), the fishing rod or the canoe's oar — holding a weapon,
     // the bar stays Block / Fire… (and with the line out it's the reel — _phoneControllerStatus)
     if (town?.isActive()) return _heldWeaponId() && !isRodEquipped() && !isOarEquipped() ? undefined : town.interactLabel(); // (undefined when there's nothing to do: Block stays Block)
+    // The sea start: 🛶 Oar / 🛶 Get out
+    if (seaStart?.isActive()) return seaStart.interactLabel();
     return undefined;
   };
   const _phoneControllerStatus = () => {
@@ -7175,9 +7211,8 @@ async function initCore(runtimeContext) {
   });
   // The gear stays hidden until the panel exists (the start screen shows it once the game loads)
   document.body.classList.add('settings-ready');
-  // Now the map (started early in initCore) — then put the player on its ground at the spawn
-  await _defaultMapReady;
-  {
+  // The player on the map's ground at its spawn
+  const _placeAtSpawn = () => {
     const spawn = getSpawnPosition();
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
@@ -7185,7 +7220,13 @@ async function initCore(runtimeContext) {
     playerControls.playerZ = spawn.z;
     playerControls.lastPosition?.set(spawn.x, spawn.y, spawn.z);
     playerControls.body?.setTranslation({ x: spawn.x, y: spawn.y + 0.6, z: spawn.z }, true);
-  }
+  };
+  // The map (started early in initCore) isn't waited on: the game loop starts without it (the
+  // guest's sea start plays meanwhile; a mode picked waits on it in the mode handler). Once it's
+  // in, the player goes to its spawn — unless they're out on the sea.
+  _defaultMapReady
+    .then(() => { if (!seaStart?.isActive()) _placeAtSpawn(); })
+    .catch((err) => console.error('[map] the default map failed to load:', err));
   const settingsOverlay = document.getElementById('settings-overlay');
   const merchantOverlay = document.getElementById('merchant-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
@@ -7710,6 +7751,7 @@ async function initCore(runtimeContext) {
   // Clear the field (enemies, bombs, stage) and put the player back on their feet
   const _resetForMenu = () => {
     town?.exit();
+    seaStart?.exit();
     _psStopSong();
     village?.exit();
     _psRoamQuest = null;
@@ -8563,6 +8605,37 @@ async function initCore(runtimeContext) {
     onBounty: (name, coins) => town?.onBounty(name, coins),
     onWorldMessage: (from, data) => town?.handleNet(from, data),
   });
+  // (Town's canoe and the sea start's) m of water over the map's ground (0: dry land; out past the map's ground: deep)
+  const _waterDepthAt = (x, z) => {
+    const level = _activeMap?.water?.(x, z);
+    if (level == null) return 0;
+    const ground = _glbResolveHeight(x, z);
+    return Number.isFinite(ground) ? Math.max(0, level - ground) : Infinity;
+  };
+  const _carryPlayer = (x, y, z, dYaw) => {
+    if (!playerControls || !playerModel) return;
+    playerControls.playerX = x;
+    playerControls.playerZ = z;
+    playerModel.position.x = x;
+    playerModel.position.z = z;
+    if (Number.isFinite(y) && Math.abs(y - playerControls.playerY) < 0.5) {
+      playerControls.playerY = y;
+      playerModel.position.y = y;
+    }
+    if (dYaw) {
+      playerControls.yaw += dYaw;
+      playerModel.rotation.y += dYaw;
+      _duelCamLastYaw = playerControls.yaw;
+    }
+  };
+  // The joystick (on screen / the phone's) or WASD as { fwd, turn } (−1…1; turn > 0 = right)
+  const _getSteer = () => {
+    if (!playerControls) return { fwd: 0, turn: 0 };
+    const f = playerControls.joystickForce;
+    if (f > 0.1) return { fwd: Math.sin(playerControls.joystickAngle) * f, turn: Math.cos(playerControls.joystickAngle) * f };
+    const k = playerControls.keysPressed;
+    return { fwd: (k.has('w') ? 1 : 0) - (k.has('s') ? 1 : 0), turn: (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0) };
+  };
   town = createTownMode({
     net: townNet,
     scene,
@@ -8762,37 +8835,10 @@ async function initCore(runtimeContext) {
     },
     getOarModel: () => (isOarEquipped() ? foamSword?.getOarModel?.() ?? null : null),
     // m of water over the map's ground (0: dry land; out past the map's ground: deep)
-    waterDepth: (x, z) => {
-      const level = _activeMap?.water?.(x, z);
-      if (level == null) return 0;
-      const ground = _glbResolveHeight(x, z);
-      return Number.isFinite(ground) ? Math.max(0, level - ground) : Infinity;
-    },
+    waterDepth: _waterDepthAt,
     holdStill: (on) => { if (playerControls) playerControls.holdStill = !!on; },
-    carryPlayer: (x, y, z, dYaw) => {
-      if (!playerControls || !playerModel) return;
-      playerControls.playerX = x;
-      playerControls.playerZ = z;
-      playerModel.position.x = x;
-      playerModel.position.z = z;
-      if (Number.isFinite(y) && Math.abs(y - playerControls.playerY) < 0.5) {
-        playerControls.playerY = y;
-        playerModel.position.y = y;
-      }
-      if (dYaw) {
-        playerControls.yaw += dYaw;
-        playerModel.rotation.y += dYaw;
-        _duelCamLastYaw = playerControls.yaw;
-      }
-    },
-    // The joystick (on screen / the phone's) or WASD as { fwd, turn } (−1…1; turn > 0 = right)
-    getSteer: () => {
-      if (!playerControls) return { fwd: 0, turn: 0 };
-      const f = playerControls.joystickForce;
-      if (f > 0.1) return { fwd: Math.sin(playerControls.joystickAngle) * f, turn: Math.cos(playerControls.joystickAngle) * f };
-      const k = playerControls.keysPressed;
-      return { fwd: (k.has('w') ? 1 : 0) - (k.has('s') ? 1 : 0), turn: (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0) };
-    },
+    carryPlayer: _carryPlayer,
+    getSteer: _getSteer,
     // A live gyro sword (phone, or this device's own): else casting / hooking are buttons
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
     // The phone controller's reel: radians cranked since the last call
@@ -8835,11 +8881,70 @@ async function initCore(runtimeContext) {
     if (!town?.isActive() && _townLantern.group.parent) _townLantern.group.parent.remove(_townLantern.group);
     if (_townLantern.isLit() !== want) _townLantern.setLit(want);
   };
+  // Where the sea start's guest stepped ashore ({ x, z, yaw }): Town starts there, not at its spawn
+  let _townArrival = null;
   const startTownMode = () => {
     _resetForMenu();
     // Town plays as the character picked in the Showdown village (others in a shared town see it — townNet's `pl`)
     setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected]?.url || glbCharacterConfig.villageBoyUrl);
-    town.enter();
+    town.enter({ arrival: _townArrival });
+    _townArrival = null;
+  };
+
+  // The guest's sea start (src/town/seaStart.js): out on the sea in a canoe, the rod in hand,
+  // before the map's in. Its numbers for the island: MAPS.islandTown.seaStart
+  seaStart = createSeaStart({
+    scene,
+    getMapWater: () => (_activeMapKey === DEFAULT_MAP ? _activeMap?.water ?? null : null),
+    waterDepth: _waterDepthAt,
+    getGroundY: (x, z) => getTerrainHeight(x, z),
+    teleport: (x, z, yaw) => _teleportPlayer(x, z, yaw),
+    holdStill: (on) => { if (playerControls) playerControls.holdStill = !!on; },
+    setPositionConstraint: (fn) => { if (playerControls) playerControls.positionConstraint = fn; },
+    carryPlayer: _carryPlayer,
+    getSteer: _getSteer,
+    getOarModel: () => (isOarEquipped() ? foamSword?.getOarModel?.() ?? null : null),
+    // 'rod' | 'oar' in hand, or null: nothing
+    hold: (kind) => {
+      if (kind === 'rod') equipInventoryItem(FISHING_ROD_ITEM_ID);
+      else if (kind === 'oar') equipInventoryItem(OAR_ITEM_ID);
+      else _putWeaponsAway();
+      _refreshGearUI();
+      _phoneSwordStatusNow?.();
+    },
+    hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
+    isTouch: () => !!playerControls?.isTouchLayout?.(),
+    // Ashore by the fishing spot: Town, as the guest, from there
+    onLanded: (spot) => {
+      _townArrival = spot;
+      arcadeOverlay.startMode('town');
+    },
+    onLobby: () => {
+      _resetForMenu();
+      if (_activeMap) _placeAtSpawn();
+      arcadeOverlay.showStartScreen();
+    },
+    onSignIn: () => arcadeOverlay.signIn(),
+    onExit: () => { _seaStartPending = false; },
+  }, MAPS[DEFAULT_MAP].seaStart);
+  const startSeaMode = () => {
+    _resetForMenu();
+    _putWeaponsAway();
+    // (before the map's in, the ground's floor is the sea's shallows as it will be then)
+    if (!_activeMap) {
+      _preMapFloor = MAPS[DEFAULT_MAP].seaStart.seaLevel - SEA_WADE_DEPTH;
+      setTerrainFloor(_preMapFloor);
+      _syncPhysicsGround();
+    }
+    seaStart.enter();
+    // (sound needs a tap / key first: the start screen's buttons would have given one)
+    const startAudio = () => {
+      window.removeEventListener('pointerdown', startAudio, true);
+      window.removeEventListener('keydown', startAudio, true);
+      void startAudioAndGameOnce();
+    };
+    window.addEventListener('pointerdown', startAudio, true);
+    window.addEventListener('keydown', startAudio, true);
   };
 
   let _modeStartToken = 0;
@@ -8864,7 +8969,7 @@ async function initCore(runtimeContext) {
   // Tutorial, Showdown, Classic, Town or Multiplayer. Only Multiplayer runs peer multiplayer.
   // A pick made while the game was still loading runs as soon as this is set.
   arcadeOverlay.setModeHandler((gameMode) => {
-    if (_phoneSwordQrDeferred) {
+    if (_phoneSwordQrDeferred && gameMode !== 'sea') {
       _phoneSwordQrDeferred = false;
       if (!window.phoneSwordGyro?.connected && _phoneSwordPeerId) void showPhoneSwordQr(_phoneSwordPeerId);
     }
@@ -8875,6 +8980,12 @@ async function initCore(runtimeContext) {
     if (gameMode !== 'classic') _setClassicMode(false);
     devRoam.exit();
     town.exit();
+    // The guest's sea start: right away, the map or not (it waits on nothing)
+    if (gameMode === 'sea') {
+      ++_modeStartToken;
+      startSeaMode();
+      return;
+    }
     // Each mode's map first (Classic: map.glb, the rest: the island town); a new map puts
     // the player at its spawn. A newer pick made while a map loads wins.
     const token = ++_modeStartToken;
@@ -10231,6 +10342,8 @@ async function initCore(runtimeContext) {
     // Town mode: the townsfolk, the clock, the law
     town?.update(frameDelta);
     _updateTownLantern();
+    // The guest's sea start: the canoe on the sea, the player in it
+    seaStart?.update(frameDelta);
     // Ships on the sea bob on the swell
     _activeMap?.animate?.(performance.now() / 1000);
     // Showdown death: the carriers + the fixed camera
