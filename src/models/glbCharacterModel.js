@@ -55,6 +55,7 @@ import { addBlobShadow } from '../environment/blobShadows.js';
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
   villageBoyUrl: '/models/glb_characters/village_boy.glb', // default player character (unlocked from the start)
+  villageGirlUrl: '/models/glb_characters/village_girl.glb', // playable from the start (never a Showdown boss); Town townsfolk
   frogManUrl: '/models/glb_characters/frog_man.glb',       // Showdown's base enemy; Showdown boss unlock
   antlerGuyUrl: '/models/glb_characters/antler_guy.glb',   // a quarter of the EnemyPlayers
   pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // Multiplayer roster / Showdown unlock
@@ -80,17 +81,20 @@ export const glbCharacterConfig = {
     '/models/glb_characters/tree_creature.glb': 1.4,
     '/models/glb_characters/gemhorn_rigged.glb': 1.4,
     '/models/glb_characters/village_boy.glb': 0.8,
+    '/models/glb_characters/village_girl.glb': 0.8,
     '/models/glb_characters/villager.glb': 1.1, // Pemberton
   },
   // Per-model multiplier on the player camera's height (characterCameraHeight): a smaller
   // character gets a lower camera
   cameraHeightByUrl: {
     '/models/glb_characters/village_boy.glb': 0.9,
+    '/models/glb_characters/village_girl.glb': 0.9,
   },
   // Per-model weapon hold (characterHold): `grip` scales where the hands hold the sword /
   // shield / gun (and the unarmed gyro arm) around the feet, `sword` scales the held sword
   holdByUrl: {
     '/models/glb_characters/village_boy.glb': { grip: 0.76, sword: 0.8 },
+    '/models/glb_characters/village_girl.glb': { grip: 0.76, sword: 0.8 },
   },
 
   // Arm IK

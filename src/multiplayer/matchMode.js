@@ -78,6 +78,8 @@ const cleanRule = (rule) => (MATCH_RULES[rule] ? rule : DEFAULT_RULE);
 const isFreeForAll = (mode) => mode !== 'team';
 export const MATCH_CHARACTERS = {
   villageBoy: { label: 'Village Boy', team: 'Village Boys', emoji: '👦', url: glbCharacterConfig.villageBoyUrl },
+  // starter: unlocked from the start in Showdown (PS_START_CHARACTERS) and never a stage boss
+  villageGirl: { label: 'Village Girl', team: 'Village Girls', emoji: '👧', url: glbCharacterConfig.villageGirlUrl, starter: true },
   antler: { label: 'Antler Guy', team: 'Antlers', emoji: '🦌', url: glbCharacterConfig.antlerGuyUrl },
   frog: { label: 'Frog Man', team: 'Frogs', emoji: '🐸', url: glbCharacterConfig.frogManUrl },
   gemhorn: { label: 'Gemhorn', team: 'Gemhorns', emoji: '💎', url: glbCharacterConfig.url },

@@ -980,7 +980,7 @@ export function createVillage(ctx) {
       const keys = unlocked.filter((k) => k !== selected && ctx.characters.roster[k] && k !== quest.giverKey);
       // (story characters aren't won from bosses)
       const lockedCount = Object.entries(ctx.characters.roster)
-        .filter(([k, c]) => !c.story && !unlocked.includes(k)).length;
+        .filter(([k, c]) => !c.story && !c.starter && !unlocked.includes(k)).length;
       if (lockedCount > 0) {
         const sign = textSprite(`🔒 ${lockedCount} more — beat stage bosses`, { height: 0.2, border: 'rgba(255,255,255,0.25)' });
         sign.position.copy(groupCenter).add(_v2.set(0, 1.42, 0));
