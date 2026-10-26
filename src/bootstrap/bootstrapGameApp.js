@@ -4098,7 +4098,7 @@ async function initCore(runtimeContext) {
   // always the frog man and the first boss with a wand (FIRST_WAND_BOSS_STAGE) the wizard.
   // The player starts as the village boy and picks who to play as in the village.
   // Saved in localStorage + profiles/<key>/phoneSwordStats/characters.
-  const PS_START_CHARACTERS = ['villageBoy'];
+  const PS_START_CHARACTERS = ['villageBoy', 'villageGirl']; // (MATCH_CHARACTERS[k].starter — never bosses)
   const PS_ENEMY_BASE_CHARACTER = 'frog';
   const PS_FIXED_BOSSES = { 1: 'frog', [FIRST_WAND_BOSS_STAGE]: 'wizard' }; // stage → boss character
   // The story's boss for each stage (where each character lives — CHARACTER_STORIES in
@@ -4144,7 +4144,7 @@ async function initCore(runtimeContext) {
     if (fixed) return { key: fixed, unlocks: !_psChars.unlocked.includes(fixed), stage };
     const reserved = [...Object.entries(PS_FIXED_BOSSES), ...Object.entries(PS_STORY_BOSSES)]
       .filter(([s]) => Number(s) > stage).map(([, k]) => k);
-    const fightable = Object.keys(MATCH_CHARACTERS).filter((k) => !MATCH_CHARACTERS[k].story);
+    const fightable = Object.keys(MATCH_CHARACTERS).filter((k) => !MATCH_CHARACTERS[k].story && !MATCH_CHARACTERS[k].starter);
     const locked = fightable.filter((k) => !_psChars.unlocked.includes(k));
     const story = PS_STORY_BOSSES[stage];
     const repeat = [...Object.entries(PS_FIXED_BOSSES), ...Object.entries(PS_STORY_BOSSES)]
@@ -8837,6 +8837,8 @@ async function initCore(runtimeContext) {
   };
   const startTownMode = () => {
     _resetForMenu();
+    // Town plays as the character picked in the Showdown village (others in a shared town see it — townNet's `pl`)
+    setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected]?.url || glbCharacterConfig.villageBoyUrl);
     town.enter();
   };
 

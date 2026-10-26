@@ -47,13 +47,14 @@ const CIVILIAN_URLS = [
   glbCharacterConfig.treeCreatureUrl,
   glbCharacterConfig.frogManUrl,
   glbCharacterConfig.villageBoyUrl,
+  glbCharacterConfig.villageGirlUrl,
 ];
 export const characterForRole = (role) => {
   if (role === 'guard' || role === 'nightGuard') return glbCharacterConfig.antlerGuyUrl;
   if (role === 'sheriff') return glbCharacterConfig.url; // gemhorn
   if (role === 'merchant') return glbCharacterConfig.pumpkinUrl;
   if (role === 'wizard') return glbCharacterConfig.wizardUrl;
-  if (role === 'kid') return glbCharacterConfig.villageBoyUrl;
+  if (role === 'kid') return Math.random() < 0.5 ? glbCharacterConfig.villageBoyUrl : glbCharacterConfig.villageGirlUrl;
   if (role === 'bandit') return glbCharacterConfig.frogManUrl;
   if (role === 'banditBoss') return glbCharacterConfig.treeCreatureUrl;
   return CIVILIAN_URLS[Math.floor(Math.random() * CIVILIAN_URLS.length)];
