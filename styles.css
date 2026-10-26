@@ -4277,6 +4277,8 @@ body.mobile-block-bar .classic-combo {
 /* Unseen: the stars blink while the guards search */
 .town-stars:not(.town-stars-hunted) { animation: town-stars-blink 0.9s steps(2, start) infinite; }
 .town-stars-hunted { color: var(--danger); }
+/* (the stars are icons — pixelIcons.js: hunted = a red glow) */
+.town-stars-hunted px-icon { filter: drop-shadow(0 0 3px var(--danger)) drop-shadow(0 0 6px var(--danger)); }
 @keyframes town-stars-blink { to { opacity: 0.35; } }
 .town-jail {
   position: absolute;

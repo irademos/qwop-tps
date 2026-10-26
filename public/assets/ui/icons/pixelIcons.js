@@ -1,5 +1,5 @@
-// Icons in place of emoji — two sheets: pixel-icons.png (pixel art, 16 × 22 cells of 32 px) and
-// painted-icons.png (painted, 7 × 5 cells of 96 px; where both have one, the painted one is used) —
+// Icons in place of emoji — two sheets: pixel-icons.webp (pixel art, 16 × 22 cells of 32 px, lossless) and
+// painted-icons.webp (painted, 8 × 8 cells of 64 px; where both have one, the painted one is used) —
 // shared by the game (index.html) and the phone controller (phone-sword.html) as a plain script.
 //
 // Every emoji in ICONS shown anywhere in the page's DOM is drawn as its icon: a MutationObserver
@@ -9,10 +9,10 @@
 // An emoji not in either list stays an emoji. To add one: its cell [row, column] in its sheet's list.
 (() => {
   const SHEETS = [
-    { url: '/assets/ui/icons/pixel-icons.png', cols: 16, rows: 22, cell: 32, pixelated: true },
-    { url: '/assets/ui/icons/painted-icons.png', cols: 7, rows: 5, cell: 96, pixelated: false },
+    { url: '/assets/ui/icons/pixel-icons.webp', cols: 16, rows: 22, cell: 32, pixelated: true },
+    { url: '/assets/ui/icons/painted-icons.webp', cols: 8, rows: 8, cell: 64, pixelated: false },
   ];
-  // emoji → [row, column] in pixel-icons.png
+  // emoji → [row, column] in pixel-icons.webp
   const PIXEL = {
     '💀': [0, 0], '☠': [0, 0], '👹': [0, 4], '✨': [0, 5], '🌟': [0, 5], '❤': [0, 6], '💖': [0, 6], '💕': [0, 6],
     '😴': [0, 7], '💤': [0, 7], '⚡': [0, 8], '💧': [0, 10], '🚿': [0, 10], '💦': [0, 10],
@@ -45,15 +45,19 @@
     '🛒': [20, 0], '🧺': [20, 0],
     '🌅': [21, 7], '☀': [21, 8], '🌄': [21, 9], '🌙': [21, 10], '❄': [21, 11],
   };
-  // emoji → [row, column] in painted-icons.png (wins over PIXEL)
+  // emoji → [row, column] in painted-icons.webp (wins over PIXEL)
   const PAINTED = {
-    '🛶': [0, 0], '🔫': [0, 1], '🏠': [0, 2], '🏡': [0, 2], '🏘': [0, 2], '❗': [0, 3], '❕': [0, 3], '❓': [0, 4], '❔': [0, 4],
-    '📍': [0, 5], '🧝': [0, 6],
-    '🧔': [1, 0], '😈': [1, 1], '🧑‍🌾': [1, 2], '👻': [1, 3], '🔒': [1, 4], '🔐': [1, 4], '🤝': [1, 5], '🌊': [1, 6],
-    '⚙': [2, 0], '🎒': [2, 1], '🔥': [2, 2], '🌳': [2, 3], '⛰': [2, 4], '🏔': [2, 4], '📦': [2, 5], '🎁': [2, 5], '🧭': [2, 6],
-    '⭐': [3, 0], '❤': [3, 1], '💖': [3, 1], '💕': [3, 1], '🗡': [3, 2], '🛡': [3, 3], '🏆': [3, 4], '🏅': [3, 4], '🪙': [3, 5], '🐾': [3, 6],
-    '💬': [4, 0], '🗨': [4, 0], '🗺': [4, 1], '🪝': [4, 2], '🔧': [4, 3], '🛠': [4, 3], '⛺': [4, 4], '🏕': [4, 4], '🌲': [4, 5],
-    '📖': [4, 6], '📕': [4, 6],
+    '🛶': [0, 0], '🔫': [0, 1], '🏠': [0, 2], '🏡': [0, 2], '🏘': [0, 2], '❗': [0, 3], '❕': [0, 3], '❓': [0, 4],
+    '❔': [0, 4], '📍': [0, 5], '🧝': [0, 6], '🧔': [0, 7], '😈': [1, 0], '👻': [1, 2], '🔒': [1, 3], '🔐': [1, 3],
+    '🤝': [1, 4], '🌊': [1, 5], '⚙': [1, 6], '🎒': [1, 7], '🔥': [2, 0], '🌳': [2, 1], '⛰': [2, 2], '🏔': [2, 2],
+    '📦': [2, 3], '🎁': [2, 3], '🧭': [2, 4], '⭐': [2, 5], '❤': [2, 6], '💖': [2, 6], '💕': [2, 6], '🗡': [2, 7],
+    '🛡': [3, 0], '🏆': [3, 1], '🏅': [3, 1], '🪙': [3, 2], '🐾': [3, 3], '💬': [3, 4], '🗨': [3, 4], '🗺': [3, 5],
+    '🪝': [3, 6], '🔧': [3, 7], '🛠': [3, 7], '⛺': [4, 0], '🏕': [4, 0], '🌲': [4, 1], '📖': [4, 2], '📕': [4, 2],
+    '🔶': [4, 3], '🔰': [4, 4], '👦': [4, 5], '🧒': [4, 5], '👧': [4, 6], '🦌': [4, 7], '🐸': [5, 0], '🎃': [5, 1],
+    '🧙': [5, 2], '🧑‍🌾': [5, 3], '🧍': [1, 1], '😄': [5, 4], '🙂': [5, 4], '😢': [5, 5], '😭': [5, 5], '😠': [5, 6],
+    '😡': [5, 6], '😮': [5, 7], '😲': [5, 7], '😒': [5, 7], '😐': [6, 0], '😌': [6, 0], '😉': [6, 1], '😊': [6, 2],
+    '🥰': [6, 2], '😴': [6, 3], '💤': [6, 3], '😂': [6, 4], '😆': [6, 4], '👥': [6, 5], '🔔': [6, 6], '★': [6, 7],
+    '☆': [7, 0],
   };
   const ICONS = {};
   for (const [e, rc] of Object.entries(PIXEL)) ICONS[e] = [...rc, 0];
