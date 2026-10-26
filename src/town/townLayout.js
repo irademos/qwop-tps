@@ -317,8 +317,8 @@ export function installTownLayout(T, ctx) {
     // with its counters (townStalls.js); over the shop's / the jail's door outside, its sign
     for (const key of Object.keys(places.rooms)) if (places.rooms[key].kind === 'home') T.rooms.build(group, key);
     T.rooms.build(group, 'jail');
-    T.stalls.build(group, { key: 'shop', label: '🛒 Shop' });
-    for (const [key, text] of [['shop', '🛒 Shop'], ['jail', '⭐ Sheriff · Jail']]) {
+    T.stalls.build(group, { key: 'shop', label: 'Shop' });
+    for (const [key, text] of [['shop', 'Shop'], ['jail', 'Sheriff · Jail']]) {
       const { door, exitYaw } = places.shops[key];
       // (a little out from the door, away from the house)
       const signSprite = makeTextSprite(text, { height: 0.34 });
@@ -352,7 +352,7 @@ export function installTownLayout(T, ctx) {
     const iron = new THREE.MeshStandardMaterial({ color: 0x2f2f35, roughness: 0.6, metalness: 0.3 });
     const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1, metalness: 0 });
     // The wizard's stall (townStalls.js) and his tent behind it
-    T.stalls.buildOutdoor(group, { key: 'wizard', label: '🔮 Wizard' });
+    T.stalls.buildOutdoor(group, { key: 'wizard', label: 'Wizard' });
     const robe = new THREE.MeshStandardMaterial({ color: 0x4b2f7a, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     const hut = places.wizard.hut;
     const wizTent = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1.9, 6, 1, true), robe);
@@ -418,11 +418,11 @@ export function installTownLayout(T, ctx) {
       post.position.set(px, groundAt(px, pz) + 0.75, pz);
       post.castShadow = true;
       group.add(post);
-      const fishSign = makeTextSprite('🎣 Fishing spot', { height: 0.26 });
+      const fishSign = makeTextSprite('Fishing spot', { height: 0.26 });
       fishSign.position.set(px, groundAt(px, pz) + 1.75, pz);
       group.add(fishSign);
     }
-    const campSign = makeTextSprite('💀 Bandit camp', { height: 0.28 });
+    const campSign = makeTextSprite('Bandit camp', { height: 0.28 });
     campSign.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 2.3, places.camp.z);
     group.add(campSign);
     return { group, fire, door, campFire, strongbox, cookPot, wizTent };

@@ -88,11 +88,11 @@ export function createSeaStart(ctx, config) {
     b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onClick(); });
     return b;
   };
-  const lobbyBtn = btn('sea-lobby ui-btn ui-btn-ghost', '⬅ Lobby', () => ctx.onLobby());
+  const lobbyBtn = btn('sea-lobby ui-btn ui-btn-ghost', 'Lobby', () => ctx.onLobby());
   const signInBtn = btn('sea-signin ui-btn', 'Sign In', () => ctx.onSignIn());
-  const rodBtn = btn('sea-tool ui-btn ui-btn-secondary', '🎣 Rod', () => pick('rod'));
-  const oarBtn = btn('sea-tool ui-btn ui-btn-secondary', '🛶 Oar', () => pick('oar'));
-  const outBtn = btn('sea-out ui-btn hidden', '🛶 Get out', () => getOut());
+  const rodBtn = btn('sea-tool ui-btn ui-btn-secondary', 'Rod', () => pick('rod'));
+  const oarBtn = btn('sea-tool ui-btn ui-btn-secondary', 'Oar', () => pick('oar'));
+  const outBtn = btn('sea-out ui-btn hidden', 'Get out', () => getOut());
   const tools = el('div', 'sea-tools');
   tools.append(rodBtn, oarBtn);
   hud.append(lobbyBtn, signInBtn, outBtn, tools);
@@ -235,7 +235,7 @@ export function createSeaStart(ctx, config) {
     update,
     isActive: () => active,
     // The phone's Block bar as an interact button: 🛶 Get out at the spot, else 🛶 Oar
-    interactLabel: () => (!active ? null : landSpot ? '🛶 Get out' : held === 'oar' ? null : '🛶 Oar'),
+    interactLabel: () => (!active ? null : landSpot ? 'Get out' : held === 'oar' ? null : 'Oar'),
     interact: () => {
       if (!active) return;
       if (landSpot) getOut();

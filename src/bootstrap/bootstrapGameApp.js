@@ -2536,7 +2536,7 @@ async function initCore(runtimeContext) {
   };
   const showLevelPopup = level => {
     if (!levelPopup) return;
-    levelPopup.textContent = `You've reached level ${level}! +1 ❤ Max Health`;
+    levelPopup.textContent = `You've reached level ${level}! +1 Max Health`;
     // Restart the pop animation even if the popup is already showing
     levelPopup.classList.remove('visible');
     void levelPopup.offsetWidth;
@@ -3958,8 +3958,8 @@ async function initCore(runtimeContext) {
     _psBoss?.dispose();
     // (a roam quest's: he talks first, like a stage boss, then grows to his size and fights)
     const talkLines = _psRoamQuest?.def.pemberton;
-    const boss = createPembertonBoss({ ..._bossFighterCtx(enemy), name: '🎩 Pemberton', ...(talkLines ? { autoStart: false } : {}) });
-    if (talkLines) boss.talk = { speaker: '🎩 Pemberton', name: '🎩 Pemberton', lines: talkLines, fight: '⚔️ Fight', spare: null };
+    const boss = createPembertonBoss({ ..._bossFighterCtx(enemy), name: 'Pemberton', ...(talkLines ? { autoStart: false } : {}) });
+    if (talkLines) boss.talk = { speaker: 'Pemberton', name: 'Pemberton', lines: talkLines, fight: 'Fight', spare: null };
     _psTrackBoss(boss, enemy);
   };
   // A stage's final enemy: waits on the path, talks when the player gets to it (_psStartBossTalk),
@@ -4376,7 +4376,7 @@ async function initCore(runtimeContext) {
       bar?.classList.add('mana-flash');
       if (performance.now() - _manaToastAt > 2500) {
         _manaToastAt = performance.now();
-        showPickupToast('mana_potion', 1, '', { text: _matchLoadout ? 'Out of mana — grab a 🧪 Mana pickup' : 'Out of mana — buy a 🧪 Mana Potion' });
+        showPickupToast('mana_potion', 1, '', { text: _matchLoadout ? 'Out of mana — grab a Mana pickup' : 'Out of mana — buy a Mana Potion' });
       }
       void psAutoBuyTick();
       return false;
@@ -4491,7 +4491,7 @@ async function initCore(runtimeContext) {
     setStat('health', statsState.health + count, { skipSave: true });
     const gained = Math.max(0, Math.round(statsState.health - before));
     audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.7, { cooldownKey: 'heart-bubble', cooldownMs: 150 });
-    showPickupToast('heart', Math.max(1, gained), '', { text: gained > 0 ? `+${gained} ❤️ Health` : 'Health already full' });
+    showPickupToast('heart', Math.max(1, gained), '', { text: gained > 0 ? `+${gained} Health` : 'Health already full' });
   };
   // Heart bubbles per stage: 1 at the start, +1 every 5 stages (max 4), plus a rising
   // chance of one more; they sit around the middle of the path.
@@ -5082,18 +5082,18 @@ async function initCore(runtimeContext) {
     _classicSetPlaying(false);
     const _unlocked = !_classicMode && _psStageBoss?.unlocks ? MATCH_CHARACTERS[_psStageBoss.key] : null;
     _psWinSub.textContent = _unlocked
-      ? `${_unlocked.emoji} ${_unlocked.label} ${_psStageBoss.spared ? 'joined you' : 'unlocked'}!`
+      ? `${_unlocked.label} ${_psStageBoss.spared ? 'joined you' : 'unlocked'}!`
       : `Stage ${_psStage} Cleared!`;
     // The story's end: Pemberton beaten (unlocks the villager); an open-roam quest done
     if (!_classicMode && _voyage) {
       _psWinTitle.textContent = 'VOYAGE COMPLETE!';
-      _psWinSub.textContent = `The ship’s home safe. 🪙 +${VOYAGE_REWARD}`;
+      _psWinSub.textContent = `The ship’s home safe. +${VOYAGE_REWARD} coins`;
     } else if (!_classicMode && _psRoamQuest) {
       _psWinTitle.textContent = 'QUEST COMPLETE!';
-      _psWinSub.textContent = `${_psRoamQuest.def.done} 🪙 +${_psRoamQuest.reward}`;
+      _psWinSub.textContent = `${_psRoamQuest.def.done} +${_psRoamQuest.reward} coins`;
     } else if (!_classicMode && _psStageBoss?.pemberton) {
       _psWinTitle.textContent = 'PEMBERTON DEFEATED!';
-      _psWinSub.textContent = `The debts are settled.${_unlocked ? ` ${_unlocked.emoji} ${_unlocked.label} unlocked!` : ''}`;
+      _psWinSub.textContent = `The debts are settled.${_unlocked ? ` ${_unlocked.label} unlocked!` : ''}`;
     }
     // force animation restart
     _psWinTitle.style.animation = 'none';
@@ -5235,8 +5235,8 @@ async function initCore(runtimeContext) {
       pathAngle: (route && _psRouteAngle(route))
         ?? _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage), _center ?? playerModel.position),
       boss: _final
-        ? `🎩 Pemberton (${PEMBERTON_HEARTS} ❤️)`
-        : `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️`
+        ? `Pemberton (${PEMBERTON_HEARTS} ❤️)`
+        : `Final enemy: ${_boss.label} (${_psBossHearts(stage)} ❤️`
           + (stage === SPARED_STAGE ? ')' : ` ${stageBossGearIcons(stage)})`)
           + (_psStageBoss.unlocks && stage !== SPARED_STAGE ? ' — beat it to unlock!' : ''),
       finalBoss: _final,
@@ -5295,8 +5295,8 @@ async function initCore(runtimeContext) {
     if (_classicStageRecalib) {
       _classicStageRecalib.onclick = () => {
         window.phoneSwordRecalibrate?.();
-        _classicStageRecalib.textContent = '✅ Calibrated!';
-        setTimeout(() => { _classicStageRecalib.textContent = '🎯 Recalibrate Sword'; }, 1500);
+        _classicStageRecalib.textContent = 'Calibrated!';
+        setTimeout(() => { _classicStageRecalib.textContent = 'Recalibrate Sword'; }, 1500);
       };
     }
     // Replay the banner's slide-in
@@ -5415,7 +5415,7 @@ async function initCore(runtimeContext) {
     if (!ship || _voyage || playerDead) return null;
     const m = _shipMiddle(ship);
     if (Math.hypot(m.x - playerModel.position.x, m.z - playerModel.position.z) > VOYAGE_ACT_DIST) return null;
-    return { label: '⛵ Explore the Seas', onClick: _voyageStart };
+    return { label: 'Explore the Seas', onClick: _voyageStart };
   };
   const _voyageStart = () => {
     if (_voyage) return;
@@ -5427,7 +5427,7 @@ async function initCore(runtimeContext) {
     if (!ship || _voyage || !village?.isOpen()) return;
     const route = _voyagePickRoute(ship);
     if (!route) {
-      showPickupToast('coins', 1, '', { text: '🌊 No open water to sail today' });
+      showPickupToast('coins', 1, '', { text: 'No open water to sail today' });
       _villageSheathe();
       return;
     }
@@ -5464,7 +5464,7 @@ async function initCore(runtimeContext) {
     _psSongPool = [];
     _psStopSong();
     _psPlayNextSong(_psCurrentIsNight);
-    showPickupToast('coins', 1, '', { text: '⛵ Anchors aweigh! Hold the deck till we’re home' });
+    showPickupToast('coins', 1, '', { text: 'Anchors aweigh! Hold the deck till we’re home' });
   };
   // Back to how it was: anchored, nobody kept aboard
   const _voyageEnd = () => {
@@ -5696,7 +5696,7 @@ async function initCore(runtimeContext) {
       center: { x: route.points[0].x, z: route.points[0].z },
       pathAngle: _psRouteAngle(route),
       count: _psEnemyCount(q.stage),
-      boss: `Final enemy: 🎩 Pemberton (${PEMBERTON_HEARTS} ❤️)`,
+      boss: `Final enemy: Pemberton (${PEMBERTON_HEARTS} ❤️)`,
       bannerTitle: 'QUEST',
       giverUrl: giver.url,
       def: q,
@@ -5733,7 +5733,7 @@ async function initCore(runtimeContext) {
       _psSetRewardOwed(0);
       _spawnRewardCoins(owed);
     }
-    village?.enterRoam({ title: '🗺️ Free Roam', spots, onStart: _psStartRoamQuest, extraAct: _voyageAct });
+    village?.enterRoam({ title: 'Free Roam', spots, onStart: _psStartRoamQuest, extraAct: _voyageAct });
   };
   // A roam village's quest accepted (after the sword calibration): its stage, from right there
   const _psStartRoamQuest = (spot, pathAngle) => {
@@ -6074,10 +6074,10 @@ async function initCore(runtimeContext) {
   phoneSwordQrCopy.addEventListener('click', () => {
     const url = phoneSwordQrUrl.dataset.url || phoneSwordQrUrl.textContent;
     navigator.clipboard.writeText(url).then(() => {
-      phoneSwordQrCopy.textContent = '✅ Copied!';
+      phoneSwordQrCopy.textContent = 'Copied!';
       phoneSwordQrCopy.classList.add('copied');
       setTimeout(() => {
-        phoneSwordQrCopy.textContent = '📋 Copy URL';
+        phoneSwordQrCopy.textContent = 'Copy URL';
         phoneSwordQrCopy.classList.remove('copied');
       }, 2000);
     }).catch(() => {
@@ -6090,10 +6090,10 @@ async function initCore(runtimeContext) {
       ta.select();
       document.execCommand('copy');
       document.body.removeChild(ta);
-      phoneSwordQrCopy.textContent = '✅ Copied!';
+      phoneSwordQrCopy.textContent = 'Copied!';
       phoneSwordQrCopy.classList.add('copied');
       setTimeout(() => {
-        phoneSwordQrCopy.textContent = '📋 Copy URL';
+        phoneSwordQrCopy.textContent = 'Copy URL';
         phoneSwordQrCopy.classList.remove('copied');
       }, 2000);
     });
@@ -6347,7 +6347,7 @@ async function initCore(runtimeContext) {
   // What the phone's Block bar does as an interact button right now (undefined: it's Block / Fire…;
   // null: interact, but nothing to do) — the calibration popup, a boss's talk, the village
   const _phoneInteract = () => {
-    if (_isSwordCalibPromptOpen()) return '✅ Okay';
+    if (_isSwordCalibPromptOpen()) return 'Okay';
     if (bossTalk.isOpen()) return bossTalk.interactLabel();
     if (village?.isOpen()) return village.interactLabel();
     // Town: only with empty hands (✋ Hands), the fishing rod or the canoe's oar — holding a weapon,
@@ -7085,7 +7085,7 @@ async function initCore(runtimeContext) {
     switch (itemId) {
       case 'life_potion': return `Health ${statsState.health} / ${statsState.maxHealthSegments}`;
       case 'mana_potion': return `Mana ${getMana()} / ${MAX_MANA}`;
-      case MAGIC_WAND_ITEM_ID: return hasMagicWand() ? 'You have it — tap 🪄 Wand to use it' : `Each spell uses ${WAND_MANA_COST} mana`;
+      case MAGIC_WAND_ITEM_ID: return hasMagicWand() ? 'You have it — tap Wand to use it' : `Each spell uses ${WAND_MANA_COST} mana`;
       case 'showdown_bomb': return `You have ${getPlayerBombCount()}`;
       case 'bubble': return `You have ${getBubbleCount()}`;
       case SHIELD_ITEM_ID: return `You have ${inventoryState[SHIELD_ITEM_ID]?.count || 0}`;
@@ -7124,7 +7124,7 @@ async function initCore(runtimeContext) {
     const prize = prizes.find((p) => (r -= p.w) < 0) || prizes[0];
     const text = prize.give();
     _villageSaved();
-    showPickupToast('coins', 1, '', { text: `🎁 ${free ? 'Hidden Chest' : 'Mystery Chest'}: ${text}` });
+    showPickupToast('coins', 1, '', { text: `${free ? 'Hidden Chest' : 'Mystery Chest'}: ${text}` });
     return { ok: true, emoji: prize.emoji, text };
   };
   const villageShop = {
@@ -8201,18 +8201,18 @@ async function initCore(runtimeContext) {
         _matchLoadout.ammoBank = 0;
         if (hasGun) {
           inventoryState.pistol = { ...inventoryState.pistol, [PISTOL_AMMO_KEY]: getPistolAmmoCount() + ammo };
-          text = `+${ammo} 🔶 Bullets`;
+          text = `+${ammo} Bullets`;
         } else {
           inventoryState.pistol = ensureCatalogEntry('pistol', { count: 1, [PISTOL_AMMO_KEY]: ammo });
-          text = `🔫 Gun · ${ammo} bullets`;
+          text = `Gun · ${ammo} bullets`;
         }
       } else if (type === 'ammo') {
         if (hasGun) {
           inventoryState.pistol = { ...inventoryState.pistol, [PISTOL_AMMO_KEY]: getPistolAmmoCount() + MATCH_AMMO_PICKUP };
-          text = `+${MATCH_AMMO_PICKUP} 🔶 Bullets`;
+          text = `+${MATCH_AMMO_PICKUP} Bullets`;
         } else {
           _matchLoadout.ammoBank += MATCH_AMMO_PICKUP;
-          text = `+${MATCH_AMMO_PICKUP} 🔶 Bullets (for when you find a gun)`;
+          text = `+${MATCH_AMMO_PICKUP} Bullets (for when you find a gun)`;
         }
       } else if (type === 'shield') {
         inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
@@ -8223,27 +8223,27 @@ async function initCore(runtimeContext) {
         if (isInventoryItemEquipped(SHIELD_ITEM_ID)) {
           updateShieldHealthHUD(MATCH_SHIELD_HEALTH, MATCH_SHIELD_HEALTH, 1);
         }
-        text = '🛡️ Shield';
+        text = 'Shield';
       } else if (type === 'bomb') {
         setStat('bombs', getPlayerBombCount() + MATCH_BOMB_PICKUP, { skipSave: true });
-        text = `+${MATCH_BOMB_PICKUP} 💣 Bombs`;
+        text = `+${MATCH_BOMB_PICKUP} Bombs`;
       } else if (type === 'wand') {
         const had = hasMagicWand();
         inventoryState[MAGIC_WAND_ITEM_ID] = ensureCatalogEntry(MAGIC_WAND_ITEM_ID, { count: 1 });
         setStat('mana', MAX_MANA, { skipSave: true });
-        text = had ? '🧪 Mana refilled' : '🪄 Magic Wand · swipe to cast';
+        text = had ? 'Mana refilled' : 'Magic Wand · swipe to cast';
       } else if (type === 'mana') {
         setStat('mana', Math.min(MAX_MANA, getMana() + MATCH_MANA_PICKUP), { skipSave: true });
-        text = `+${MATCH_MANA_PICKUP} 🧪 Mana`;
+        text = `+${MATCH_MANA_PICKUP} Mana`;
       } else if (type === 'heart' || type === 'potion') {
         const before = statsState.health;
         const next = type === 'heart' ? before + MATCH_HEART_PICKUP : effectiveMaxHealthSegments();
         setStat('health', next, { skipSave: true });
         const gained = Math.max(0, Math.round(statsState.health - before));
-        text = gained > 0 ? `+${gained} ❤️ Health` : 'Health already full';
+        text = gained > 0 ? `+${gained} Health` : 'Health already full';
       } else if (type === 'bubble') {
         setStat('bubbles', getBubbleCount() + 1, { skipSave: true });
-        text = '+1 🫧 Bubble';
+        text = '+1 Bubble';
       } else {
         return;
       }
@@ -8388,7 +8388,7 @@ async function initCore(runtimeContext) {
   const _townWalletFullToast = () => {
     if (performance.now() - _townWalletToastAt < 4000) return;
     _townWalletToastAt = performance.now();
-    showPickupToast('coins', 1, '', { text: `👛 Wallet full (${TOWN_WALLET_MAX}) — keep some in your chest at home` });
+    showPickupToast('coins', 1, '', { text: `Wallet full (${TOWN_WALLET_MAX}) — keep some in your chest at home` });
   };
   // Town's coins in: what fits in the wallet; the rest drops as coins at the player's feet
   // (picked up once there's room)

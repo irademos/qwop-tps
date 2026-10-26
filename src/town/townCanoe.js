@@ -81,8 +81,8 @@ export function installTownCanoe(T, ctx) {
     ctx.setPositionConstraint(pin);
     ctx.setOar(true);
     T.feedLine(ctx.hasGyro()
-      ? '🛶 Hold the phone up — the oar points down — and sweep the blade back through the water beside the canoe. Left side: forward and right. Right side: forward and left.'
-      : '🛶 Paddle with W / S or the joystick, turn with A / D.');
+      ? 'Hold the phone up — the oar points down — and sweep the blade back through the water beside the canoe. Left side: forward and right. Right side: forward and left.'
+      : 'Paddle with W / S or the joystick, turn with A / D.');
     T.actsAt = 0;
   };
   // Out of it where it is (dying, an arrest, a room, leaving Town); the controls let go
@@ -123,7 +123,7 @@ export function installTownCanoe(T, ctx) {
   const getOut = () => {
     if (!canoe?.aboard) return;
     const spot = shoreSpot();
-    if (!spot) { T.feedLine('🛶 Paddle closer to the shore to get out.'); return; }
+    if (!spot) { T.feedLine('Paddle closer to the shore to get out.'); return; }
     const s = canoe.standPoint();
     leave();
     ctx.teleport(spot.x, spot.z, Math.atan2(spot.x - s.x, spot.z - s.z));
@@ -147,10 +147,10 @@ export function installTownCanoe(T, ctx) {
   // ── Acts (townActs.js): 🛶 Get in by it; aboard, 🛶 Get out by the shore ──
   const canoeActs = (calm) => {
     if (!canoe) return [];
-    if (canoe.aboard) return shoreSpot() ? [{ key: 'canoeout', label: '🛶 Get out', onClick: getOut }] : [];
+    if (canoe.aboard) return shoreSpot() ? [{ key: 'canoeout', label: 'Get out', onClick: getOut }] : [];
     if (!calm || T.inRoom || T.jail || T.held || T.fishing || ctx.isPlayerDead()) return [];
     const p = T.playerPos();
-    return dist2(p.x, p.z, canoe.x, canoe.z) < CANOE_BOARD_DIST ? [{ key: 'canoein', label: '🛶 Get in the canoe', onClick: board }] : [];
+    return dist2(p.x, p.z, canoe.x, canoe.z) < CANOE_BOARD_DIST ? [{ key: 'canoein', label: 'Get in the canoe', onClick: board }] : [];
   };
 
   // Leaving Town: out of it, and back at its mooring for next time

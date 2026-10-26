@@ -110,7 +110,7 @@ const STORY_BOSSES = [
       ['them', 'Grrr… WATER… grrr…'],
       ['them', 'GRRAAAAH!'],
     ],
-    fight: '⚔️ Fight' },
+    fight: 'Fight' },
   { char: 'pumpkin', // Ashford: the burned pumpkin patch
     lines: [
       ['action', 'It stands in the ashes of a burned pumpkin patch, between rows of new wheat.'],
@@ -118,7 +118,7 @@ const STORY_BOSSES = [
       ['you', 'Did it just say “my”?'],
       ['them', 'RRRAAAH!'],
     ],
-    fight: '⚔️ Fight' },
+    fight: 'Fight' },
   { char: 'gemhorn', // Greyhollow quarry: the gems in its horn
     lines: [
       ['action', 'Its horn is chipped, with empty holes where gems used to sit.'],
@@ -126,7 +126,7 @@ const STORY_BOSSES = [
       ['you', 'Who did?'],
       ['them', 'GRRAAH!'],
     ],
-    fight: '⚔️ Fight' },
+    fight: 'Fight' },
   { char: 'frog', // Saltmere docks: the boat (a frog fisher — not the fen's Fenn)
     lines: [
       ['action', 'It stands on the pier, a torn fishing net still round its arm.'],
@@ -134,7 +134,7 @@ const STORY_BOSSES = [
       ['you', 'I didn’t take anything.'],
       ['them', 'You… work… for HIM… RRAAH!'],
     ],
-    fight: '⚔️ Fight' },
+    fight: 'Fight' },
   { char: 'tree', name: 'Oldbark', // Fenwick Wood: the trees
     lines: [
       ['action', 'Stumps everywhere. One of the trees steps out of the treeline.'],
@@ -144,7 +144,7 @@ const STORY_BOSSES = [
       ['them', 'Pemberton has cut down half of it for his sawmill. Every plank in his manor was one of my trees.'],
       ['them', 'Not one more tree. Not while I stand.'],
     ],
-    fight: '🌳 Fight' },
+    fight: 'Fight' },
   { char: 'wizard', name: 'Alder', // Riverbend camp: the healer
     lines: [
       ['them', 'Not the camp. Please. There are sick people here.'],
@@ -152,7 +152,7 @@ const STORY_BOSSES = [
       ['them', 'I’m Alder. I was the healer at Riverbend, until Pemberton bought every herb garden and sold medicine to the sick at ten times the price. Here I heal them for nothing.'],
       ['them', 'If you want this camp, you’ll have to go through me.'],
     ],
-    fight: '⚔️ Fight' },
+    fight: 'Fight' },
   { char: 'antler', name: 'Bram', // Old Hearth: the forge
     lines: [
       ['action', 'He lowers his blade, just a little.'],
@@ -161,7 +161,7 @@ const STORY_BOSSES = [
       ['them', 'My name is Bram. I was the smith here, until Pemberton took my forge and sold my anvil.'],
       ['them', 'Remember that name when he asks how many you killed. But I won’t let you through to my family. En garde.'],
     ],
-    fight: '⚔️ En garde' },
+    fight: 'En garde' },
   { char: 'antler', name: 'Wren', // Highcrest Gate: Bram's sister, the ledger
     lines: [
       ['them', 'Bram was my brother.'],
@@ -171,7 +171,7 @@ const STORY_BOSSES = [
       ['them', 'He keeps a ledger of everything he’s taken. The fen. The patch. The gems. The boat. The wood. The gardens. The forge. Read it. Then decide who the monster is.'],
       ['them', 'But you’ll have to get past me first.'],
     ],
-    fight: '⚔️ Fight' },
+    fight: 'Fight' },
   { name: 'Marta', // the road to Gould Manor: spared
     lines: [
       ['action', 'She steps into the road, blade up — then sees your face.'],
@@ -181,7 +181,7 @@ const STORY_BOSSES = [
       ['action', 'She lowers her blade.'],
       ['them', 'His guards are waiting at the manor. Go.'],
     ],
-    spare: '🤝 Lower your sword' },
+    spare: 'Lower your sword' },
   { name: 'Guard Captain', // Gould Manor's guards
     lines: [
       ['them', 'Halt! Mr. Pemberton’s orders: no monsters past this gate.'],
@@ -189,7 +189,7 @@ const STORY_BOSSES = [
       ['them', 'He pays me, {name}. Same as he paid you.'],
       ['them', 'GUARDS! Hold the line!'],
     ],
-    fight: '⚔️ Fight' },
+    fight: 'Fight' },
 ];
 // The stage whose boss is spared (the last before Pemberton's guards)
 export const SPARED_STAGE = STORY_BOSSES.findIndex((b) => b.spare) + 1;
@@ -209,7 +209,6 @@ const ROAD_BOSSES = [
 export function stageBossTalk(stage, character, { afterStory = false, key = null } = {}) {
   const s = Math.max(1, Math.floor(stage) || 1);
   let story = !afterStory ? STORY_BOSSES[s - 1] : null;
-  const emoji = character?.emoji ?? '👹';
   const own = CHARACTER_STORIES[key];
   const talking = s >= TALKING_FROM_STAGE;
   // A different character on a story stage (an old save had it unlocked): its own story
@@ -219,15 +218,15 @@ export function stageBossTalk(stage, character, { afterStory = false, key = null
     story = {
       name: talking ? own?.name : null,
       lines: [...lines, ['them', talking ? 'Then come on.' : 'GRRAAH!']],
-      fight: '⚔️ Fight',
+      fight: 'Fight',
     };
   }
   const name = story?.name ?? character?.label ?? 'Monster';
   return {
-    speaker: `${emoji} ${name}`,
-    name: `${emoji} ${name}`,
+    speaker: name,
+    name,
     lines: story?.lines ?? ROAD_BOSSES[(s - 1) % ROAD_BOSSES.length],
-    fight: story?.spare ? null : (story?.fight ?? '⚔️ Fight'),
+    fight: story?.spare ? null : (story?.fight ?? 'Fight'),
     spare: story?.spare ?? null,
   };
 }
@@ -421,7 +420,7 @@ export const ROAM_QUESTS = [
       ['them', 'He’s shut the sluice gates on the Thornwick road so my fen stays dry, and paid thugs to guard them.'],
       ['you', 'Then let’s open them.'],
     ],
-    accept: '🐸 Open the gates',
+    accept: 'Open the gates',
     pemberton: [
       ['them', 'You again, {name}. That fen is drained land now. My land.'],
       ['them', 'I have the papers to prove it. Shall I show you?'],
@@ -432,7 +431,7 @@ export const ROAM_QUESTS = [
       ['them', 'Pemberton’s back, {name}. He’s put a fence round my old patch and his men are salting the ground so nothing grows but his wheat.'],
       ['you', 'Not for long.'],
     ],
-    accept: '🎃 Tear down the fence',
+    accept: 'Tear down the fence',
     pemberton: [
       ['them', 'Pumpkins, {name}? You came all this way for pumpkins?'],
       ['them', 'Wheat pays. Sentiment doesn’t.'],
@@ -444,7 +443,7 @@ export const ROAM_QUESTS = [
       ['them', 'And him at the end, holding the key.'],
       ['you', 'I’ll get your gems back.'],
     ],
-    accept: '💎 Stop the cart',
+    accept: 'Stop the cart',
     pemberton: [
       ['them', 'These stones are worth more than that whole beast, {name}.'],
       ['them', 'Finders keepers.'],
@@ -455,7 +454,7 @@ export const ROAM_QUESTS = [
       ['them', 'Pemberton’s painted his name on my boat, {name}. My boat! It’s moored past Saltmere with his men all along the shore.'],
       ['you', 'Let’s go and scrape it off.'],
     ],
-    accept: '⛵ Get the boat back',
+    accept: 'Get the boat back',
     pemberton: [
       ['them', 'Ah, {name}. Come to admire my boat?'],
       ['them', 'It even has my name on it. That makes it mine, you know. That’s how names work.'],
@@ -467,7 +466,7 @@ export const ROAM_QUESTS = [
       ['them', 'Every tree he cuts was a friend of mine.'],
       ['you', 'Not one more tree.'],
     ],
-    accept: '🌳 Stop the saws',
+    accept: 'Stop the saws',
     pemberton: [
       ['them', 'It’s timber, {name}. Wood. It grows back.'],
       ['them', 'Eventually. Not my problem.'],
@@ -479,7 +478,7 @@ export const ROAM_QUESTS = [
       ['them', 'People are sick, and they can’t pay.'],
       ['you', 'Then they won’t have to.'],
     ],
-    accept: '🌿 Free the gardens',
+    accept: 'Free the gardens',
     pemberton: [
       ['them', 'Medicine costs money, {name}. Somebody has to charge for it.'],
       ['them', 'And that somebody is me.'],
@@ -490,7 +489,7 @@ export const ROAM_QUESTS = [
       ['them', 'He’s locked my forge at Old Hearth, {name}, and sold the key to the highest bidder. Himself.'],
       ['you', 'Let’s go and get it.'],
     ],
-    accept: '🔨 Take back the forge',
+    accept: 'Take back the forge',
     pemberton: [
       ['them', 'A forge, {name}? I’ll have it melted down and sold by the pound.'],
       ['them', 'Iron’s up this year, you know.'],
@@ -502,7 +501,7 @@ export const ROAM_QUESTS = [
       ['them', 'It was our father’s.'],
       ['you', 'Then it goes home.'],
     ],
-    accept: '⚒️ Bring the anvil home',
+    accept: 'Bring the anvil home',
     pemberton: [
       ['them', 'That anvil looks splendid in my trophy room, {name}.'],
       ['them', 'Right next to the space I’ve kept for you.'],

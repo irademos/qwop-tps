@@ -260,7 +260,7 @@ export function createTownStalls(ctx) {
       finishItems(stall);
       const chestEntry = stall.items.find((e) => e.def.chest);
       if (chestEntry) {
-        const label = makeTextSprite('🎁 Mystery Chest', { height: 0.22 });
+        const label = makeTextSprite('Mystery Chest', { height: 0.22 });
         label.position.copy(chestEntry.object.position).add(_v.set(0, 0.95, 0));
         root.add(label);
         stall.labels.push(label);
@@ -359,7 +359,7 @@ export function createTownStalls(ctx) {
     if (!entry) return null;
     const s = ctx.getState(focus, entry.def.id);
     if (s.blocked || ctx.getCoins() < s.price) return null;
-    return `🪙 ${s.verb || 'Buy'} ${s.name} (${s.price})`;
+    return `${s.verb || 'Buy'} ${s.name} (${s.price})`;
   };
 
   // ── Focus (the shop camera) ──

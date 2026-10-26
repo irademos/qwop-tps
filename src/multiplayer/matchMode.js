@@ -161,7 +161,7 @@ const round3 = (v) => Math.round(v * 1000) / 1000;
 const teamChar = (charKey) => MATCH_CHARACTERS[charKey] || MATCH_CHARACTERS.antler;
 const teamLabel = (charKey) => {
   const c = teamChar(charKey);
-  return `${c.emoji} ${c.team}`;
+  return c.team;
 };
 const formatClock = (ms) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -216,7 +216,7 @@ export function createMatchMode(ctx) {
   const inviteList = el('ul', 'duel-lobby-list');
   const setupActions = el('div', 'duel-lobby-actions');
   const startBtn = el('button', 'arcade-button', '▶ Start Battle');
-  const setupBackBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
+  const setupBackBtn = el('button', 'arcade-button arcade-secondary', 'Back');
   setupActions.append(startBtn, setupBackBtn);
   setupPanel.append(setupTitle, setupStatus, rulePicker, picks, membersTitle, membersList, inviteTitle, inviteList, setupActions);
   setup.append(setupPanel);
@@ -224,7 +224,7 @@ export function createMatchMode(ctx) {
   const invitePrompt = el('div', 'match-invite hidden');
   const inviteText = el('div', 'duel-prompt-text');
   const inviteActions = el('div', 'duel-lobby-actions');
-  const inviteAcceptBtn = el('button', 'arcade-button', '✅ Join');
+  const inviteAcceptBtn = el('button', 'arcade-button', 'Join');
   const inviteDeclineBtn = el('button', 'arcade-button arcade-secondary', 'Decline');
   inviteActions.append(inviteAcceptBtn, inviteDeclineBtn);
   invitePrompt.append(inviteText, inviteActions);
@@ -515,7 +515,7 @@ export function createMatchMode(ctx) {
       row.append(el('span', 'duel-lobby-name', peer.name));
       const label = { lobby: 'In lobby', queued: 'Matchmaking', busy: 'Busy' }[status];
       row.append(el('span', `duel-lobby-badge duel-status-${status === 'busy' ? 'dueling' : status}`, label));
-      const btn = el('button', 'duel-challenge-btn', invited ? 'Invited…' : '✉️ Invite');
+      const btn = el('button', 'duel-challenge-btn', invited ? 'Invited…' : 'Invite');
       btn.disabled = invited || status === 'busy' || partyFull;
       btn.addEventListener('click', () => invite(peerId, peer.name));
       row.append(btn);
@@ -550,7 +550,7 @@ export function createMatchMode(ctx) {
     }
     startBtn.classList.toggle('hidden', !party.isHost);
     startBtn.disabled = phase !== 'setup';
-    setupBackBtn.textContent = party.isHost ? '⬅ Back' : '⬅ Leave party';
+    setupBackBtn.textContent = party.isHost ? 'Back' : 'Leave party';
     setupBackBtn.disabled = phase === 'starting' || phase === 'pulled';
     renderRules();
     renderPicks();
@@ -1091,7 +1091,7 @@ export function createMatchMode(ctx) {
   }
 
   const showKillPop = (victimName) => {
-    killPop.textContent = `💀 You eliminated ${victimName}`;
+    killPop.textContent = `You eliminated ${victimName}`;
     killPop.classList.remove('hidden', 'is-in');
     void killPop.offsetWidth;
     killPop.classList.add('is-in');
@@ -1342,10 +1342,10 @@ export function createMatchMode(ctx) {
       const row = el('div', `match-results-row team-${c.team}`);
       row.classList.toggle('is-self', c === me);
       row.classList.toggle('is-winner', c.id === winnerId || (winnerTeam != null && c.team === winnerTeam));
-      const status = c.left ? ' (left)' : (match.rule === 'survival' && c.alive ? ' 🏅' : '');
+      const status = c.left ? ' (left)' : (match.rule === 'survival' && c.alive ? ' (survived)' : '');
       const name = el('span', 'match-results-name');
       name.append(el('span', 'match-results-emoji', MATCH_CHARACTERS[c.char].emoji),
-        document.createTextNode(`${c.name}${c === me ? ' (you)' : ''}${c.bot ? ' 🤖' : ''}${status}`));
+        document.createTextNode(`${c.name}${c === me ? ' (you)' : ''}${c.bot ? ' (bot)' : ''}${status}`));
       row.append(el('span', 'match-results-rank', String(i + 1)), name,
         el('span', 'match-results-num', String(c.kills)), el('span', 'match-results-num', String(c.deaths)));
       if (byKd()) row.append(el('span', 'match-results-num', formatKd(c)));

@@ -20,7 +20,7 @@ export function installTownLaw(T, ctx) {
     const e = ctx.spawnFighter({
       x: n.x, z: n.z, yaw: n.yaw, url: n.url, hearts: Math.max(1, n.hp),
       swingChance: n.def.law || n.def.outlaw ? 0.35 : 0.25,
-      gear: T.fighterGear(n), name: `${n.def.emoji} ${n.name}`, passive: standoff,
+      gear: T.fighterGear(n), name: n.name, passive: standoff,
     });
     if (!e) return;
     n.fighter = e;
@@ -137,13 +137,13 @@ export function installTownLaw(T, ctx) {
     else T.worldDeath(n, killer);
     if (n.def.outlaw) {
       // A bandit: the gang finds a new one in a while; no grief in town
-      T.feedLine(`💀 ${n.name} is down.`);
+      T.feedLine(`${n.name} is down.`);
       T.onJobDeath(n, byPlayer);
       T.save();
       return;
     }
     T.gossip.push({ kind: 'murder', who: firstName(n.name), by: byPlayer ? 'player' : null, at: T.simT, fresh: true });
-    T.feedLine(`💀 ${n.name} the ${n.def.label} is dead.`);
+    T.feedLine(`${n.name} the ${n.def.label} is dead.`);
     // Their family won't forget who did it
     if (byPlayer && !T.isOutlaw(n)) {
       for (const k of T.family(n)) {
@@ -198,7 +198,7 @@ export function installTownLaw(T, ctx) {
     T.gossip.push({ kind, who: victim ? firstName(victim.name) : '', by: 'player', at: T.simT, fresh: true });
     if (T.gossip.length > 12) T.gossip.shift();
     if (!witnesses.length) {
-      if (kind === 'murder') T.feedLine('🤫 Nobody saw that.');
+      if (kind === 'murder') T.feedLine('Nobody saw that.');
       return;
     }
     const before = T.law.stars;
@@ -221,7 +221,7 @@ export function installTownLaw(T, ctx) {
     if (kind === 'theft' && victim?.alive && witnesses.includes(victim)) T.say(victim, 'Oi! Those are mine!');
     if (T.law.stars > before) {
       const w = witnesses.find((x) => x !== victim) ?? witnesses[0];
-      T.feedLine(`🚨 ${firstName(w.name)} saw that! ${'★'.repeat(T.law.stars)}`);
+      T.feedLine(`${firstName(w.name)} saw that! ${'★'.repeat(T.law.stars)}`);
     }
     T.renderStars();
   };
@@ -282,10 +282,10 @@ export function installTownLaw(T, ctx) {
       T.law.stars -= 1;
       T.law.lastSeenAt = T.simT;
       if (T.law.stars <= 0) {
-        T.feedLine('😮‍💨 The guards gave up looking for you.');
+        T.feedLine('The guards gave up looking for you.');
         standDown();
       } else {
-        T.feedLine(`👀 Lost them… ${'★'.repeat(T.law.stars)}`);
+        T.feedLine(`Lost them… ${'★'.repeat(T.law.stars)}`);
       }
     }
     T.renderStars();
@@ -325,12 +325,12 @@ export function installTownLaw(T, ctx) {
         // (in the cell, in the jail house's room — facing out through the bars)
         ctx.revivePlayer(P.jail.x, P.jail.z, P.jailYaw);
         if (fine > 0) ctx.addCoins(-fine);
-        T.feedLine(fine > 0 ? `⚖️ Fined ${fine} 🪙` : '⚖️ Locked up.');
+        T.feedLine(fine > 0 ? `Fined ${fine} coins.` : 'Locked up.');
         if (Object.values(ctx.getItems() ?? {}).some(Boolean)) {
           ctx.confiscate();
-          T.feedLine('🗡️ The guards took your weapons.');
+          T.feedLine('The guards took your weapons.');
         }
-        if (T.lockpicks > 0) { T.lockpicks = 0; T.feedLine('🔧 …and your lock-picks.'); }
+        if (T.lockpicks > 0) { T.lockpicks = 0; T.feedLine('…and your lock-picks.'); }
         if (!T.mp()) T.advanceClock(3 * 60); // (a shared town's clock is everyone's)
         startJail();
         fadeTo(false);
@@ -355,7 +355,7 @@ export function installTownLaw(T, ctx) {
       later(token, 700, () => {
         const P = T.layout.places;
         ctx.revivePlayer(P.spawn.x, P.spawn.z, Math.atan2(P.fire.x - P.spawn.x, P.fire.z - P.spawn.z));
-        if (lost > 0) { ctx.addCoins(-lost); T.feedLine(`🪙 Someone helped themselves to ${lost} coins…`); }
+        if (lost > 0) { ctx.addCoins(-lost); T.feedLine(`Someone helped themselves to ${lost} coins…`); }
         if (!T.mp()) T.advanceClock(2 * 60);
         fadeTo(false);
         T.sequence = null;
@@ -390,15 +390,15 @@ export function installTownLaw(T, ctx) {
   };
   const payBail = () => {
     if (!T.jail) return;
-    if (ctx.getCoins() < BAIL) { T.feedLine(`🪙 Bail is ${BAIL} coins.`); return; }
+    if (ctx.getCoins() < BAIL) { T.feedLine(`Bail is ${BAIL} coins.`); return; }
     ctx.addCoins(-BAIL);
     ctx.playSfx('coin');
-    endJail('🔓 Bail paid. Behave yourself.');
+    endJail('Bail paid. Behave yourself.');
   };
   // A bribe works if an officer near the cell doesn't mind the player (or by luck)
   const bribe = () => {
     if (!T.jail) return;
-    if (ctx.getCoins() < BRIBE) { T.feedLine(`🪙 A bribe takes ${BRIBE} coins.`); return; }
+    if (ctx.getCoins() < BRIBE) { T.feedLine(`A bribe takes ${BRIBE} coins.`); return; }
     ctx.addCoins(-BRIBE);
     const P = T.layout.places;
     const officer = lawNpcs().filter((o) => !o.inside && dist2(o.x, o.z, P.jail.x, P.jail.z) < 30)
@@ -406,10 +406,10 @@ export function installTownLaw(T, ctx) {
     const ok = (officer && officer.attitude >= -0.2) || Math.random() < BRIBE_ODDS;
     if (ok) {
       if (officer) T.npcMoney(officer, BRIBE);
-      endJail(`🤝 ${officer ? firstName(officer.name) : 'The guard'} looks the other way. You\'re out.`);
+      endJail(`${officer ? firstName(officer.name) : 'The guard'} looks the other way. You\'re out.`);
     } else {
       T.jail.left += 15;
-      T.feedLine('😠 The guard pockets the coins and laughs. +15 s');
+      T.feedLine('The guard pockets the coins and laughs. +15 s');
     }
   };
   // Sleep it off: out in the morning (the clock jumps)
@@ -421,7 +421,7 @@ export function installTownLaw(T, ctx) {
     later(token, 800, () => {
       const h = T.hour();
       if (!T.mp()) T.advanceClock(((WAKE_HOUR - h + 24) % 24 || 24) * 60);
-      endJail('☀️ Morning. The guard lets you out.');
+      endJail('Morning. The guard lets you out.');
       fadeTo(false);
       T.sequence = null;
     });
@@ -432,23 +432,23 @@ export function installTownLaw(T, ctx) {
     T.lockpick.start((success) => {
       if (!T.jail) return;
       if (success) {
-        endJail('🔓 Click. The door swings open…');
+        endJail('Click. The door swings open…');
         T.law.stars = Math.max(T.law.stars, 1);
         T.law.peak = Math.max(T.law.peak, T.law.stars);
         T.law.lastSeenAt = T.simT;
         T.law.lastKnown.copy(T.playerPos());
-        T.feedLine('🚨 Jailbreak! The guards are after you.');
+        T.feedLine('Jailbreak! The guards are after you.');
         T.renderStars();
       } else {
         T.jail.left += LOCK_SLIP_S;
-        T.feedLine(`🔧 The pick slipped — a guard heard. +${LOCK_SLIP_S} s`);
+        T.feedLine(`The pick slipped — a guard heard. +${LOCK_SLIP_S} s`);
       }
     });
   };
   const renderJail = () => {
     if (!T.jail) return;
     T.jailChip.classList.remove('hidden');
-    T.jailChip.textContent = `🔒 In jail · ${Math.ceil(T.jail.left)} s`;
+    T.jailChip.textContent = `In jail · ${Math.ceil(T.jail.left)} s`;
   };
 
   Object.assign(T, {

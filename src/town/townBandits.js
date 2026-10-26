@@ -59,7 +59,7 @@ export function installTownBandits(T, ctx) {
       n.campFight = true;
       T.promote(n);
     }
-    T.feedLine('⚔️ The bandits attack!');
+    T.feedLine('The bandits attack!');
   };
   const updateCampWatch = () => {
     const P = T.layout.places;
@@ -84,7 +84,7 @@ export function installTownBandits(T, ctx) {
     const warn = (lines, vars = {}) => {
       const line = fillLine(pickOf(lines), vars);
       if (lookout) T.say(lookout, line, { big: true });
-      T.feedLine(`💀 ${lookout ? firstName(lookout.name) : 'Bandits'}: “${line}”`);
+      T.feedLine(`${lookout ? firstName(lookout.name) : 'Bandits'}: “${line}”`);
     };
     const face = () => {
       for (const n of gang) if (n.task?.type === 'camp') { n.task.face = { x: p.x, z: p.z }; n.task.to = { x: n.x, z: n.z }; n.path = null; }
@@ -112,7 +112,7 @@ export function installTownBandits(T, ctx) {
       const drawers = gang.filter((n) => n !== lookout).sort((a, b) => T.distToPlayer(a) - T.distToPlayer(b)).slice(0, CAMP_DEFENDERS);
       for (const n of drawers) T.promote(n, { standoff: true });
       warn(armed ? SHOUT_CAMP_DRAW_ARMED : SHOUT_CAMP_DRAW_UNARMED);
-      if (drawers.length) T.feedLine('🗡️ The bandits draw their swords.');
+      if (drawers.length) T.feedLine('The bandits draw their swords.');
     }
     T.campWatch.closeT += dt;
     const left = Math.max(0, Math.ceil(CAMP_GRACE_S - T.campWatch.closeT));
@@ -137,7 +137,7 @@ export function installTownBandits(T, ctx) {
         T.npcMoney(lookout ?? standing[0], took);
         ctx.playSfx('coin');
         warn(SHOUT_CAMP_ROB);
-        T.feedLine(`💰 The bandits took ${took} 🪙 off you.`);
+        T.feedLine(`The bandits took ${took} coins off you.`);
       } else {
         warn(SHOUT_CAMP_SPARE);
       }
@@ -147,8 +147,8 @@ export function installTownBandits(T, ctx) {
   const showCampChip = (armed) => {
     const left = Math.max(0, Math.ceil(CAMP_GRACE_S - T.campWatch.closeT));
     T.campChip.textContent = armed
-      ? `⚔️ Bandit camp — leave or they fight · ${left} s`
-      : `💰 Bandit camp — leave or they rob you · ${left} s`;
+      ? `Bandit camp — leave or they fight · ${left} s`
+      : `Bandit camp — leave or they rob you · ${left} s`;
     T.campChip.classList.remove('hidden');
   };
   // A bandit's day: loiter at the camp; on a raid night, the next thing on their list in town
@@ -196,7 +196,7 @@ export function installTownBandits(T, ctx) {
     for (const j of T.jobs) {
       if (j.status === 'active' && j.kind === 'guardField' && (j.data.raiders ?? []).includes(n.id) && !j.data.failed) {
         j.data.failed = true;
-        T.feedLine('😞 The raiders got away with the harvest.');
+        T.feedLine('The raiders got away with the harvest.');
       }
     }
   };
@@ -216,7 +216,7 @@ export function installTownBandits(T, ctx) {
     for (let k = 0; k < missing; k++) T.arrivals.push({ role: 'bandit', at: T.simT + rand(20, 90) });
     if (missing > 0 && T.gangNoteDay !== T.clock.day) {
       T.gangNoteDay = T.clock.day;
-      T.feedLine('💀 Word is more cutthroats have joined the bandits out at the camp.');
+      T.feedLine('Word is more cutthroats have joined the bandits out at the camp.');
     }
   };
 
@@ -240,7 +240,7 @@ export function installTownBandits(T, ctx) {
       n.raidsLeft = NIGHT_RAID_ACTS;
       if (!n.task || n.task.type === 'camp') T.decide(n);
     }
-    const line = `🌙 ${raiders.length} bandits are heading into town! Lock your doors.`;
+    const line = `${raiders.length} bandits are heading into town! Lock your doors.`;
     T.feedLine(line);
     if (T.netMode === 'host') T.net.broadcast({ w: 1, op: 'raid', t: line });
   };
@@ -304,7 +304,7 @@ export function installTownBandits(T, ctx) {
       const who = firstName(victims[0].name);
       T.gossip.push({ kind: 'burgled', who, at: T.simT, fresh: true });
       if (T.gossip.length > 12) T.gossip.shift();
-      if (T.distToPlayer(n) < 40 || (T.inRoom && !T.rooms.roomAt(n.x, n.z))) T.feedLine(`🏚️ Bandits broke into ${who}'s house!`);
+      if (T.distToPlayer(n) < 40 || (T.inRoom && !T.rooms.roomAt(n.x, n.z))) T.feedLine(`Bandits broke into ${who}'s house!`);
       T.npcCrime(n, 'theft', victims[0]);
     }
   };
@@ -321,12 +321,12 @@ export function installTownBandits(T, ctx) {
       s.goods[g] -= 1;
       taken[g] = (taken[g] ?? 0) + 1;
     }
-    const what = [coins ? `${coins} 🪙` : null, ...Object.entries(taken).map(([g, c]) => `${c} ${GOODS[g].emoji}`)].filter(Boolean).join(', ');
+    const what = [coins ? `${coins} coins` : null, ...Object.entries(taken).map(([g, c]) => `${c} ${GOODS[g].label.toLowerCase()}`)].filter(Boolean).join(', ');
     if (what) {
-      T.feedLine(`🏚️ Bandits broke into your house and took ${what} from your chest!`);
+      T.feedLine(`Bandits broke into your house and took ${what} from your chest!`);
       ctx.showBanner('ROBBED!', `Bandits broke into your house · ${what}`, 3200);
     } else {
-      T.feedLine('🏚️ Bandits broke into your house — but there was nothing in your chest to take.');
+      T.feedLine('Bandits broke into your house — but there was nothing in your chest to take.');
     }
     T.save();
     return coins;
@@ -340,7 +340,7 @@ export function installTownBandits(T, ctx) {
       if (!n.alive || !n.def.outlaw || n.fighter || n.inside || !n.body || !T.mine(n) || !RAIDING.has(n.task?.type)) continue;
       if (T.rooms.roomAt(n.x, n.z) || T.distToPlayer(n) > RAID_NOTICE_DIST || !T.sees(n)) continue;
       if (armed) {
-        T.feedLine(`🗡️ ${firstName(n.name)}: “${pickOf(SHOUT_RAID_FIGHT)}”`);
+        T.feedLine(`${firstName(n.name)}: “${pickOf(SHOUT_RAID_FIGHT)}”`);
         T.promote(n);
         continue;
       }
@@ -352,7 +352,7 @@ export function installTownBandits(T, ctx) {
       ctx.playSfx('coin');
       n.loot += 1;
       T.say(n, pickOf(SHOUT_MUG), { big: true });
-      T.feedLine(`💰 ${firstName(n.name)} robbed you of ${took} 🪙! (With a weapon out, they'd have to fight you for it.)`);
+      T.feedLine(`${firstName(n.name)} robbed you of ${took} coins! (With a weapon out, they'd have to fight you for it.)`);
       const P = T.layout.places;
       T.setTask(n, { type: 'raidHome', to: T.randomNear(P.camp.x, P.camp.z, 3), dur: 2, run: true });
       return;
@@ -375,7 +375,7 @@ export function installTownBandits(T, ctx) {
     T.nightKills.coins += NIGHT_KILL_REWARD * (n.role === 'banditBoss' ? 2 : 1);
     if (T.nightKillNote !== nightOf()) {
       T.nightKillNote = nightOf();
-      T.feedLine('⭐ The sheriff will want a word with you in the morning.');
+      T.feedLine('The sheriff will want a word with you in the morning.');
     }
     T.save();
   };
@@ -390,7 +390,7 @@ export function installTownBandits(T, ctx) {
       const { houses, mugs, fields } = plan.tally;
       const parts = [houses ? `broke into ${houses} house${houses > 1 ? 's' : ''}` : null, mugs ? `robbed ${mugs} ${mugs > 1 ? 'people' : 'person'}` : null,
         fields ? `raided the fields ${fields > 1 ? `${fields} times` : 'once'}` : null].filter(Boolean);
-      if (parts.length) T.feedLine(`🌅 Last night the bandits ${parts.join(', ')}.`);
+      if (parts.length) T.feedLine(`Last night the bandits ${parts.join(', ')}.`);
     }
     const sheriff = sheriffOf();
     if (!sheriff || !inHours(T.hour(), sheriff.def.hours)) return;

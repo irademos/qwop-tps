@@ -129,7 +129,7 @@ export function installTownReactions(T, ctx) {
     if (!seen) return;
     culprit.outlawUntil = T.simT + OUTLAW_S;
     T.gossip.push({ kind: kind === 'murder' ? 'murder' : 'assault', who: firstName(victim.name), by: firstName(culprit.name), at: T.simT, fresh: true });
-    if (T.distToPlayer(culprit) < 35) T.feedLine(`🚨 ${firstName(culprit.name)} ${kind === 'mug' ? 'robbed' : kind === 'theft' ? 'stole from' : 'attacked'} ${firstName(victim.name)}!`);
+    if (T.distToPlayer(culprit) < 35) T.feedLine(`${firstName(culprit.name)} ${kind === 'mug' ? 'robbed' : kind === 'theft' ? 'stole from' : 'attacked'} ${firstName(victim.name)}!`);
     sendGuard(culprit);
   };
   // The nearest free guard goes to arrest an outlaw townsperson
@@ -153,7 +153,7 @@ export function installTownReactions(T, ctx) {
     n.z = P.jail.z + rand(-0.4, 0.4);
     n.path = null;
     T.setTask(n, { type: 'jailed', dur: Infinity });
-    if (T.distToPlayer(n) < 35 || T.distToPlayer(by) < 35) T.feedLine(`👮 ${firstName(by.name)} locked up ${firstName(n.name)}.`);
+    if (T.distToPlayer(n) < 35 || T.distToPlayer(by) < 35) T.feedLine(`${firstName(by.name)} locked up ${firstName(n.name)}.`);
     T.gossip.push({ kind: 'jailed', who: firstName(n.name), by: firstName(by.name), at: T.simT, fresh: true });
   };
   // A drifter (or bandit) picks someone out on their own
@@ -178,7 +178,7 @@ export function installTownReactions(T, ctx) {
     T.setTask(n, { type: 'follow', dur: Infinity });
     const said = fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() });
     if (!quiet) T.say(n, said, { big: true });
-    T.feedLine(`🤝 ${firstName(n.name)} is coming with you.`);
+    T.feedLine(`${firstName(n.name)} is coming with you.`);
     return said;
   };
   const dismiss = (n, line = FOLLOW_LINES.leave, { quiet = false } = {}) => {

@@ -195,7 +195,7 @@ function buildHeader() {
 // Always-visible footer: Back to Lobby (start screen), shown while a mode is running
 function buildFooter() {
   const footer = createElement('div', 'settings-footer');
-  const lobbyButton = createElement('button', 'settings-button settings-button-secondary', '⬅ Back to Lobby');
+  const lobbyButton = createElement('button', 'settings-button settings-button-secondary', 'Back to Lobby');
   lobbyButton.type = 'button';
   lobbyButton.dataset.action = 'back-to-lobby';
   footer.append(lobbyButton);
@@ -800,14 +800,14 @@ function buildDevPanel() {
   const roamTitle = createElement('h3', 'settings-section-title', 'Free Roam');
   const roamText = createElement('div', 'settings-muted',
     'Walk the island freely with a panel to copy your location and record the Showdown stage routes (village spot + waypoints per stage). Leaves the mode you are in.');
-  const roamButton = createElement('button', 'settings-button', '🧭 Free Roam');
+  const roamButton = createElement('button', 'settings-button', 'Free Roam');
   roamButton.type = 'button';
   roamButton.dataset.action = 'dev-roam';
 
   const locTitle = createElement('h3', 'settings-section-title', 'Location');
   const locRow = createElement('div', 'settings-row');
   locRow.innerHTML = '<span>You are at</span><span data-field="dev-location">—</span>';
-  const locButton = createElement('button', 'settings-button settings-button-secondary', '📋 Copy location');
+  const locButton = createElement('button', 'settings-button settings-button-secondary', 'Copy location');
   locButton.type = 'button';
   locButton.dataset.action = 'dev-copy-location';
   const locHint = createElement('div', 'settings-muted',
@@ -834,7 +834,7 @@ function buildDevPanel() {
     'This browser only: Showdown uses the routes recorded here instead of STAGE_ROUTES in src/map/stageRoutes.js.');
   draftGroup.append(draftLabel, draftToggle, draftHint);
 
-  const copyRoutesButton = createElement('button', 'settings-button settings-button-secondary', '📋 Copy draft routes');
+  const copyRoutesButton = createElement('button', 'settings-button settings-button-secondary', 'Copy draft routes');
   copyRoutesButton.type = 'button';
   copyRoutesButton.dataset.action = 'dev-copy-routes';
   const discardButton = createElement('button', 'settings-button settings-button-danger', 'Discard draft');
@@ -908,7 +908,7 @@ function buildSwordGyroPanel() {
   recalBtn.addEventListener('click', () => {
     if (window.phoneSwordRecalibrate) {
       window.phoneSwordRecalibrate();
-      recalBtn.textContent = '✅ Calibrated!';
+      recalBtn.textContent = 'Calibrated!';
       setTimeout(() => { recalBtn.textContent = 'Recalibrate Sword'; }, 1500);
     } else {
       document.getElementById('phone-sword-calib-modal')?.classList.remove('hidden');
@@ -920,7 +920,7 @@ function buildSwordGyroPanel() {
 
   // Re-open the phone QR popup (connect / reconnect the phone controller)
   const qrGroup = createElement('div', 'settings-field');
-  const qrBtn = createElement('button', 'settings-button settings-button-secondary', '📱 Show Phone QR Code');
+  const qrBtn = createElement('button', 'settings-button settings-button-secondary', 'Show Phone QR Code');
   qrBtn.id = 'settings-swordgyro-qr';
   qrBtn.type = 'button';
   qrBtn.addEventListener('click', () => {
@@ -928,7 +928,7 @@ function buildSwordGyroPanel() {
       closeSettings();
     } else {
       qrBtn.textContent = 'Phone link still starting… try again';
-      setTimeout(() => { qrBtn.textContent = '📱 Show Phone QR Code'; }, 2000);
+      setTimeout(() => { qrBtn.textContent = 'Show Phone QR Code'; }, 2000);
     }
   });
   const qrHint = createElement('div', 'settings-muted');
@@ -959,7 +959,7 @@ function buildSwordGyroPanel() {
   handsToggle.checked = window.phoneSwordHandsMove !== false;
   handsToggle.addEventListener('change', () => window.setPhoneSwordHandsMove?.(handsToggle.checked));
   const handsHint = createElement('div', 'settings-muted');
-  handsHint.textContent = 'With nothing in your hands (Town\'s ✋ Hands), turning the phone turns you, like with the shield.';
+  handsHint.textContent = 'With nothing in your hands (Town\'s Hands button), turning the phone turns you, like with the shield.';
   handsGroup.append(handsLabel, handsToggle, handsHint);
 
   panelEl.append(
@@ -1029,12 +1029,12 @@ function buildLeaderboardOverlay() {
 
   const tabs = createElement('div', 'leaderboard-tabs');
   tabs.setAttribute('role', 'tablist');
-  const killsTab = createElement('button', 'leaderboard-tab is-active', '⚔️ Showdown Kills');
+  const killsTab = createElement('button', 'leaderboard-tab is-active', 'Showdown Kills');
   killsTab.type = 'button';
   killsTab.dataset.leaderboardTab = 'kills';
   killsTab.setAttribute('role', 'tab');
   killsTab.setAttribute('aria-selected', 'true');
-  const stageTab = createElement('button', 'leaderboard-tab', '⚔️ Top Stage');
+  const stageTab = createElement('button', 'leaderboard-tab', 'Top Stage');
   stageTab.type = 'button';
   stageTab.dataset.leaderboardTab = 'stage';
   stageTab.setAttribute('role', 'tab');
@@ -1048,8 +1048,8 @@ function buildLeaderboardOverlay() {
     tab.setAttribute('aria-selected', 'false');
     return tab;
   };
-  const mpWinsTab = makeTab('mpWins', '🏆 Multiplayer Wins');
-  const mpKillsTab = makeTab('mpKills', '💀 Multiplayer Kills');
+  const mpWinsTab = makeTab('mpWins', 'Multiplayer Wins');
+  const mpKillsTab = makeTab('mpKills', 'Multiplayer Kills');
   tabs.append(killsTab, stageTab, mpWinsTab, mpKillsTab);
 
   const body = createElement('div', 'leaderboard-body');
@@ -1256,10 +1256,10 @@ async function handleAction(target) {
     const pose = context.appState?.getPlayerPose?.();
     if (!pose) return;
     const ok = await copyText(JSON.stringify(pose));
-    flashButton(elements.dev?.locButton, ok ? '✅ Copied!' : 'Copy failed');
+    flashButton(elements.dev?.locButton, ok ? 'Copied!' : 'Copy failed');
   } else if (action === 'dev-copy-routes') {
     const ok = await copyText(formatRoutes(loadDraftRoutes(ROUTES_MAP_KEY)));
-    flashButton(elements.dev?.copyRoutesButton, ok ? '✅ Copied!' : 'Copy failed');
+    flashButton(elements.dev?.copyRoutesButton, ok ? 'Copied!' : 'Copy failed');
   } else if (action === 'dev-discard-routes') {
     if (!window.confirm('Discard the draft stage routes on this device?')) return;
     discardDraftRoutes(ROUTES_MAP_KEY);
@@ -1272,7 +1272,7 @@ async function handleAction(target) {
     const ok = await copyText(JSON.stringify(cfg));
     const button = elements.displayFields?.cameraCopyButton;
     if (button) {
-      button.textContent = ok ? '✅ Copied!' : 'Copy failed';
+      button.textContent = ok ? 'Copied!' : 'Copy failed';
       setTimeout(() => { button.textContent = 'Copy Values'; }, 1500);
     }
   } else if (action === 'reset-camera') {

@@ -184,7 +184,7 @@ export function createTownMode(ctx) {
   // ── DOM ──
   const hud = el('div', 'town-hud hidden');
   const top = el('div', 'town-top ui-panel');
-  const topPlace = el('span', 'town-top-place', `🏘️ ${TOWN_NAME}`);
+  const topPlace = el('span', 'town-top-place', `${TOWN_NAME}`);
   const topSep = el('span', 'town-top-sep', '·');
   const topClock = el('span', 'town-top-clock');
   top.append(topPlace, topSep, topClock);
@@ -475,7 +475,7 @@ export function createTownMode(ctx) {
         n.z = T.layout.places.camp.z;
         T.npcs.push(n);
         T.decide(n);
-        if (T.distToPlayer(n) < 40) feedLine(`💀 ${n.name} joined the bandits.`);
+        if (T.distToPlayer(n) < 40) feedLine(`${n.name} joined the bandits.`);
         continue;
       }
       // (they've heard what the town thinks of the player)
@@ -487,7 +487,7 @@ export function createTownMode(ctx) {
       T.assignWork();
       T.setTask(n, { type: 'wander', to: n.home, dur: 2 });
       T.gossip.push({ kind: 'newcomer', who: firstName(n.name), at: T.simT, fresh: true });
-      feedLine(`🧳 ${n.name} the ${n.def.label} moved to ${TOWN_NAME}.`);
+      feedLine(`${n.name} the ${n.def.label} moved to ${TOWN_NAME}.`);
       save();
     }
   };
@@ -649,7 +649,7 @@ export function createTownMode(ctx) {
         ctx.teleport(P.spawn.x, P.spawn.z, Math.atan2(P.market.x - P.spawn.x, P.market.z - P.spawn.z));
       }
       T.laidOut = true;
-      if (T.netMode === 'joining') { feedLine(`🏘️ Finding your town…`); return; }
+      if (T.netMode === 'joining') { feedLine(`Finding your town…`); return; }
       spawnTown();
       feedLine(`Welcome to ${TOWN_NAME}! Walk up to people to talk.`);
     }, 30);
@@ -722,7 +722,7 @@ export function createTownMode(ctx) {
     T.netMode = 'off';
     T.laidOut = false;
     net?.stop();
-    topPlace.textContent = `🏘️ ${TOWN_NAME}`;
+    topPlace.textContent = `${TOWN_NAME}`;
   };
 
   const update = (dt) => {
@@ -740,7 +740,7 @@ export function createTownMode(ctx) {
     if (T.jail) {
       T.jail.left -= dt;
       T.renderJail();
-      if (T.jail.left <= 0) T.endJail('🔓 Time served. You\'re free to go.');
+      if (T.jail.left <= 0) T.endJail('Time served. You\'re free to go.');
     }
     if (!T.jail && !T.doorPick && lockpick.isOpen()) lockpick.stop();
     lockpick.update(dt);
@@ -927,7 +927,7 @@ export function createTownMode(ctx) {
     onBounty: (name, coins) => {
       if (!T.active) return;
       ctx.addCoins(coins);
-      feedLine(`💰 You brought ${name} in · +${coins} 🪙`);
+      feedLine(`You brought ${name} in · +${coins} coins`);
       ctx.showBanner('BOUNTY!', `${name} is off to jail · 🪙 +${coins}`, 2600);
     },
     isActive: () => T.active,

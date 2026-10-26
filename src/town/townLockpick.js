@@ -20,7 +20,7 @@ const el = (tag, className, text) => {
 
 export function createLockpick(parent) {
   const panel = el('div', 'town-lockpick ui-panel hidden');
-  const title = el('div', 'town-market-title', '🔧 Pick the lock');
+  const title = el('div', 'town-market-title', 'Pick the lock');
   const hint = el('div', 'town-market-info', 'Press when the pin is in the gold.');
   const track = el('div', 'town-lockpick-track');
   const zone = el('div', 'town-lockpick-zone');

@@ -86,7 +86,7 @@ export function installTownFarming(T, ctx) {
       root.add(post, spout, reel);
       root.traverse((m) => { if (m.isMesh) m.castShadow = true; });
       group.add(root);
-      const sign = makeTextSprite('🚿 Hose', { height: 0.24 });
+      const sign = makeTextSprite('Hose', { height: 0.24 });
       sign.position.set(tap.x, root.position.y + 1.25, tap.z);
       group.add(sign);
       farm.tapTop = root.position.clone().add(_v.set(0, HOSE_REEL_UP, 0.12));
@@ -116,7 +116,7 @@ export function installTownFarming(T, ctx) {
       const fs = farm.fieldSigns[i];
       if (!fs) return;
       const o = T.fieldOwners[i];
-      const text = !o ? `🌱 Field for sale · ${FIELD_PRICE} 🪙` : ownsField(i) ? '🌱 Your field' : `🌱 ${o.n || 'Someone'}'s field`;
+      const text = !o ? `Field for sale · ${FIELD_PRICE} 🪙` : ownsField(i) ? 'Your field' : `${o.n || 'Someone'}'s field`;
       if (text === fs.text) return;
       fs.text = text;
       if (fs.sign) { fs.sign.parent?.remove(fs.sign); fs.sign.material.map?.dispose(); fs.sign.material.dispose(); }
@@ -141,7 +141,7 @@ export function installTownFarming(T, ctx) {
   const buyField = (i) => {
     const f = fields()[i];
     if (!f || T.fieldOwners[i]) return;
-    if (ctx.getCoins() < FIELD_PRICE) { T.feedLine(`🪙 This field costs ${FIELD_PRICE} coins.`); return; }
+    if (ctx.getCoins() < FIELD_PRICE) { T.feedLine(`This field costs ${FIELD_PRICE} coins.`); return; }
     const farmer = T.npcs.find((n) => n.alive && n.role === 'farmer' && n.work === f) ?? null;
     ctx.addCoins(-FIELD_PRICE);
     if (farmer) T.npcMoney(farmer, FIELD_PRICE);
@@ -155,14 +155,14 @@ export function installTownFarming(T, ctx) {
       T.say(farmer, 'It\'s yours now — look after it!', { big: true });
       T.remember(farmer, 'customer');
     }
-    T.feedLine(`🌱 You bought ${farmer ? `${firstName(farmer.name)}'s` : 'the'} field. Its veg is yours to pick.`);
+    T.feedLine(`You bought ${farmer ? `${firstName(farmer.name)}'s` : 'the'} field. Its veg is yours to pick.`);
     renderSigns();
     T.save();
   };
   const fieldActs = () => {
     const i = fieldNear();
     if (i < 0 || T.fieldOwners[i]) return [];
-    return [{ key: `field:${i}`, label: `🌱 Buy this field (${FIELD_PRICE} 🪙)`, onClick: () => buyField(i) }];
+    return [{ key: `field:${i}`, label: `Buy this field (${FIELD_PRICE} 🪙)`, onClick: () => buyField(i) }];
   };
   // Shared town: the host keeps who owns which
   const handleFarmNet = (from, d) => {
@@ -212,8 +212,8 @@ export function installTownFarming(T, ctx) {
     T.seeds -= 1;
     T.veg.push({ x: at.x, z: at.z, g: 0, w: 0 });
     T.feedLine(T.veg.length === 1
-      ? '🌱 Planted a seed. It\'ll grow a veg by tomorrow — or water it with the hose and it\'s ready in no time.'
-      : `🌱 Planted a seed (${T.seeds} left).`);
+      ? 'Planted a seed. It\'ll grow a veg by tomorrow — or water it with the hose and it\'s ready in no time.'
+      : `Planted a seed (${T.seeds} left).`);
   };
   const ripeVegNear = () => {
     const p = T.playerPos();
@@ -225,14 +225,14 @@ export function installTownFarming(T, ctx) {
     if (T.bagRoom() <= 0) { T.bagFullNote(); return; }
     T.gain('crops');
     T.veg = T.veg.filter((o) => o !== v);
-    T.feedLine(`🥕 +1 Veg you grew (${T.goods.crops})`);
+    T.feedLine(`+1 Veg you grew (${T.goods.crops})`);
   };
   const farmActs = () => {
     const out = [];
     if (T.hose?.watering) return out;
-    if (ripeVegNear()) out.push({ key: 'pickVeg', label: '🥕 Pick your veg', onClick: pickVeg });
+    if (ripeVegNear()) out.push({ key: 'pickVeg', label: 'Pick your veg', onClick: pickVeg });
     out.push(...fieldActs());
-    if (plantSpot()) out.push({ key: 'plant', label: `🌱 Plant a seed (${T.seeds})`, onClick: plant });
+    if (plantSpot()) out.push({ key: 'plant', label: `Plant a seed (${T.seeds})`, onClick: plant });
     return out;
   };
 
@@ -268,8 +268,8 @@ export function installTownFarming(T, ctx) {
       T.hose = { watering: false, dropAt: 0 };
       ctx.setPositionConstraint(hoseConstraint);
       T.feedLine(ctx.hasGyro()
-        ? '🚿 Got the hose. Point it with the phone and hold 💧 Water.'
-        : '🚿 Got the hose. Face the beds and hold 💧 Water (or F).');
+        ? 'Got the hose. Point it with the phone and hold Water.'
+        : 'Got the hose. Face the beds and hold Water (or F).');
       return true;
     },
     drop: ({ keepConstraint = false, quiet = false } = {}) => {
@@ -281,7 +281,7 @@ export function installTownFarming(T, ctx) {
         farm.hose.visible = false;
         farm.nozzle.visible = false;
       }
-      if (!quiet) T.feedLine(tapDistance() < HOSE_GRAB_DIST ? '🚿 Hose hung back on the tap.' : '🚿 The hose winds back onto its reel.');
+      if (!quiet) T.feedLine(tapDistance() < HOSE_GRAB_DIST ? 'Hose hung back on the tap.' : 'The hose winds back onto its reel.');
     },
   });
   const setWatering = (on) => {
@@ -408,7 +408,7 @@ export function installTownFarming(T, ctx) {
       }
       if (v.w > 0) v.w = Math.max(0, v.w - dt);
     }
-    if (ripeNow && T.simT - ripeNoteAt > 15) { ripeNoteAt = T.simT; T.feedLine('🥕 A veg you planted is ready — 🥕 Pick your veg.'); }
+    if (ripeNow && T.simT - ripeNoteAt > 15) { ripeNoteAt = T.simT; T.feedLine('A veg you planted is ready to pick.'); }
     // (meshes: one per planted seed)
     for (const [v, m] of farm.piles) {
       if (T.veg.includes(v)) continue;

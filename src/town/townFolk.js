@@ -213,7 +213,7 @@ export function installTownFolk(T, ctx) {
       if ((h >= 23 || h < 6) && !n.escort) {
         n.following = false;
         say(n, pickOf(FOLLOW_LINES.late));
-        T.feedLine(`🌙 ${firstName(n.name)} went home for the night.`);
+        T.feedLine(`${firstName(n.name)} went home for the night.`);
       } else {
         setTask(n, { type: 'follow', dur: Infinity });
         return;

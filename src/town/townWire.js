@@ -148,7 +148,7 @@ export function installTownWire(T, ctx) {
     }
     const byMe = !!killer && killer === T.myId();
     if (byMe && n.money >= 1) ctx.dropCoins(new THREE.Vector3(n.x, T.groundY(n) + 0.3, n.z), Math.min(3, 1 + Math.floor(n.money / 8)));
-    if (byMe || T.distToPlayer(n) < 60) T.feedLine(n.def.outlaw ? `💀 ${n.name} is down.` : `💀 ${n.name} the ${n.def.label} is dead.`);
+    if (byMe || T.distToPlayer(n) < 60) T.feedLine(n.def.outlaw ? `${n.name} is down.` : `${n.name} the ${n.def.label} is dead.`);
     if (!n.def.outlaw) T.gossip.push({ kind: 'murder', who: firstName(n.name), by: byMe ? 'player' : null, at: T.simT, fresh: true });
     if (byMe && !T.isOutlaw(n)) {
       T.crime('murder', n);
@@ -185,7 +185,7 @@ export function installTownWire(T, ctx) {
     if (!T.ready) {
       T.spawnTown(s, T.loadPersonal());
       placeFromDyn(s.dyn);
-      T.topPlace.textContent = `🏘️ ${TOWN_NAME} · 👥 ${T.net.playerCount()}`;
+      T.topPlace.textContent = `${TOWN_NAME} · ${T.net.playerCount()} online`;
       T.feedLine(`Welcome to ${TOWN_NAME}! ${T.net.playerCount() > 1 ? `${T.net.playerCount()} players are in town.` : 'Walk up to people to talk.'}`);
       return;
     }
@@ -207,7 +207,7 @@ export function installTownWire(T, ctx) {
         T.npcs.push(n);
         added = true;
         T.nextId = Math.max(T.nextId, p.id + 1);
-        T.feedLine(n.def.outlaw ? `💀 ${n.name} joined the bandits.` : `🧳 ${n.name} the ${n.def.label} moved to ${TOWN_NAME}.`);
+        T.feedLine(n.def.outlaw ? `${n.name} joined the bandits.` : `${n.name} the ${n.def.label} moved to ${TOWN_NAME}.`);
       }
       if (!T.mine(n) && n.alive) {
         if (Number.isFinite(p.money)) n.money = p.money;
@@ -369,8 +369,8 @@ export function installTownWire(T, ctx) {
       T.net.stop();
       T.netMode = 'off';
       T.spawnTown();
-      T.topPlace.textContent = `🏘️ ${TOWN_NAME} · 📴 just you`;
-      T.feedLine(`📴 No shared town (${why}) — this one's just yours.`);
+      T.topPlace.textContent = `${TOWN_NAME} · just you`;
+      T.feedLine(`No shared town (${why}) — this one's just yours.`);
       return;
     }
     // (the room's lookup failed: no need to wait out the timeout)
@@ -401,8 +401,8 @@ export function installTownWire(T, ctx) {
       // (lost the room: everyone's ours, a town of our own from here)
       becomeHost();
       T.netMode = 'off';
-      T.topPlace.textContent = `🏘️ ${TOWN_NAME}`;
-      T.feedLine('📴 Lost the connection — the town carries on, just you now.');
+      T.topPlace.textContent = `${TOWN_NAME}`;
+      T.feedLine('Lost the connection — the town carries on, just you now.');
       return;
     }
     if (!T.net.ready()) return;
@@ -450,7 +450,7 @@ export function installTownWire(T, ctx) {
   const netTick = () => {
     if (T.simT > T.netT.label) {
       T.netT.label = T.simT + 1;
-      T.topPlace.textContent = `🏘️ ${TOWN_NAME} · 👥 ${T.net.playerCount()}`;
+      T.topPlace.textContent = `${TOWN_NAME} · ${T.net.playerCount()} online`;
     }
     if (T.netMode === 'host') {
       if (T.simT > T.netT.send) {

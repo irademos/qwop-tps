@@ -17,7 +17,7 @@ export function installTownMissions(T, ctx) {
   const activeJobs = () => T.jobs.filter((j) => j.status === 'active');
   // (taken: being done, or done and waiting on the reward)
   const takenJobs = () => T.jobs.filter((j) => j.status === 'active' || j.status === 'done');
-  const rewardText = (r) => [r.coins ? `🪙 ${r.coins}` : null, r.attitude ? '🤝 goodwill' : null, r.item ? `🛡️ a ${r.item}` : null].filter(Boolean).join(' · ') || 'Their thanks';
+  const rewardText = (r) => [r.coins ? `${r.coins}` : null, r.attitude ? 'goodwill' : null, r.item ? `a ${r.item}` : null].filter(Boolean).join(' · ') || 'Their thanks';
   const townsfolkFor = (test) => T.npcs.filter((n) => n.alive && !n.def.law && !n.def.outlaw && !n.def.unhurt
     && n.role !== 'merchant' && !n.following && n.jailedUntil <= T.simT && test(n));
   // Seconds of town time until the clock next reads `h` o'clock
@@ -126,7 +126,7 @@ export function installTownMissions(T, ctx) {
       const why = g === 'wood' ? 'I need firewood for the cold nights' : g === 'fish' ? 'I\'m sick of veg — I\'d kill for some fish' : 'I need veg for a stew';
       return makeJob({
         kind: 'deliver', giverId: giver.id,
-        title: `Bring ${n} ${GOODS[g].emoji} to ${firstName(giver.name)}`,
+        title: `Bring ${n} ${GOODS[g].label.toLowerCase()} to ${firstName(giver.name)}`,
         desc: `${why}${T.market.stock[g] <= 0 ? ', and the market\'s sold out' : ''}. Could you bring me ${n} ${GOODS[g].emoji}?`,
         reward: { coins: Math.round(GOODS[g].base * n * 1.8) + 4, attitude: 0.2 }, data: { good: g, n, toId: giver.id },
       });
@@ -171,7 +171,7 @@ export function installTownMissions(T, ctx) {
       if (sheriff) sheriff.attitude = Math.max(-1, sheriff.attitude - 0.15);
     }
     if (giver) T.say(giver, j.shady ? 'Good. Quietly, now.' : 'Thank you! Come back when it\'s done.', { big: true });
-    T.feedLine(`📋 Job taken: ${j.title}`);
+    T.feedLine(`Job taken: ${j.title}`);
     T.introNote('job');
   };
   const dropJob = (j) => {
@@ -192,14 +192,14 @@ export function installTownMissions(T, ctx) {
       giver.attitude = Math.max(-1, giver.attitude - 0.05);
       T.say(giver, 'Oh. Never mind, then.', { big: true });
     }
-    T.feedLine(`📋 Dropped: ${j.title}`);
+    T.feedLine(`Dropped: ${j.title}`);
   };
   // A job's work is done: back to whoever gave it for the reward (paid at once if they're gone)
   const markDone = (j, text = null) => {
     const giver = npcById(j.giverId);
     if (!giver) { completeJob(j, { text }); return; }
     j.status = 'done';
-    T.feedLine(`✔ ${text ?? j.title} — see ${firstName(giver.name)} for your reward.`);
+    T.feedLine(`${text ?? j.title} — see ${firstName(giver.name)} for your reward.`);
     T.save();
   };
   // What a job was, as the giver remembers it
@@ -230,7 +230,7 @@ export function installTownMissions(T, ctx) {
     if (j.reward.item) ctx.grantItem(j.reward.item);
     if (j.reward.town) for (const n of T.npcs) if (n.alive && !n.def.outlaw) n.attitude = Math.min(1, n.attitude + j.reward.town);
     if (giver?.body && !T.jobTalk.isOpen()) T.say(giver, 'Thank you!', { big: true });
-    T.feedLine(text ?? `✅ ${j.title}${coins > 0 ? ` · +${coins} 🪙` : ''}`);
+    T.feedLine(text ?? `${j.title}${coins > 0 ? ` · +${coins} coins` : ''}`);
     // A chain goes on to its next step (or ends)
     const chain = j.chain && CHAINS.find((c) => c.id === j.chain.id);
     if (chain) {
@@ -240,7 +240,7 @@ export function installTownMissions(T, ctx) {
         if (next) {
           T.jobs.push(next);
           startJob(next);
-          T.feedLine(`📋 Next: ${next.title}`);
+          T.feedLine(`Next: ${next.title}`);
           T.save();
           return next;
         }
@@ -259,14 +259,14 @@ export function installTownMissions(T, ctx) {
     if (n.def.outlaw && byPlayer && T.isNight) T.noteNightKill(n);
     for (const j of [...T.jobs]) {
       if (j.kind === 'bounty' && j.data.targetId === n.id) {
-        if (j.status === 'active' && mine) markDone(j, `💰 ${n.name} is down`);
+        if (j.status === 'active' && mine) markDone(j, `${n.name} is down`);
         else if (j.status !== 'done') T.jobs = T.jobs.filter((x) => x !== j);
       } else if (j.kind === 'killBandits' && n.def.outlaw && j.status === 'active' && mine) {
         j.data.kills += 1;
         if (j.data.kills >= j.data.n) markDone(j);
       } else if (j.kind === 'nightWatch' && n.def.outlaw && j.status === 'active' && mine && T.isNight) {
         j.data.kills += 1;
-        if (j.data.kills >= j.data.n) markDone(j, '🌙 You kept the town safe tonight');
+        if (j.data.kills >= j.data.n) markDone(j, 'You kept the town safe tonight');
       } else if (j.kind === 'guardField' && (j.data.raiders ?? []).includes(n.id)) {
         // (checked in updateJobs: all raiders down)
       } else if (j.status === 'done' && n.id === j.giverId) {
@@ -274,7 +274,7 @@ export function installTownMissions(T, ctx) {
         completeJob(j);
       } else if ([j.giverId, j.data.toId, j.data.debtorId, j.data.creditorId, j.data.kidId].includes(n.id) && !n.def.outlaw) {
         dropJob(j);
-        if (j.status === 'active') T.feedLine(`✖ ${j.title}: ${firstName(n.name)} is dead.`);
+        if (j.status === 'active') T.feedLine(`${j.title}: ${firstName(n.name)} is dead.`);
       }
     }
   };
@@ -307,17 +307,17 @@ export function installTownMissions(T, ctx) {
     for (const j of activeJobs()) {
       const d = j.data;
       if (j.kind === 'deliver' && d.toId === n.id && T.goods[d.good] >= d.n) {
-        out.push({ key: `give:${j.id}`, label: `📦 Give ${d.n} ${GOODS[d.good].emoji}`, onClick: () => {
+        out.push({ key: `give:${j.id}`, label: `Give ${d.n} ${GOODS[d.good].emoji}`, onClick: () => {
           if (T.goods[d.good] < d.n) return;
           T.goods[d.good] -= d.n;
           T.renderGoods();
           completeJob(j);
         } });
       } else if (j.kind === 'debt' && d.debtorId === n.id) {
-        out.push({ key: `collect:${j.id}`, label: `💰 Collect ${d.amount}`, onClick: () => collectDebt(j, n) });
-        out.push({ key: `forgive:${j.id}`, label: '🤲 Let it go', onClick: () => forgiveDebt(j, n) });
+        out.push({ key: `collect:${j.id}`, label: `Collect ${d.amount}`, onClick: () => collectDebt(j, n) });
+        out.push({ key: `forgive:${j.id}`, label: 'Let it go', onClick: () => forgiveDebt(j, n) });
       } else if (j.kind === 'returnTo' && d.toId === n.id && T.strongboxHeld) {
-        out.push({ key: `return:${j.id}`, label: '📦 Hand over the strongbox', onClick: () => {
+        out.push({ key: `return:${j.id}`, label: 'Hand over the strongbox', onClick: () => {
           T.strongboxHeld = false;
           completeJob(j);
         } });
@@ -335,7 +335,7 @@ export function installTownMissions(T, ctx) {
     debtor.attitude = Math.max(-1, debtor.attitude - 0.3);
     T.remember(debtor, 'collected');
     T.say(debtor, paid < j.data.amount ? 'That\'s all I have…' : 'Fine. Take it.', { big: true });
-    markDone(j, `💰 Collected ${paid} for ${creditor ? firstName(creditor.name) : 'nobody'}`);
+    markDone(j, `Collected ${paid} for ${creditor ? firstName(creditor.name) : 'nobody'}`);
   };
   const forgiveDebt = (j, debtor) => {
     const creditor = npcById(j.data.creditorId);
@@ -343,7 +343,7 @@ export function installTownMissions(T, ctx) {
     T.remember(debtor, 'forgave');
     if (creditor) creditor.attitude = Math.max(-1, creditor.attitude - 0.2);
     T.say(debtor, 'Bless you! I won\'t forget it.', { big: true });
-    completeJob(j, { coins: 0, text: `🤲 You let ${firstName(debtor.name)}'s debt go.` });
+    completeJob(j, { coins: 0, text: `You let ${firstName(debtor.name)}'s debt go.` });
   };
   // Per-tick job upkeep: postings, raids, the lost kid, the tracker
   const updateJobs = () => {
@@ -365,16 +365,16 @@ export function installTownMissions(T, ctx) {
             free.push(n);
           }
           d.raiders = free.filter((n) => T.take(n)).slice(0, 2).map((n) => { T.startRaid(n, field, j.id); return n.id; });
-          T.feedLine('🌙 Raiders are heading for the field!');
+          T.feedLine('Raiders are heading for the field!');
         } else if (d.raidStarted && d.raiders.every((id) => !npcById(id) || npcById(id).jailedUntil > T.simT)) {
-          markDone(j, '🌾 The field is safe');
+          markDone(j, 'The field is safe');
         } else if (d.raidStarted && d.failed) {
           // (they got away: they'll be back tomorrow night)
           d.raidStarted = false;
           d.failed = false;
           d.raiders = [];
           d.raidAt = T.simT + secondsUntilHour(RAID_HOUR);
-          T.feedLine('🌙 They\'ll be back tomorrow night.');
+          T.feedLine('They\'ll be back tomorrow night.');
         }
       } else if (j.kind === 'findKid') {
         const kid = npcById(d.kidId);
@@ -394,7 +394,7 @@ export function installTownMissions(T, ctx) {
           kid.task = null;
           for (const f of T.family(kid)) f.attitude = Math.min(1, f.attitude + 0.5);
           T.say(kid, 'Home! Thank you!', { big: true });
-          markDone(j, `🏠 ${firstName(kid.name)} is home`);
+          markDone(j, `${firstName(kid.name)} is home`);
         } else if (d.found && !kid.following && kid.fear <= 0 && kid.jailedUntil <= T.simT && T.take(kid)) {
           // (walked home with the player, not on their own: whatever pulled them away — a scare,
           // the evening fire, bedtime — they come back to the player)
@@ -416,7 +416,7 @@ export function installTownMissions(T, ctx) {
     const who = (id) => (npcById(id) ? firstName(npcById(id).name) : '?');
     if (j.status === 'done') return `Back to ${who(j.giverId)} for your reward`;
     switch (j.kind) {
-      case 'deliver': return `${Math.min(T.goods[d.good], d.n)} / ${d.n} ${GOODS[d.good].emoji} → ${who(d.toId)}`;
+      case 'deliver': return `${Math.min(T.goods[d.good], d.n)} / ${d.n} ${GOODS[d.good].label.toLowerCase()} → ${who(d.toId)}`;
       case 'bounty': return 'Find them near the bandit camp';
       case 'killBandits': return `${d.kills} / ${d.n} bandits`;
       case 'nightWatch': return T.isNight ? `${d.kills} / ${d.n} bandits — they're in town!` : `${d.kills} / ${d.n} bandits · tonight from ${NIGHT_RAID_HOURS[0]}:00`;
@@ -493,7 +493,7 @@ export function installTownMissions(T, ctx) {
     T.strongboxHeld = true;
     if (T.standoffGang().length) T.campFightAll();
     T.layout.props.strongbox.visible = false;
-    T.feedLine('📦 You have the strongbox!');
+    T.feedLine('You have the strongbox!');
     const P = T.layout.places;
     for (const n of T.npcs) {
       if (n.alive && n.def.outlaw && !n.fighter && n.jailedUntil <= T.simT && dist2(n.x, n.z, P.camp.x, P.camp.z) < 20) {
@@ -525,11 +525,11 @@ export function installTownMissions(T, ctx) {
       };
       T.jobTalk.open({
         who, sub: j.title, text: lines[j.kind] ?? 'You did it! Here, this is yours.', reward: `Reward: ${reward}`,
-        choices: [{ label: '🪙 Take the reward', primary: true, onClick: () => {
+        choices: [{ label: 'Take the reward', primary: true, onClick: () => {
           if (j.kind === 'debt') T.npcMoney(n, Math.max(0, (j.data.collected ?? 0) - j.reward.coins));
           const next = completeJob(j);
           if (next && next.giverId === n.id) {
-            T.jobTalk.open({ who, sub: next.title, text: next.desc, choices: [{ label: '👍 On my way', primary: true }] });
+            T.jobTalk.open({ who, sub: next.title, text: next.desc, choices: [{ label: 'On my way', primary: true }] });
           }
         } }],
       });
@@ -541,7 +541,7 @@ export function installTownMissions(T, ctx) {
         who, sub: j.title, text: j.desc, reward: `Reward: ${rewardText(j.reward)}`,
         choices: full
           ? [{ label: `You have ${MAX_ACTIVE_JOBS} jobs on — later`, primary: false }]
-          : [{ label: '✅ I\'ll do it', primary: true, onClick: () => acceptJob(j) }, { label: 'Not right now', primary: false }],
+          : [{ label: 'I\'ll do it', primary: true, onClick: () => acceptJob(j) }, { label: 'Not right now', primary: false }],
       });
       return;
     }
@@ -549,17 +549,17 @@ export function installTownMissions(T, ctx) {
     const d = j.data;
     const choices = [];
     if (j.kind === 'deliver' && d.toId === n.id && T.goods[d.good] >= d.n) {
-      choices.push({ label: `📦 Give ${d.n} ${GOODS[d.good].emoji}`, primary: true, onClick: () => {
+      choices.push({ label: `Give ${d.n} ${GOODS[d.good].emoji}`, primary: true, onClick: () => {
         if (T.goods[d.good] < d.n) return;
         T.goods[d.good] -= d.n;
         T.renderGoods();
         completeJob(j);
       } });
     } else if (j.kind === 'returnTo' && d.toId === n.id && T.strongboxHeld) {
-      choices.push({ label: '📦 Hand over the strongbox', primary: true, onClick: () => { T.strongboxHeld = false; completeJob(j); } });
+      choices.push({ label: 'Hand over the strongbox', primary: true, onClick: () => { T.strongboxHeld = false; completeJob(j); } });
     }
-    choices.push({ label: '👍 I\'m on it', primary: !choices.length });
-    if (!j.chain || j.chain.step === 0) choices.push({ label: '✖ Drop the job', primary: false, onClick: () => abandonJob(j) });
+    choices.push({ label: 'I\'m on it', primary: !choices.length });
+    if (!j.chain || j.chain.step === 0) choices.push({ label: 'Drop the job', primary: false, onClick: () => abandonJob(j) });
     T.jobTalk.open({ who, sub: j.title, text: `How's it going? (${jobProgress(j)})`, choices });
   };
   // Saved jobs back (raids are re-planned for the next night)

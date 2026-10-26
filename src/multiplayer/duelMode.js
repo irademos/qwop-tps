@@ -73,8 +73,8 @@ export function createDuelMode(ctx) {
     { mode: 'ffa', icon: '🎯', title: 'Free For All', desc: '10 fighters · everyone for themselves' }
   ];
   const BATTLE_RULES = [
-    { rule: 'survival', label: '🛡️ Survival' },
-    { rule: 'kills', label: '💀 Most Kills' }
+    { rule: 'survival', label: 'Survival' },
+    { rule: 'kills', label: 'Most Kills' }
   ];
   BATTLE_MODES.forEach(({ mode, icon, title, desc }) => {
     const card = el('div', 'duel-mode-card');
@@ -92,14 +92,14 @@ export function createDuelMode(ctx) {
     lobbyModes.append(card);
   });
   const lobbyActions = el('div', 'duel-lobby-actions');
-  const backBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
-  const leaderboardBtn = el('button', 'arcade-button arcade-secondary', '🏆 Leaderboard');
+  const backBtn = el('button', 'arcade-button arcade-secondary', 'Back');
+  const leaderboardBtn = el('button', 'arcade-button arcade-secondary', 'Leaderboard');
   leaderboardBtn.addEventListener('click', () => ctx.openLeaderboard?.());
   lobbyActions.append(backBtn, leaderboardBtn);
   const prompt = el('div', 'duel-prompt hidden');
   const promptText = el('div', 'duel-prompt-text');
   const promptActions = el('div', 'duel-lobby-actions');
-  const acceptBtn = el('button', 'arcade-button', '⚔️ Accept');
+  const acceptBtn = el('button', 'arcade-button', 'Accept');
   const declineBtn = el('button', 'arcade-button arcade-secondary', 'Decline');
   const cancelBtn = el('button', 'arcade-button arcade-secondary', 'Cancel');
   promptActions.append(acceptBtn, declineBtn, cancelBtn);
@@ -176,7 +176,7 @@ export function createDuelMode(ctx) {
       const badge = el('span', `duel-lobby-badge duel-status-${status}`, STATUS_LABELS[status]);
       row.append(name, badge);
       if (!isSelf) {
-        const btn = el('button', 'duel-challenge-btn', outgoing?.to === peerId ? 'Waiting…' : '⚔️ Challenge');
+        const btn = el('button', 'duel-challenge-btn', outgoing?.to === peerId ? 'Waiting…' : 'Challenge');
         btn.disabled = status !== 'lobby' || !!outgoing || !!incoming;
         btn.addEventListener('click', () => challenge(peerId, peer.name));
         row.append(btn);

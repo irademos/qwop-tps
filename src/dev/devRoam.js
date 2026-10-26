@@ -72,9 +72,9 @@ export function createDevRoam(ctx) {
 
   // ── DOM ──
   const panel = el('div', 'dev-roam ui-panel hidden');
-  const title = el('div', 'dev-roam-title', '🧭 Free Roam (dev)');
+  const title = el('div', 'dev-roam-title', 'Free Roam (dev)');
   const coords = el('div', 'dev-roam-coords');
-  const copyLocBtn = el('button', 'ui-btn ui-btn-secondary', '📋 Copy location');
+  const copyLocBtn = el('button', 'ui-btn ui-btn-secondary', 'Copy location');
 
   const routeTitle = el('div', 'dev-roam-subtitle', 'Showdown stage route');
   const stageRow = el('div', 'dev-roam-row');
@@ -84,15 +84,15 @@ export function createDevRoam(ctx) {
   stageRow.append(prevBtn, stageLabel, nextBtn);
   const hint = el('div', 'dev-roam-hint');
   const editRow = el('div', 'dev-roam-row');
-  const addBtn = el('button', 'ui-btn', '➕ Add point');
-  const undoBtn = el('button', 'ui-btn ui-btn-secondary', '↩ Undo');
-  const clearBtn = el('button', 'ui-btn ui-btn-secondary', '🗑 Clear');
+  const addBtn = el('button', 'ui-btn', 'Add point');
+  const undoBtn = el('button', 'ui-btn ui-btn-secondary', 'Undo');
+  const clearBtn = el('button', 'ui-btn ui-btn-secondary', 'Clear');
   editRow.append(addBtn, undoBtn, clearBtn);
   const copyRow = el('div', 'dev-roam-row');
-  const goBtn = el('button', 'ui-btn ui-btn-secondary', '📍 Go to start');
-  const copyAllBtn = el('button', 'ui-btn ui-btn-secondary', '📋 Copy all routes');
+  const goBtn = el('button', 'ui-btn ui-btn-secondary', 'Go to start');
+  const copyAllBtn = el('button', 'ui-btn ui-btn-secondary', 'Copy all routes');
   copyRow.append(goBtn, copyAllBtn);
-  const exitBtn = el('button', 'ui-btn ui-btn-ghost', '⬅ Exit Free Roam');
+  const exitBtn = el('button', 'ui-btn ui-btn-ghost', 'Exit Free Roam');
   const output = el('textarea', 'dev-roam-output hidden');
   output.readOnly = true;
   panel.append(title, coords, copyLocBtn, routeTitle, stageRow, hint, editRow, copyRow, output, exitBtn);
@@ -218,13 +218,13 @@ export function createDevRoam(ctx) {
   copyAllBtn.addEventListener('click', async () => {
     const text = formatRoutes(routes);
     const ok = await copyText(text);
-    flash(copyAllBtn, ok ? '✅ Copied!' : '❌ Copy failed');
+    flash(copyAllBtn, ok ? 'Copied!' : 'Copy failed');
     if (!ok) { output.value = text; output.classList.remove('hidden'); }
   });
   copyLocBtn.addEventListener('click', async () => {
     const text = JSON.stringify(ctx.getPlayerPose());
     const ok = await copyText(text);
-    flash(copyLocBtn, ok ? '✅ Copied!' : '❌ Copy failed');
+    flash(copyLocBtn, ok ? 'Copied!' : 'Copy failed');
     if (!ok) { output.value = text; output.classList.remove('hidden'); }
   });
   exitBtn.addEventListener('click', () => ctx.onExit());

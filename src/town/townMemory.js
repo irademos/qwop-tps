@@ -109,9 +109,9 @@ export function installTownMemory(T, ctx) {
     const tier = reputationTier(reputation());
     if (tier.title === repTitle) return;
     // (the first reading on arrival isn't news)
-    if (repTitle) T.feedLine(`📣 The town now sees you as: ${tier.emoji} ${tier.title}`);
+    if (repTitle) T.feedLine(`The town now sees you as: ${tier.title}`);
     repTitle = tier.title;
-    repEl.replaceChildren(el('span', null, tier.emoji), el('span', 'town-top-rep-title', ` ${tier.title}`));
+    repEl.replaceChildren(el('span', 'town-top-rep-title', tier.title));
     repEl.title = 'What the town thinks of you';
   };
 

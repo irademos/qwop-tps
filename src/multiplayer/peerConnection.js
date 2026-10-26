@@ -248,7 +248,7 @@ export class Multiplayer {
     this.isHost = (hostPeerId === this.id);
 
     if (this.isHost && this.lastHostLogId !== this.id && isVerboseNetDebugEnabled()) {
-      debugNetLog("👑 I am the host player");
+      debugNetLog("I am the host player");
       this.lastHostLogId = this.id;
     }
     if (previousHostId !== hostPeerId && hostPeerId && isVerboseNetDebugEnabled()) {
@@ -616,10 +616,10 @@ export class Multiplayer {
         const stats = await pc.getStats();
         stats.forEach(report => {
           if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-            debugNetLog(`🎯 Connected to peer ${conn.peer}`);
+            debugNetLog(`Connected to peer ${conn.peer}`);
             debugNetLog('Selected candidate pair:');
-            debugNetLog(`🔹 Local: ${report.localCandidateId}`);
-            debugNetLog(`🔸 Remote: ${report.remoteCandidateId}`);
+            debugNetLog(`Local: ${report.localCandidateId}`);
+            debugNetLog(`Remote: ${report.remoteCandidateId}`);
           }
         });
       } catch (err) {

@@ -237,7 +237,7 @@ export function updateProjectiles({
           } else if (nextHealth > 0 && player.isDead) {
             player.isDead = false;
           }
-          console.log(`💥 Hit player: ${id}, Health: ${player.health}`);
+          console.log(`Hit player: ${id}, Health: ${player.health}`);
         }
         removeProjectile(i);
         removed = true;

@@ -44,9 +44,9 @@ export function installTownGrab(T, ctx) {
   };
   // One button: Drop while something's in hand, else Grab the nearest (empty hands only)
   const grabActs = () => {
-    if (T.held) return [{ key: 'drop', label: `✋ Drop ${T.held.name}`, onClick: () => dropHeld() }];
+    if (T.held) return [{ key: 'drop', label: `Drop ${T.held.name}`, onClick: () => dropHeld() }];
     const g = canGrab() ? nearestGrabbable() : null;
-    return g ? [{ key: 'grab', label: `✋ Grab ${g.name}`, onClick: () => grab(g) }] : [];
+    return g ? [{ key: 'grab', label: `Grab ${g.name}`, onClick: () => grab(g) }] : [];
   };
 
   Object.assign(T, {

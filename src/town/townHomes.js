@@ -121,7 +121,7 @@ export function installTownHomes(T, ctx) {
     n.alive = false;
     n.dying = null;
     T.npcs = T.npcs.filter((m) => m !== n);
-    return `📦 ${n.name} the ${n.def.label} packed up and left — ${why}.`;
+    return `${n.name} the ${n.def.label} packed up and left — ${why}.`;
   };
   // A house for a player (the town's authority only: a town of your own, or the host). An
   // empty one with a room, else the least needed townsperson in a house with a room moves out
@@ -216,7 +216,7 @@ export function installTownHomes(T, ctx) {
     if (extraCoins > 0) {
       ctx.addCoins(-extraCoins);
       T.store.coins += extraCoins;
-      T.feedLine(`👛 ${extraCoins} 🪙 didn't fit in your wallet — they're in your chest at home.`);
+      T.feedLine(`${extraCoins} coins didn't fit in your wallet — they're in your chest at home.`);
     }
     let extra = bagCount() - BAG_MAX;
     for (const g of GOOD_IDS) {
@@ -228,7 +228,7 @@ export function installTownHomes(T, ctx) {
     }
     T.renderGoods();
     const i = myHome();
-    if (i >= 0 && !T.houses[i].b) T.feedLine(`🏠 A house is kept for you — buy it at its door (${HOUSE_PRICE} 🪙) to keep your things there.`);
+    if (i >= 0 && !T.houses[i].b) T.feedLine(`A house is kept for you — buy it at its door (${HOUSE_PRICE} coins) to keep your things there.`);
   };
 
   // ── Shared town: the houses over the wire ──
@@ -255,8 +255,8 @@ export function installTownHomes(T, ctx) {
     T.houses = cleanHouses(d.h);
     for (const line of Array.isArray(d.moved) ? d.moved.slice(0, 4) : []) if (typeof line === 'string') T.feedLine(line.slice(0, 160));
     const i = myHome();
-    if (i >= 0 && before < 0 && !T.houses[i].b) T.feedLine(`🏠 A house is kept for you — buy it at its door (${HOUSE_PRICE} 🪙).`);
-    if (i < 0 && before < 0 && T.ready) T.feedLine('🏠 No house free in town for you right now.');
+    if (i >= 0 && before < 0 && !T.houses[i].b) T.feedLine(`A house is kept for you — buy it at its door (${HOUSE_PRICE} coins).`);
+    if (i < 0 && before < 0 && T.ready) T.feedLine('No house free in town for you right now.');
   };
   const handleHomesNet = (from, d) => {
     if (d.op === 'houses') { if (from === T.net.hostId() && T.netMode === 'client') onHouses(d); return true; }
@@ -294,16 +294,16 @@ export function installTownHomes(T, ctx) {
   const lockedNote = (key, a) => {
     if (T.simT - (noteAt[key] ?? -1e9) < 4) return;
     noteAt[key] = T.simT;
-    if (a.why === 'forSale') T.feedLine(`🏠 Your house — for sale, ${HOUSE_PRICE} 🪙. Buy it here at the door.`);
-    else if (a.why === 'player') T.feedLine(`🔒 ${a.owner.n || 'Another player'}'s home — locked.`);
-    else if (a.why === 'kept') T.feedLine(`🔒 This house is kept for ${a.owner.n || 'another player'}.`);
-    else T.feedLine(`🔒 ${whose(key)} locked for the night. Knock?`);
+    if (a.why === 'forSale') T.feedLine(`Your house — for sale, ${HOUSE_PRICE} coins. Buy it here at the door.`);
+    else if (a.why === 'player') T.feedLine(`${a.owner.n || 'Another player'}'s home — locked.`);
+    else if (a.why === 'kept') T.feedLine(`This house is kept for ${a.owner.n || 'another player'}.`);
+    else T.feedLine(`${whose(key)} locked for the night. Knock?`);
   };
   const knock = (key) => {
     if (T.knock || T.simT - (T.knockedAt[key] ?? -1e9) < KNOCK_AGAIN_S) return;
     T.knock = { key, at: T.simT };
     T.knockedAt[key] = T.simT;
-    T.feedLine('✊ Knock knock…');
+    T.feedLine('Knock knock…');
     T.actsAt = 0;
   };
   // Someone at home answers the door
@@ -311,19 +311,19 @@ export function installTownHomes(T, ctx) {
     const i = homeOfRoom(key);
     const home = residents(i).filter((n) => !n.fighter && !(n.jailedUntil > T.simT)
       && (n.inside || T.rooms.roomAt(n.x, n.z) === key));
-    if (!home.length) { T.feedLine('🚪 No answer — nobody\'s home.'); return; }
+    if (!home.length) { T.feedLine('No answer — nobody\'s home.'); return; }
     const n = home.reduce((a, b) => (b.attitude > a.attitude ? b : a));
     const first = firstName(n.name);
     const job = T.jobs.some((j) => j.giverId === n.id && (j.status === 'active' || j.status === 'done'));
     if (job || n.following || n.attitude >= FRIEND_ATTITUDE) {
       T.invites[key] = T.simT + INVITE_S;
-      T.feedLine(`🚪 ${first}: “${pickOf(job ? JOB_IN_LINES : COME_IN_LINES)}”`);
+      T.feedLine(`${first}: “${pickOf(job ? JOB_IN_LINES : COME_IN_LINES)}”`);
       return;
     }
-    if (n.vendetta || n.attitude < GRUDGE_ATTITUDE) { T.feedLine('🚪 No answer… but someone\'s moving about in there.'); return; }
+    if (n.vendetta || n.attitude < GRUDGE_ATTITUDE) { T.feedLine('No answer… but someone\'s moving about in there.'); return; }
     const asleep = n.task?.type === 'sleep';
     if (Math.random() < (asleep ? 0.45 : 0.65) && comeOut(n, key)) return;
-    T.feedLine(asleep ? '💤 No answer. Snoring, from somewhere inside.' : `🚪 No answer. ${first} must be busy.`);
+    T.feedLine(asleep ? 'No answer. Snoring, from somewhere inside.' : `No answer. ${first} must be busy.`);
   };
   // They come out to the door (talk to them there); back in after a while (decide)
   const comeOut = (n, key) => {
@@ -340,7 +340,7 @@ export function installTownHomes(T, ctx) {
     // (woken for this)
     n.attitude = Math.max(-1, n.attitude - 0.05);
     T.say(n, pickOf(COME_OUT_LINES), { big: true });
-    T.feedLine(`🚪 ${firstName(n.name)} came to the door.`);
+    T.feedLine(`${firstName(n.name)} came to the door.`);
     return true;
   };
   // A lock-pick at a locked door: the lockpick minigame, the pick used up either way; in, it's a
@@ -352,11 +352,11 @@ export function installTownHomes(T, ctx) {
     T.actsAt = 0;
     T.lockpick.start((success) => {
       T.doorPick = null;
-      if (!success) { T.feedLine('🔧 Snap — the lock-pick broke.'); T.save(); return; }
+      if (!success) { T.feedLine('Snap — the lock-pick broke.'); T.save(); return; }
       const victim = residents(homeOfRoom(key))[0] ?? null;
       T.crime('theft', victim);
-      if (T.law.stars > 0) { T.feedLine('🔧 The lock gave — but you were seen.'); T.save(); return; }
-      T.feedLine('🔓 Click. You slip inside.');
+      if (T.law.stars > 0) { T.feedLine('The lock gave — but you were seen.'); T.save(); return; }
+      T.feedLine('Click. You slip inside.');
       T.enterRoom(key, { forced: true });
       T.save();
     });
@@ -365,14 +365,14 @@ export function installTownHomes(T, ctx) {
     const i = myHome();
     const h = T.houses[i];
     if (!h || h.b) return;
-    if (ctx.getCoins() < HOUSE_PRICE) { T.feedLine(`🏠 You need ${HOUSE_PRICE} 🪙 for the house.`); return; }
+    if (ctx.getCoins() < HOUSE_PRICE) { T.feedLine(`You need ${HOUSE_PRICE} coins for the house.`); return; }
     ctx.addCoins(-HOUSE_PRICE);
     h.b = true;
     T.homeBought = true;
     if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'buyHome', k: myKey() });
     broadcastHouses();
     ctx.showBanner('HOME SWEET HOME', 'Your things are safe in the chest inside', 2600);
-    T.feedLine('🏠 The house is yours. Keep what doesn\'t fit in your bag in the chest.');
+    T.feedLine('The house is yours. Keep what doesn\'t fit in your bag in the chest.');
     T.actsAt = 0;
     T.save();
   };
@@ -384,10 +384,10 @@ export function installTownHomes(T, ctx) {
   const bagFullNote = () => {
     if (T.simT - fullNoteAt < 5) return;
     fullNoteAt = T.simT;
-    T.feedLine(`🎒 Your bag's full (${BAG_MAX}) — sell some, or keep it in your chest at home.`);
+    T.feedLine(`Your bag's full (${BAG_MAX}) — sell some, or keep it in your chest at home.`);
   };
   const chestModel = () => ({
-    title: '📦 Your chest',
+    title: 'Your chest',
     wallet: ctx.getCoins(),
     walletMax: WALLET_MAX,
     bag: bagCount(),
@@ -424,7 +424,7 @@ export function installTownHomes(T, ctx) {
   const openChest = () => {
     const i = homeOfRoom(T.inRoom);
     const h = T.houses[i];
-    if (!h || h.k !== myKey()) { T.feedLine(`🔒 ${h?.n ? `${h.n}'s` : 'Their'} chest is locked tight.`); return; }
+    if (!h || h.k !== myKey()) { T.feedLine(`${h?.n ? `${h.n}'s` : 'Their'} chest is locked tight.`); return; }
     storage.open(chestModel());
   };
 
@@ -437,15 +437,15 @@ export function installTownHomes(T, ctx) {
     const a = doorAccess(key);
     if (a.open) return [];
     const out = [];
-    if (a.why === 'forSale') out.push({ key: 'buyhouse', label: `🏠 Buy house · ${HOUSE_PRICE} 🪙`, onClick: buyHouse });
+    if (a.why === 'forSale') out.push({ key: 'buyhouse', label: `Buy house · ${HOUSE_PRICE} 🪙`, onClick: buyHouse });
     if (a.why === 'night' && !T.knock && T.simT - (T.knockedAt[key] ?? -1e9) >= KNOCK_AGAIN_S) {
-      out.push({ key: `knock:${key}`, label: '✊ Knock', onClick: () => knock(key) });
+      out.push({ key: `knock:${key}`, label: 'Knock', onClick: () => knock(key) });
     }
-    if (a.why !== 'forSale' && T.lockpicks > 0) out.push({ key: `lockpick:${key}`, label: `🔧 Pick the lock (${T.lockpicks})`, onClick: () => pickDoor(key) });
+    if (a.why !== 'forSale' && T.lockpicks > 0) out.push({ key: `lockpick:${key}`, label: `Pick the lock (${T.lockpicks})`, onClick: () => pickDoor(key) });
     return out;
   };
   // Inside a home, by its chest
-  const chestActs = () => (atChest() && !storage.isOpen() ? [{ key: 'chest', label: '📦 Chest', onClick: openChest }] : []);
+  const chestActs = () => (atChest() && !storage.isOpen() ? [{ key: 'chest', label: 'Chest', onClick: openChest }] : []);
 
   // In the player's own home, by the bed: sleep till night / till morning (the clock jumps — not
   // in a shared town, whose clock is everyone's — and the player wakes up rested, at full health)
@@ -457,7 +457,7 @@ export function installTownHomes(T, ctx) {
   };
   const sleepInBed = (untilH) => {
     if (T.sequence || !atBed()) return;
-    if (T.law.stars > 0) { T.feedLine('😬 Too wound up to sleep with the guards after you.'); return; }
+    if (T.law.stars > 0) { T.feedLine('Too wound up to sleep with the guards after you.'); return; }
     const token = {};
     T.sequence = token;
     T.storage.close();
@@ -468,8 +468,8 @@ export function installTownHomes(T, ctx) {
       if (!shared) T.advanceClock(((untilH - T.hour() + 24) % 24 || 24) * 60);
       const { health, max } = ctx.getHealth();
       if (max > health) ctx.heal(max - health);
-      T.feedLine(shared ? '😴 You nap a while and wake up rested. (The town\'s clock is everyone\'s — it didn\'t wait.)'
-        : untilH === WAKE_HOUR ? '☀️ Good morning! You wake up rested.' : '🌙 You wake up as night falls, rested.');
+      T.feedLine(shared ? 'You nap a while and wake up rested. (The town\'s clock is everyone\'s — it didn\'t wait.)'
+        : untilH === WAKE_HOUR ? 'Good morning! You wake up rested.' : 'You wake up as night falls, rested.');
       T.save();
       setTimeout(() => {
         if (T.sequence === token) T.sequence = null;
@@ -483,8 +483,8 @@ export function installTownHomes(T, ctx) {
     const out = [];
     const h = T.hour();
     // (till night only by day — from evening on, it's till morning)
-    if (h >= WAKE_HOUR && h < NIGHT_FROM_H - 0.5) out.push({ key: 'sleepnight', label: '🌙 Sleep till night', onClick: () => sleepInBed(NIGHT_FROM_H) });
-    out.push({ key: 'sleepmorning', label: '☀️ Sleep till morning', onClick: () => sleepInBed(WAKE_HOUR) });
+    if (h >= WAKE_HOUR && h < NIGHT_FROM_H - 0.5) out.push({ key: 'sleepnight', label: 'Sleep till night', onClick: () => sleepInBed(NIGHT_FROM_H) });
+    out.push({ key: 'sleepmorning', label: 'Sleep till morning', onClick: () => sleepInBed(WAKE_HOUR) });
     return out;
   };
 
@@ -499,7 +499,7 @@ export function installTownHomes(T, ctx) {
     }
     if (T.doorPick && T.lockpick.isOpen() && T.nearDoor(DOOR_ACT_DIST + 1) !== T.doorPick) {
       T.lockpick.stop();
-      T.feedLine('🔧 You walked off — the lock-pick snapped in the lock.');
+      T.feedLine('You walked off — the lock-pick snapped in the lock.');
     }
     if (T.doorPick && !T.lockpick.isOpen()) T.doorPick = null;
     if (storage.isOpen() && !atChest()) storage.close();
@@ -509,7 +509,7 @@ export function installTownHomes(T, ctx) {
   const updateSign = () => {
     const i = myHome();
     const r = i >= 0 ? P().rooms[roomOf(i)] : null;
-    const text = !r ? '' : T.houses[i].b ? '🏠 Home' : `🏠 For sale · ${HOUSE_PRICE} 🪙`;
+    const text = !r ? '' : T.houses[i].b ? 'Home' : `For sale · ${HOUSE_PRICE} 🪙`;
     if (text === signText) return;
     signText = text;
     if (sign) { sign.parent?.remove(sign); sign.material.map?.dispose(); sign.material.dispose(); sign = null; }
