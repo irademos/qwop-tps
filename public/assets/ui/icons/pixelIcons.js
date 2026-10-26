@@ -1,18 +1,19 @@
-// Pixel icons in place of emoji — one sheet (pixel-icons.png: 16 × 22 cells of 32 px), shared by
-// the game (index.html) and the phone controller (phone-sword.html) as a plain script.
+// Icons in place of emoji — two sheets: pixel-icons.png (pixel art, 16 × 22 cells of 32 px) and
+// painted-icons.png (painted, 7 × 5 cells of 96 px; where both have one, the painted one is used) —
+// shared by the game (index.html) and the phone controller (phone-sword.html) as a plain script.
 //
 // Every emoji in ICONS shown anywhere in the page's DOM is drawn as its icon: a MutationObserver
 // wraps each one in a <px-icon> whose text stays the emoji (transparent), so textContent — and code
 // comparing it — is unchanged. Canvas text (3D signs / markers) goes through
 // window.pixelIcons.drawText / measureText (makeTextSprite in src/village/villageMode.js).
-// An emoji not in ICONS stays an emoji. To add one: its cell [row, column] in the sheet below.
+// An emoji not in either list stays an emoji. To add one: its cell [row, column] in its sheet's list.
 (() => {
-  const SHEET_URL = '/assets/ui/icons/pixel-icons.png';
-  const COLS = 16;
-  const ROWS = 22;
-  const CELL = 32;
-  // emoji → [row, column]
-  const ICONS = {
+  const SHEETS = [
+    { url: '/assets/ui/icons/pixel-icons.png', cols: 16, rows: 22, cell: 32, pixelated: true },
+    { url: '/assets/ui/icons/painted-icons.png', cols: 7, rows: 5, cell: 96, pixelated: false },
+  ];
+  // emoji → [row, column] in pixel-icons.png
+  const PIXEL = {
     '💀': [0, 0], '☠': [0, 0], '👹': [0, 4], '✨': [0, 5], '🌟': [0, 5], '❤': [0, 6], '💖': [0, 6], '💕': [0, 6],
     '😴': [0, 7], '💤': [0, 7], '⚡': [0, 8], '💧': [0, 10], '🚿': [0, 10], '💦': [0, 10],
     '💪': [1, 4],
@@ -44,6 +45,19 @@
     '🛒': [20, 0], '🧺': [20, 0],
     '🌅': [21, 7], '☀': [21, 8], '🌄': [21, 9], '🌙': [21, 10], '❄': [21, 11],
   };
+  // emoji → [row, column] in painted-icons.png (wins over PIXEL)
+  const PAINTED = {
+    '🛶': [0, 0], '🔫': [0, 1], '🏠': [0, 2], '🏡': [0, 2], '🏘': [0, 2], '❗': [0, 3], '❕': [0, 3], '❓': [0, 4], '❔': [0, 4],
+    '📍': [0, 5], '🧝': [0, 6],
+    '🧔': [1, 0], '😈': [1, 1], '🧑‍🌾': [1, 2], '👻': [1, 3], '🔒': [1, 4], '🔐': [1, 4], '🤝': [1, 5], '🌊': [1, 6],
+    '⚙': [2, 0], '🎒': [2, 1], '🔥': [2, 2], '🌳': [2, 3], '⛰': [2, 4], '🏔': [2, 4], '📦': [2, 5], '🎁': [2, 5], '🧭': [2, 6],
+    '⭐': [3, 0], '❤': [3, 1], '💖': [3, 1], '💕': [3, 1], '🗡': [3, 2], '🛡': [3, 3], '🏆': [3, 4], '🏅': [3, 4], '🪙': [3, 5], '🐾': [3, 6],
+    '💬': [4, 0], '🗨': [4, 0], '🗺': [4, 1], '🪝': [4, 2], '🔧': [4, 3], '🛠': [4, 3], '⛺': [4, 4], '🏕': [4, 4], '🌲': [4, 5],
+    '📖': [4, 6], '📕': [4, 6],
+  };
+  const ICONS = {};
+  for (const [e, rc] of Object.entries(PIXEL)) ICONS[e] = [...rc, 0];
+  for (const [e, rc] of Object.entries(PAINTED)) ICONS[e] = [...rc, 1];
   const VS16 = '️';
   const keys = Object.keys(ICONS).sort((a, b) => b.length - a.length);
   const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -67,19 +81,21 @@ px-icon {
   font-size: inherit;
   line-height: 1.3em;
   white-space: nowrap;
-  background: url('${SHEET_URL}') 0 0 / ${COLS * 100}% ${ROWS * 100}% no-repeat;
-  image-rendering: pixelated;
+  background: no-repeat 0 0;
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
   user-select: none;
   pointer-events: none;
-}`;
+}
+${SHEETS.map((sh, i) => `px-icon[s="${i}"] { background-image: url('${sh.url}'); background-size: ${sh.cols * 100}% ${sh.rows * 100}%;${sh.pixelated ? ' image-rendering: pixelated;' : ''} }`).join('\n')}`;
   document.head.append(style);
 
   const SKIP = 'px-icon, script, style, textarea, input, select, option, [data-no-icons]';
   const iconNode = (emoji) => {
-    const [r, c] = cellOf(emoji);
+    const [r, c, i] = cellOf(emoji);
+    const sh = SHEETS[i];
     const node = document.createElement('px-icon');
-    node.style.backgroundPosition = `${(c / (COLS - 1)) * 100}% ${(r / (ROWS - 1)) * 100}%`;
+    node.setAttribute('s', String(i));
+    node.style.backgroundPosition = `${(c / (sh.cols - 1)) * 100}% ${(r / (sh.rows - 1)) * 100}%`;
     node.textContent = emoji;
     return node;
   };
@@ -121,11 +137,11 @@ px-icon {
   else document.addEventListener('DOMContentLoaded', start, { once: true });
 
   // ── Canvas ──
-  const sheet = new Image();
-  sheet.src = SHEET_URL;
+  const images = SHEETS.map((sh) => Object.assign(new Image(), { src: sh.url }));
+  const loaded = () => images.every((im) => im.complete && im.naturalWidth > 0);
   const pending = [];
-  sheet.addEventListener('load', () => pending.splice(0).forEach((fn) => fn()));
-  // [{ text } | { icon: [r, c] }]
+  images.forEach((im) => im.addEventListener('load', () => { if (loaded()) pending.splice(0).forEach((fn) => fn()); }));
+  // [{ text } | { icon: [r, c, sheet] }]
   const split = (text) => {
     const parts = [];
     let last = 0;
@@ -143,10 +159,10 @@ px-icon {
   const measureText = (g, text, size) => split(text)
     .reduce((w, p) => w + (p.icon ? size * ICON_EM : g.measureText(p.text).width), 0);
   // Draws `text` centred on (x, y) (textBaseline 'middle'), icons for the emoji in it.
-  // onReady: called once the sheet has loaded if it wasn't yet (redraw then); returns false then.
+  // onReady: called once the sheets have loaded if they weren't yet (redraw then); returns false then.
   const drawText = (g, text, x, y, size, onReady) => {
     const parts = split(text);
-    const ready = sheet.complete && sheet.naturalWidth > 0;
+    const ready = loaded();
     if (!ready && onReady && parts.some((p) => p.icon)) pending.push(onReady);
     const align = g.textAlign;
     g.textAlign = 'left';
@@ -155,9 +171,11 @@ px-icon {
       if (p.icon) {
         const s = size * ICON_EM;
         if (ready) {
+          const [r, c, i] = p.icon;
+          const { cell, pixelated } = SHEETS[i];
           const smooth = g.imageSmoothingEnabled;
-          g.imageSmoothingEnabled = false;
-          g.drawImage(sheet, p.icon[1] * CELL, p.icon[0] * CELL, CELL, CELL, cx, y - s / 2, s, s);
+          g.imageSmoothingEnabled = !pixelated;
+          g.drawImage(images[i], c * cell, r * cell, cell, cell, cx, y - s / 2, s, s);
           g.imageSmoothingEnabled = smooth;
         }
         cx += s;

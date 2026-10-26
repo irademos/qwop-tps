@@ -374,7 +374,7 @@ export function createBossTalk({ fill = (text) => text } = {}) {
     isOpen: () => !!talk,
     interact,
     /** What the phone's interact button says right now. */
-    interactLabel: () => (!talk ? null : talk.done && talk.choices ? `${talk.choices[0][0]}` : '▶ NEXT'),
+    interactLabel: () => (!talk ? null : talk.done && talk.choices ? `${talk.choices[0][0]}` : 'NEXT'),
     open(data, onDone) {
       talk = { data, onDone, i: -1, who: 'them', words: [], shown: 0, acc: 0, done: true, choices: null, wait: 0 };
       el.sub.textContent = data.spare ? '' : 'Final enemy';

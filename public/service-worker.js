@@ -1,5 +1,5 @@
-const SHELL_CACHE_VERSION = 'v8';
-const STATIC_CACHE_VERSION = 'v13';
+const SHELL_CACHE_VERSION = 'v9';
+const STATIC_CACHE_VERSION = 'v14';
 const DYNAMIC_CACHE_VERSION = 'v4';
 const CDN_CACHE_VERSION = 'v2';
 

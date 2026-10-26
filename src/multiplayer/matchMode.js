@@ -215,7 +215,7 @@ export function createMatchMode(ctx) {
   const inviteTitle = el('div', 'match-section-title', 'Invite online players');
   const inviteList = el('ul', 'duel-lobby-list');
   const setupActions = el('div', 'duel-lobby-actions');
-  const startBtn = el('button', 'arcade-button', '▶ Start Battle');
+  const startBtn = el('button', 'arcade-button', 'Start Battle');
   const setupBackBtn = el('button', 'arcade-button arcade-secondary', 'Back');
   setupActions.append(startBtn, setupBackBtn);
   setupPanel.append(setupTitle, setupStatus, rulePicker, picks, membersTitle, membersList, inviteTitle, inviteList, setupActions);

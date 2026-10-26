@@ -1960,7 +1960,7 @@ export function createVillage(ctx) {
   }
   function interactLabel() {
     if (!canInteract()) return null;
-    if (focus === 'villager' && talk) return talk.done && talk.choices ? talk.choices[0][0] : '▶ Next';
+    if (focus === 'villager' && talk) return talk.done && talk.choices ? talk.choices[0][0] : 'Next';
     if (focus === 'fire') return 'Sit';
     if (focus) return 'Back';
     if (extraAct) return extraAct.label;
