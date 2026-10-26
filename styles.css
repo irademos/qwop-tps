@@ -4663,3 +4663,70 @@ body.town-shop-open #action-buttons { visibility: hidden; }
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
 }
 .town-lockpick-status { font-size: 13px; font-weight: 700; }
+
+/* ── The guest's sea start (src/town/seaStart.js): out on the sea in a canoe ──────
+   The only UI is its own (#sea-hud): ⬅ Lobby top left, Sign In top right, 🎣 Rod / 🛶 Oar
+   at the bottom (+ 🛶 Get out by the fishing spot); everything else on the page is hidden but
+   the phone QR / calibration popups.
+   Touch screens without a gyro get the joystick back while the oar's out (body.sea-steer). */
+body.sea-start > :not(#game-container):not(#sea-hud):not(#phone-sword-qr-modal):not(#phone-sword-connect-calib):not(#phone-sword-calib-modal) { display: none !important; }
+body.sea-start.sea-steer > #joystick-container { display: block !important; }
+.sea-hud {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+  font-family: var(--font-ui);
+}
+.sea-hud > * { pointer-events: auto; }
+.sea-lobby,
+.sea-signin {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.sea-lobby {
+  left: calc(12px + env(safe-area-inset-left, 0px));
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
+}
+.sea-signin { right: calc(12px + env(safe-area-inset-right, 0px)); }
+.sea-tools {
+  position: absolute;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+}
+.sea-tool {
+  min-width: 112px;
+  min-height: 52px;
+  font-size: 17px;
+  font-weight: 700;
+}
+.sea-tool.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+  color: var(--accent-hi);
+}
+.sea-out {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: fit-content;
+  margin: 0 auto;
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  min-height: 52px;
+  padding: 0 22px;
+  font-size: 17px;
+  font-weight: 800;
+}
+.sea-hud .hidden { display: none; }
+/* (touch, no gyro: the joystick sits to the left of the Rod / Oar buttons, above them on narrow screens) */
+@media (max-width: 520px) {
+  body.sea-start.sea-steer .sea-tools { left: auto; right: calc(12px + env(safe-area-inset-right, 0px)); transform: none; flex-direction: column; }
+}

@@ -93,7 +93,7 @@ import { updateCampfire } from '../village/villageMode.js';
 import {
   BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
   BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, RAID_NOTICE_DIST, SAVE_EVERY_S, SAVE_PREFIX,
-  START_MINUTES, TALK_RANGE, WALLET_MAX, _v2, angleLerp, el, heightScale, rand,
+  START_MINUTES, TALK_RANGE, WALLET_MAX, ARRIVAL_SNAP_DIST, _v2, angleLerp, dist2, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
 import { installTownFolk } from './townFolk.js';
@@ -590,7 +590,9 @@ export function createTownMode(ctx) {
     save();
   };
 
-  const enter = () => {
+  // arrival: { x, z, yaw } — where the player comes in (the sea start's guest stepping ashore by
+  // the fishing spot), else the town's spawn
+  const enter = ({ arrival = null } = {}) => {
     if (T.active) return;
     T.active = true;
     T.ready = false;
@@ -626,7 +628,13 @@ export function createTownMode(ctx) {
       root.add(T.layout.props.group);
       T.addLights(root);
       const P = T.layout.places;
-      ctx.teleport(P.spawn.x, P.spawn.z, Math.atan2(P.market.x - P.spawn.x, P.market.z - P.spawn.z));
+      const nav = T.layout.nav;
+      const a = arrival ? nav.nearestWalkable(arrival.x, arrival.z) : -1;
+      if (a >= 0 && dist2(nav.cellX(a), nav.cellZ(a), arrival.x, arrival.z) < ARRIVAL_SNAP_DIST) {
+        ctx.teleport(nav.cellX(a), nav.cellZ(a), arrival.yaw);
+      } else {
+        ctx.teleport(P.spawn.x, P.spawn.z, Math.atan2(P.market.x - P.spawn.x, P.market.z - P.spawn.z));
+      }
       T.laidOut = true;
       if (T.netMode === 'joining') { feedLine(`🏘️ Finding your town…`); return; }
       spawnTown();
