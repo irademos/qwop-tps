@@ -7,9 +7,11 @@
 // faces — come from the map's definition (`MAPS.islandTown.seaStart` in bootstrapGameApp.js).
 //
 // The only UI: 🎣 Rod and 🛶 Oar (bottom), ⬅ Lobby (top left) and Sign In (top right) — the rest
-// of the HUD is hidden (body.sea-start). 🛶 Oar puts the oar in hand and turns the canoe to face
-// the island's fishing spot, so paddling straight on gets there (canoeBoat.js paddles: the oar's
-// blade with a gyro, else W / S / A / D or — touch screens — the joystick). Near the spot with
+// of the HUD is hidden (body.sea-start), but for the phone QR / calibration popups. The canoe
+// starts pointed at the island's fishing spot, the player facing over its side with the rod;
+// 🛶 Oar puts the oar in hand, faces the player forward and (if it's drifted round) turns the
+// canoe back to the fishing spot, so paddling straight on gets there (canoeBoat.js paddles: the
+// oar's blade with a gyro, else W / S / A / D or — touch screens — the joystick). Near the spot with
 // dry ground in reach, 🛶 Get out → onLanded: Town starts there as the guest, normal UI.
 // ⬅ Lobby → onLobby (the start screen); Sign In → onSignIn (the login form).
 
@@ -18,12 +20,12 @@ import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { createCanoeBoat } from './canoeBoat.js';
 import { CANOE_SHORE_DIST, dist2, el } from './townConfig.js';
 
-const SEA_START_DIST = 140;       // m out from the fishing spot, the way its bank faces
-const SEA_START_SIDE = 25;        // m off to one side of that line (the island in view, off the bow)
+const SEA_START_DIST = 140;       // m out from the fishing spot, the way its bank faces…
+const SEA_START_SIDE = 4;         // …and this far to one side (headings exactly along a diagonal
+                                  // look straight at a skybox cube edge, which some renderers draw badly)
 const SEA_TURN_RATE = 2.2;        // rad/s — 🛶 Oar turning the canoe to face the fishing spot
 const SEA_LAND_RADIUS = 14;       // m from the fishing spot: 🛶 Get out (with dry ground in reach)
 const SEA_LAND_CHECK_S = 0.25;    // s between looks for the shore
-const SEA_HINT_MS = 6000;         // ms a hint stays up
 const OCEAN_SIZE = 2400;          // m — the stand-in ocean, centred on the start
 const SEABED_DEPTH = 7;           // m under the surface
 const SEABED_COLOR = 0x1f5f78;
@@ -91,17 +93,9 @@ export function createSeaStart(ctx, config) {
   const rodBtn = btn('sea-tool ui-btn ui-btn-secondary', '🎣 Rod', () => pick('rod'));
   const oarBtn = btn('sea-tool ui-btn ui-btn-secondary', '🛶 Oar', () => pick('oar'));
   const outBtn = btn('sea-out ui-btn hidden', '🛶 Get out', () => getOut());
-  const hint = el('div', 'sea-hint ui-panel hidden');
   const tools = el('div', 'sea-tools');
   tools.append(rodBtn, oarBtn);
-  hud.append(lobbyBtn, signInBtn, hint, outBtn, tools);
-  let hintTimer = 0;
-  const showHint = (text) => {
-    hint.textContent = text;
-    hint.classList.remove('hidden');
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => hint.classList.add('hidden'), SEA_HINT_MS);
-  };
+  hud.append(lobbyBtn, signInBtn, outBtn, tools);
   const renderTools = () => {
     rodBtn.classList.toggle('is-active', held === 'rod');
     oarBtn.classList.toggle('is-active', held === 'oar');
@@ -110,19 +104,20 @@ export function createSeaStart(ctx, config) {
   };
 
   // ── Rod / oar ──
+  // The rod: facing over the canoe's side (its right, as the bow points); the oar: facing the bow
+  const faceFor = (kind) => {
+    const s = boat.standPoint();
+    ctx.teleport(s.x, s.z, boat.yaw + (kind === 'rod' ? -Math.PI / 2 : 0));
+  };
   const pick = (kind) => {
     if (!active) return;
     held = kind;
     ctx.hold(kind);
+    faceFor(kind);
+    // (the oar: the canoe back round to the fishing spot, so paddling straight on gets there)
     if (kind === 'oar') {
-      // Facing the fishing spot: paddling straight on gets there
       const s = boat.standPoint();
       aimYaw = Math.atan2(fishSpot.x - s.x, fishSpot.z - s.z);
-      showHint(ctx.hasGyro()
-        ? '🛶 The island\'s fishing spot is straight ahead. Hold the phone up — the oar points down — and sweep the blade back through the water.'
-        : ctx.isTouch()
-          ? '🛶 The island\'s fishing spot is straight ahead. Paddle with the joystick.'
-          : '🛶 The island\'s fishing spot is straight ahead. Paddle with W / S, turn with A / D.');
     }
     renderTools();
   };
@@ -169,10 +164,10 @@ export function createSeaStart(ctx, config) {
     simT = 0;
     landSpot = null;
     aimYaw = null;
-    // Out on the open sea off the fishing spot, side on to the island
+    // Out on the open sea off the fishing spot, pointed at it
     const x = fishSpot.x + face.x * SEA_START_DIST - face.z * SEA_START_SIDE;
     const z = fishSpot.z + face.z * SEA_START_DIST + face.x * SEA_START_SIDE;
-    const yaw = Math.atan2(fishSpot.x - x, fishSpot.z - z) + Math.PI / 2;
+    const yaw = Math.atan2(fishSpot.x - x, fishSpot.z - z);
     boat = createCanoeBoat({ waterY, waterDepth, x, z, yaw });
     boat.place(0);
     ctx.scene.add(boat.group);
@@ -188,7 +183,6 @@ export function createSeaStart(ctx, config) {
     document.body.classList.add('sea-start');
     document.body.append(hud);
     outBtn.classList.add('hidden');
-    hint.classList.add('hidden');
     pick('rod');
   };
 
@@ -204,10 +198,8 @@ export function createSeaStart(ctx, config) {
     boat.group.parent?.remove(boat.group);
     boat = null;
     removeOcean();
-    clearTimeout(hintTimer);
     hud.remove();
     document.body.classList.remove('sea-start', 'sea-steer');
-    ctx.onExit();
   };
 
   const update = (dt) => {

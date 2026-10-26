@@ -765,9 +765,8 @@ async function initCore(runtimeContext) {
   // Guest (Play Without Signing In): profileNameKey is null, so nothing is saved
   const isGuest = !!profileResult.guest;
   let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
-  // A guest starting out on the sea (src/town/seaStart.js) until they land or go to the lobby —
-  // meanwhile the phone QR popup waits, as it does behind the start screen
-  let _seaStartPending = !!profileResult.seaStart;
+  // A guest starting out on the sea (src/town/seaStart.js)
+  const _seaStartWanted = !!profileResult.seaStart;
 
   if (!isGuest) {
     setCookie("playerName", playerName);
@@ -1843,7 +1842,7 @@ async function initCore(runtimeContext) {
   const MAP_NOT_GROUND = new Set(['sea', 'seabed', 'water']);   // MapLoader water meshes
   const mapForMode = (gameMode) => (gameMode === 'classic' ? 'classic' : DEFAULT_MAP);
   // The sea start doesn't wait on the map: the player is stylized with its measured look
-  if (_seaStartPending) presetStyleReference(MAPS[DEFAULT_MAP].seaStart.styleReference);
+  if (_seaStartWanted) presetStyleReference(MAPS[DEFAULT_MAP].seaStart.styleReference);
 
   // Build a BVH-accelerated mesh list for downward raycasting to get terrain height.
   const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = await import('three-mesh-bvh');
@@ -6053,7 +6052,7 @@ async function initCore(runtimeContext) {
   // screen, so it would cover the mode buttons) — see the mode handler
   let _phoneSwordQrDeferred = false;
   const autoShowPhoneSwordQr = (peerId) => {
-    if (!startOverlay.classList.contains('hidden') || _seaStartPending) {
+    if (!startOverlay.classList.contains('hidden')) {
       _phoneSwordPeerId = peerId;
       _phoneSwordQrDeferred = true;
       return;
@@ -8925,7 +8924,6 @@ async function initCore(runtimeContext) {
       arcadeOverlay.showStartScreen();
     },
     onSignIn: () => arcadeOverlay.signIn(),
-    onExit: () => { _seaStartPending = false; },
   }, MAPS[DEFAULT_MAP].seaStart);
   const startSeaMode = () => {
     _resetForMenu();
@@ -8969,7 +8967,7 @@ async function initCore(runtimeContext) {
   // Tutorial, Showdown, Classic, Town or Multiplayer. Only Multiplayer runs peer multiplayer.
   // A pick made while the game was still loading runs as soon as this is set.
   arcadeOverlay.setModeHandler((gameMode) => {
-    if (_phoneSwordQrDeferred && gameMode !== 'sea') {
+    if (_phoneSwordQrDeferred) {
       _phoneSwordQrDeferred = false;
       if (!window.phoneSwordGyro?.connected && _phoneSwordPeerId) void showPhoneSwordQr(_phoneSwordPeerId);
     }
