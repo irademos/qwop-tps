@@ -113,6 +113,7 @@ import { installTownHomes } from './townHomes.js';
 import { installTownLights } from './townLights.js';
 import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
+import { installTownCanoe } from './townCanoe.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -636,6 +637,7 @@ export function createTownMode(ctx) {
   const exit = () => {
     if (!T.active) return;
     save();
+    T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;
     T.closeMarket();
@@ -737,6 +739,7 @@ export function createTownMode(ctx) {
     for (const n of T.npcs) T.updateNpc(n, dt);
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);
     T.updateFishing(dt);
+    T.updateCanoe(dt);
     T.updateIntroWalk(dt);
     T.updateCooking(dt);
     T.updateFarm(dt);
@@ -811,6 +814,7 @@ export function createTownMode(ctx) {
   installTownLights(T, ctx);
   installTownGrab(T, ctx);
   installTownFarming(T, ctx);
+  installTownCanoe(T, ctx);
 
   // ── Settings → Town (settingsPanel.js): everyone in town, their coins and a few stats ──
   const TASK_STATUS = {
@@ -931,8 +935,11 @@ export function createTownMode(ctx) {
     dropHeld: () => { if (T.active) T.dropHeld(); },
     // Night, out of town: the player carries a lantern in their left hand
     wantsLantern: () => !!(T.active && T.ready && T.lantern),
-    // The phone's Block bar label while there's something to do (undefined: it stays Block)
-    interactLabel: () => (T.active && T.acts.length ? T.acts[0].label : undefined),
+    // The phone's Block bar label while there's something to do (undefined: it stays Block; null:
+    // interact, nothing to do — in the canoe, where Block means nothing)
+    interactLabel: () => (T.active && T.acts.length ? T.acts[0].label : T.active && T.inCanoe() ? null : undefined),
+    // Standing in the canoe (townCanoe.js): the oar is the only thing in hand
+    inCanoe: () => !!(T.active && T.ready && T.inCanoe()),
     // (dev console)
     debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, market: T.market, goods, stalls: T.stalls, ctx, jobs: T.jobs, chainsDone: T.chainsDone, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
   };

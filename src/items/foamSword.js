@@ -4,6 +4,7 @@ import { Weapon } from './weapon.js';
 import { loadAllSwordModelTemplates, createSwordModelInstance, swordVariantForCharacter } from './swordModel.js';
 import { createWandModel } from './magicWand.js';
 import { createFishingRodModel, ROD_HOLD_PITCH } from './fishingRod.js';
+import { createOarModel, OAR_SUPPORT_AT } from './oar.js';
 import { characterHold } from '../models/glbCharacterModel.js';
 
 export const FOAM_SWORD_ITEM_ID = 'foamSword';
@@ -16,6 +17,7 @@ const POMMEL_COLOR  = 0xaa1111;
 
 // Scratch objects for directional mode (no per-frame allocation)
 const _fsSwordDir   = new THREE.Vector3();
+const _fsOarDir     = new THREE.Vector3();
 
 // How far the hands spread from center in player-local units at max lateral.
 const FS_HAND_SPREAD  = 0.75;
@@ -24,6 +26,14 @@ const FS_HAND_HEIGHT_GAIN = 0.4;
 // Default center position of the hands.
 const FS_HAND_CENTER_Y = 0.82;
 const FS_HAND_Z        = 0.50;
+// Town's canoe oar (held by its handle, pointing down — the phone straight up holds it straight
+// down): the top hand's height, raised as the phone tilts away from upright (so the blade comes
+// out of the water when tilted well over), how far it follows the phone sideways / forward
+const OAR_HAND_Y      = 0.95;
+const OAR_HAND_LIFT   = 0.35;
+const OAR_HAND_SIDE   = 0.22;
+const OAR_HAND_Z      = 0.32;
+const OAR_HAND_FWD    = 0.25;
 
 // Procedural foam sword (origin at the guard, blade along +Z)
 function buildFoamSwordParts(group) {
@@ -83,13 +93,22 @@ export class FoamSword extends Weapon {
       holdOffset: new THREE.Vector3(0, 0, 0),
     });
     this._groundOffset = 0.35;
-    this._variant = null; // sword model shown: 'default' (sword.glb), 'wii' (Mii holder), 'wand' or 'rod'
+    this._variant = null; // sword model shown: 'default' (sword.glb), 'wii' (Mii holder), 'wand', 'rod' or 'oar'
     // Sword Showdown magic wand: held exactly like the sword (same gyro hold), only the model
     // changes; the game casts spells instead of sword hits while it's out (bootstrapGameApp.js)
     this.wand = false;
     // Town fishing rod: the same again — held and swung with the gyro like the sword, the game
     // casts / hooks / reels with it instead of sword hits (townTrade.js)
     this.rod = false;
+    // Town's canoe oar: the same again, upside down (blade along −Z — see oar.js); townCanoe.js
+    // paddles with its blade
+    this.oar = false;
+  }
+
+  /** The oar model on the hand, or null. */
+  getOarModel() {
+    if (this._variant !== 'oar') return null;
+    return (this.heldMesh || this.mesh)?.children.find((c) => c.name === 'oar') || null;
   }
 
   /** The fishing rod model on the hand, or null. */
@@ -114,6 +133,7 @@ export class FoamSword extends Weapon {
       group.clear();
       const model = variant === 'wand' ? createWandModel()
         : variant === 'rod' ? createFishingRodModel()
+        : variant === 'oar' ? createOarModel()
         : createSwordModelInstance({ variant });
       if (variant === 'rod') model.rotation.x = ROD_HOLD_PITCH;
       if (model) group.add(model);
@@ -146,7 +166,7 @@ export class FoamSword extends Weapon {
       const pm = this.holder.playerModel;
       pm.userData.foamSwordMode = true;
       // Mii characters hold the Wii sword (with their ball hands on the handle)
-      this._setVariant(this.rod ? 'rod' : this.wand ? 'wand' : swordVariantForCharacter(pm.userData.qwopRig?.characterUrl));
+      this._setVariant(this.oar ? 'oar' : this.rod ? 'rod' : this.wand ? 'wand' : swordVariantForCharacter(pm.userData.qwopRig?.characterUrl));
 
       // Derive where the blade points (+Z axis of sword in player-local space)
       _fsSwordDir.set(0, 0, 1).applyQuaternion(this._holdQuaternion);
@@ -161,6 +181,25 @@ export class FoamSword extends Weapon {
         pm.userData.foamSwordHandTarget = { x: 0, y: FS_HAND_CENTER_Y, z: FS_HAND_Z };
       }
       const tgt = pm.userData.foamSwordHandTarget;
+      if (this.oar) {
+        // The oar: the top hand on the handle, a little toward where the phone leans (the blade
+        // goes the other way), the other hand down the shaft (foamSwordSupport, playerModel.js);
+        // sized with the character like the hands' grip (the small village boy's is shorter)
+        const grip = characterHold(pm.userData.qwopRig?.characterUrl).grip || 1;
+        tgt.x = THREE.MathUtils.clamp(_fsSwordDir.x * OAR_HAND_SIDE, -0.4, 0.4);
+        tgt.y = OAR_HAND_Y + OAR_HAND_LIFT * (1 - Math.abs(_fsSwordDir.y));
+        tgt.z = THREE.MathUtils.clamp(OAR_HAND_Z + _fsSwordDir.z * OAR_HAND_FWD, 0.1, 0.65);
+        _fsOarDir.copy(_fsSwordDir).multiplyScalar(-OAR_SUPPORT_AT);
+        const support = (this._oarSupport ??= { x: 0, y: 0, z: 0 });
+        support.x = tgt.x + _fsOarDir.x;
+        support.y = tgt.y + _fsOarDir.y;
+        support.z = tgt.z + _fsOarDir.z;
+        pm.userData.foamSwordSupport = support;
+        super.update();
+        const active = this.useHeldMeshWhenHeld && this.heldMesh ? this.heldMesh : this.mesh;
+        active?.scale.setScalar(grip);
+        return;
+      }
       const blocking = !!window.phoneSwordGyro?.blocking;
       const blockSign = blocking ? -1 : 1;
       // Lateral: sword right → hands right (inverted + compressed toward center in blocking mode)

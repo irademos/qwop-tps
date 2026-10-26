@@ -136,6 +136,20 @@ const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
 const MAGIC_WAND_ITEM_ID = 'magic_wand';
 // Town's fishing rod (bought at the shop): the sword weapon in rod form, like the wand
 const FISHING_ROD_ITEM_ID = 'fishing_rod';
+const OAR_ITEM_ID = 'canoe_oar';
+// Town's canoe oar: the phone's tilt away from upright is multiplied by this for the oar, so a
+// small lean of the phone swings it well out (capped at OAR_GYRO_MAX_TILT from straight down)…
+const OAR_GYRO_GAIN = 1.8;
+const OAR_GYRO_MAX_TILT = 160 * Math.PI / 180;
+// …then pulled toward one of two settled tilts — the blade in the water beside the hull
+// (OAR_IN_TILT) or lifted clear of it (OAR_OUT_TILT), flipping quickly around OAR_SNAP_TILT —
+// by OAR_GUIDE, faded in over the first few degrees from upright (no twitching when held still)
+const DEG_RAD = Math.PI / 180;
+const OAR_IN_TILT = 32 * DEG_RAD;
+const OAR_OUT_TILT = 75 * DEG_RAD;
+const OAR_SNAP_TILT = 52 * DEG_RAD;
+const OAR_SNAP_WIDTH = 5 * DEG_RAD;
+const OAR_GUIDE = 0.65;
 const MAX_MANA = 100;
 const WAND_MANA_COST = 10;               // per blast; mana potions refill it
 const WAND_SWIPE_START_SPEED = 405;      // deg/s: a swipe starts…
@@ -2804,6 +2818,30 @@ async function initCore(runtimeContext) {
   let _rodActive = false;
   const isRodAllowed = () => !!_townLoadout?.hasRod;
   const isRodEquipped = () => _rodActive && foamSword?.holder === playerControls;
+  // Town's canoe oar: the sword weapon in oar form again (held upside down — the phone up holds
+  // it pointing down; townCanoe.js paddles with it); only while standing in the canoe, and then
+  // nothing else comes out
+  let _oarActive = false;
+  const isOarAllowed = () => !!town?.inCanoe?.();
+  const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
+  // (in place) The oar's hold, its tilt from upright (player-local +Y) amplified — OAR_GYRO_GAIN —
+  // and guided into the water / out of it (OAR_IN_TILT / OAR_OUT_TILT)
+  const _oarUp = new THREE.Vector3(0, 1, 0);
+  const _oarDir = new THREE.Vector3();
+  const _oarAxis = new THREE.Vector3();
+  const _oarExtra = new THREE.Quaternion();
+  const _amplifyOarHold = (q) => {
+    _oarDir.set(0, 0, 1).applyQuaternion(q);
+    const tilt = _oarUp.angleTo(_oarDir);
+    _oarAxis.crossVectors(_oarUp, _oarDir);
+    if (tilt < 1e-4 || _oarAxis.lengthSq() < 1e-10) return q;
+    const amp = Math.min(tilt * OAR_GYRO_GAIN, OAR_GYRO_MAX_TILT);
+    const settled = OAR_IN_TILT + (OAR_OUT_TILT - OAR_IN_TILT) / (1 + Math.exp(-(amp - OAR_SNAP_TILT) / OAR_SNAP_WIDTH));
+    const guide = OAR_GUIDE * THREE.MathUtils.smoothstep(amp, 3 * DEG_RAD, 14 * DEG_RAD);
+    const extra = amp + (settled - amp) * guide - tilt;
+    if (Math.abs(extra) < 1e-5) return q;
+    return q.premultiply(_oarExtra.setFromAxisAngle(_oarAxis.normalize(), extra));
+  };
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
   const _wandSwipe = {
     active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3(),
@@ -2967,7 +3005,10 @@ async function initCore(runtimeContext) {
       return shield?.holder === playerControls;
     }
     if (itemId === FOAM_SWORD_ITEM_ID) {
-      return foamSword?.holder === playerControls && !_wandActive && !_rodActive;
+      return foamSword?.holder === playerControls && !_wandActive && !_rodActive && !_oarActive;
+    }
+    if (itemId === OAR_ITEM_ID) {
+      return isOarEquipped();
     }
     if (itemId === MAGIC_WAND_ITEM_ID) {
       return isWandEquipped();
@@ -2985,6 +3026,7 @@ async function initCore(runtimeContext) {
     if (hand === 'right') {
       if (isInventoryItemEquipped(MAGIC_WAND_ITEM_ID)) return MAGIC_WAND_ITEM_ID;
       if (isInventoryItemEquipped(FISHING_ROD_ITEM_ID)) return FISHING_ROD_ITEM_ID;
+      if (isInventoryItemEquipped(OAR_ITEM_ID)) return OAR_ITEM_ID;
       if (isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)) return FOAM_SWORD_ITEM_ID;
       if (isInventoryItemEquipped('pistol')) return 'pistol';
       if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return SHIELD_ITEM_ID;
@@ -3017,10 +3059,12 @@ async function initCore(runtimeContext) {
 
   function equipInventoryItem(itemId) {
     // Town's fishing rod: no inventory entry of its own (the sword's holds it, as for the wand)
-    if (itemId === FISHING_ROD_ITEM_ID) {
-      if (!isRodAllowed()) return;
+    if (itemId === FISHING_ROD_ITEM_ID || itemId === OAR_ITEM_ID) {
+      if (itemId === FISHING_ROD_ITEM_ID ? !isRodAllowed() : !isOarAllowed()) return;
       if (!inventoryState[FOAM_SWORD_ITEM_ID]) inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
     } else if (!itemId || !inventoryState[itemId]) return;
+    // (in Town's canoe the oar is all there is)
+    if (isOarAllowed() && itemId !== OAR_ITEM_ID) return;
     // Town: the sword has to be bought (its inventory entry is also the wand's slot)
     if (_townLoadout && itemId === FOAM_SWORD_ITEM_ID && !_townLoadout.hasSword) return;
     // Multiplayer duels are sword only
@@ -3028,25 +3072,29 @@ async function initCore(runtimeContext) {
     if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
     // The wand (and Town's fishing rod) is the sword weapon in another form: switching between
     // them just swaps the model
-    if (itemId === MAGIC_WAND_ITEM_ID || itemId === FOAM_SWORD_ITEM_ID || itemId === FISHING_ROD_ITEM_ID) {
+    if (itemId === MAGIC_WAND_ITEM_ID || itemId === FOAM_SWORD_ITEM_ID || itemId === FISHING_ROD_ITEM_ID || itemId === OAR_ITEM_ID) {
       const wand = itemId === MAGIC_WAND_ITEM_ID;
       const rod = itemId === FISHING_ROD_ITEM_ID;
+      const oar = itemId === OAR_ITEM_ID;
       if (wand && _mpSwordOnly()) return; // (not in duels)
-      if (foamSword?.holder === playerControls && (_wandActive !== wand || _rodActive !== rod)) {
-        // Already in hand: just swap sword ↔ wand ↔ rod
+      if (foamSword?.holder === playerControls && (_wandActive !== wand || _rodActive !== rod || _oarActive !== oar)) {
+        // Already in hand: just swap sword ↔ wand ↔ rod ↔ oar
         _wandActive = wand;
         _rodActive = rod;
+        _oarActive = oar;
         foamSword.wand = wand;
         foamSword.rod = rod;
+        foamSword.oar = oar;
         _wandSwipe.active = false;
-        audioManager?.playSFX(wand ? 'SFX/Spells/Spell Impact 1.ogg' : 'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', rod ? 0.25 : 0.45, { cooldownKey: 'sword-equip', cooldownMs: 100 });
+        audioManager?.playSFX(wand ? 'SFX/Spells/Spell Impact 1.ogg' : 'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', rod || oar ? 0.25 : 0.45, { cooldownKey: 'sword-equip', cooldownMs: 100 });
         updateManaUI();
         updateSettingsUI();
         return;
       }
       _wandActive = wand;
       _rodActive = rod;
-      if (foamSword) { foamSword.wand = wand; foamSword.rod = rod; }
+      _oarActive = oar;
+      if (foamSword) { foamSword.wand = wand; foamSword.rod = rod; foamSword.oar = oar; }
       _wandSwipe.active = false;
       updateManaUI();
       itemId = FOAM_SWORD_ITEM_ID;
@@ -3145,6 +3193,10 @@ async function initCore(runtimeContext) {
     }
     if (itemId === FISHING_ROD_ITEM_ID) {
       if (!isRodEquipped()) return;
+      itemId = FOAM_SWORD_ITEM_ID;
+    }
+    if (itemId === OAR_ITEM_ID) {
+      if (!isOarEquipped()) return;
       itemId = FOAM_SWORD_ITEM_ID;
     }
     if (itemId === SHIELD_ITEM_ID) {
@@ -6178,6 +6230,7 @@ async function initCore(runtimeContext) {
   // Gun/Shield buttons equip that item, or go back to the sword if it's already equipped
   // What's in hand: an item id, or null (Town: put away)
   const _heldWeaponId = () => (isWandEquipped() ? MAGIC_WAND_ITEM_ID : isRodEquipped() ? FISHING_ROD_ITEM_ID
+    : isOarEquipped() ? OAR_ITEM_ID
     : playerControls?.getEquippedWeapon?.('right')?.itemId ?? null);
   // Everything put away (Town's ✋ Hands; also the town's start, purchases and arrests)
   const _putWeaponsAway = () => {
@@ -6185,6 +6238,7 @@ async function initCore(runtimeContext) {
     getEquippedInventoryItemIds().forEach((itemId) => unequipInventoryItem(itemId));
     if (_wandActive) { _wandActive = false; if (foamSword) foamSword.wand = false; }
     if (_rodActive) { _rodActive = false; if (foamSword) foamSword.rod = false; }
+    if (_oarActive) { _oarActive = false; if (foamSword) foamSword.oar = false; }
     playerBombThrow = null;
     playerBombs?.setHeld(null);
     lastEquippedBeforeShield = null;
@@ -6248,7 +6302,7 @@ async function initCore(runtimeContext) {
       playerControls?.refreshActionButtons?.();
     } else if (action === 'sword') {
       // Town: 🗡 Sword out ↔ ✋ Hands (nothing in hand); something grabbed: drop it
-      if (!_townLoadout) return;
+      if (!_townLoadout || isOarAllowed()) return; // (in the canoe the oar stays in hand)
       if (town?.holding()) { town.dropHeld(); return; }
       if (_heldWeaponId()) _putWeaponsAway();
       else equipInventoryItem(FOAM_SWORD_ITEM_ID);
@@ -6263,9 +6317,9 @@ async function initCore(runtimeContext) {
     if (_isSwordCalibPromptOpen()) return '✅ Okay';
     if (bossTalk.isOpen()) return bossTalk.interactLabel();
     if (village?.isOpen()) return village.interactLabel();
-    // Town: only with empty hands (✋ Hands) or the fishing rod — holding a weapon, the bar stays
-    // Block / Fire… (and with the line out it's the reel — _phoneControllerStatus)
-    if (town?.isActive()) return _heldWeaponId() && !isRodEquipped() ? undefined : town.interactLabel(); // (undefined when there's nothing to do: Block stays Block)
+    // Town: only with empty hands (✋ Hands), the fishing rod or the canoe's oar — holding a weapon,
+    // the bar stays Block / Fire… (and with the line out it's the reel — _phoneControllerStatus)
+    if (town?.isActive()) return _heldWeaponId() && !isRodEquipped() && !isOarEquipped() ? undefined : town.interactLabel(); // (undefined when there's nothing to do: Block stays Block)
     return undefined;
   };
   const _phoneControllerStatus = () => {
@@ -6902,6 +6956,8 @@ async function initCore(runtimeContext) {
     // Town's fishing rod (bought at the shop): equipped like the sword / wand
     isRodAllowed: () => isRodAllowed(),
     isRodEquipped: () => isRodEquipped(),
+    isOarEquipped: () => isOarEquipped(),
+    isInCanoe: () => isOarAllowed(),
     // Town: something grabbed — the Block bar is its mode (the hose's 'water'; null: none), held
     // down: useTownHeld(true), let go: false
     getTownHeldBar: () => (town?.isActive() ? town.heldBar() : null),
@@ -8173,6 +8229,7 @@ async function initCore(runtimeContext) {
     // 'sword' | 'wand' | 'gun' | 'shield' | null — what the local player holds (sent to the
     // other fighters)
     getLocalWeapon: () => {
+      if (isOarEquipped()) return null; // (Town's canoe oar: not drawn for others)
       if (isWandEquipped()) return 'wand';
       if (isRodEquipped()) return 'rod';
       if (isInventoryItemEquipped('pistol')) return 'gun';
@@ -8689,13 +8746,53 @@ async function initCore(runtimeContext) {
     getItems: () => (_townLoadout ? _townItems() : null),
     // Something in hand (the bandits at their camp rob an unarmed trespasser instead of fighting);
     // a fishing rod is no weapon
-    isPlayerArmed: () => !!_heldWeaponId() && !isRodEquipped(),
+    isPlayerArmed: () => !!_heldWeaponId() && !isRodEquipped() && !isOarEquipped(),
     // A weapon of the town's own, in hand or not (the sheriff asks such a player to stand watch at night)
     hasWeapon: () => { const it = _townLoadout ? _townItems() : null; return !!(it && (it.sword || it.gun || it.wand)); },
     putWeaponsAway: () => _putWeaponsAway(),
     // Fishing (townTrade.js): the rod in hand, its model (the tip casts the line), the reel
     isRodEquipped: () => isRodEquipped(),
     getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
+    // Town's canoe (townCanoe.js): the oar comes out while aboard (and nothing else), its model
+    // (the blade paddles); held still in it, carried along as it moves
+    setOar: (on) => {
+      if (on) { _putWeaponsAway(); equipInventoryItem(OAR_ITEM_ID); } else if (_oarActive) _putWeaponsAway();
+      _refreshGearUI();
+      _phoneSwordStatusNow?.();
+    },
+    getOarModel: () => (isOarEquipped() ? foamSword?.getOarModel?.() ?? null : null),
+    // m of water over the map's ground (0: dry land; out past the map's ground: deep)
+    waterDepth: (x, z) => {
+      const level = _activeMap?.water?.(x, z);
+      if (level == null) return 0;
+      const ground = _glbResolveHeight(x, z);
+      return Number.isFinite(ground) ? Math.max(0, level - ground) : Infinity;
+    },
+    holdStill: (on) => { if (playerControls) playerControls.holdStill = !!on; },
+    carryPlayer: (x, y, z, dYaw) => {
+      if (!playerControls || !playerModel) return;
+      playerControls.playerX = x;
+      playerControls.playerZ = z;
+      playerModel.position.x = x;
+      playerModel.position.z = z;
+      if (Number.isFinite(y) && Math.abs(y - playerControls.playerY) < 0.5) {
+        playerControls.playerY = y;
+        playerModel.position.y = y;
+      }
+      if (dYaw) {
+        playerControls.yaw += dYaw;
+        playerModel.rotation.y += dYaw;
+        _duelCamLastYaw = playerControls.yaw;
+      }
+    },
+    // The joystick (on screen / the phone's) or WASD as { fwd, turn } (−1…1; turn > 0 = right)
+    getSteer: () => {
+      if (!playerControls) return { fwd: 0, turn: 0 };
+      const f = playerControls.joystickForce;
+      if (f > 0.1) return { fwd: Math.sin(playerControls.joystickAngle) * f, turn: Math.cos(playerControls.joystickAngle) * f };
+      const k = playerControls.keysPressed;
+      return { fwd: (k.has('w') ? 1 : 0) - (k.has('s') ? 1 : 0), turn: (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0) };
+    },
     // A live gyro sword (phone, or this device's own): else casting / hooking are buttons
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
     // The phone controller's reel: radians cranked since the last call
@@ -9093,6 +9190,7 @@ async function initCore(runtimeContext) {
 
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
+          if (_oarActive) _amplifyOarHold(foamSword._holdQuaternion);
         }
         // Unarmed (village): the gyro moves the player's right arm (updateProceduralPlayerRig)
         const _pmUD = playerControls?.playerModel?.userData;
@@ -9117,7 +9215,8 @@ async function initCore(runtimeContext) {
       // Re-derive active Q — use bounceCurrentQ if bouncing, else live gyro
       const _nowSecPS = performance.now() / 1000;
       const _activeQ = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
-      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
+      if (_oarActive) foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(foamSword._holdQuaternion);
+      else foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
 
       // ── Hide any leftover trail lines from the old swing system ─────────────
       for (const l of _psw.trailLines) l.visible = false;
@@ -9150,7 +9249,7 @@ async function initCore(runtimeContext) {
       const _blockToggleSettling = _nowSecPS < (_psw.blockToggleUntil ?? 0) || isPlayerFrozen();
       // Magic wand out: swipes cast spells (below) instead of sword hits (the fishing rod: no
       // hits either — Town's fishing reads its swings)
-      const _wandOut = _wandActive || _rodActive;
+      const _wandOut = _wandActive || _rodActive || _oarActive;
 
       // ── Sword-vs-sword collision + sweep hit detection for horde enemies ─────
       let _swingHitOccurred = false;
@@ -9606,7 +9705,7 @@ async function initCore(runtimeContext) {
     // ── Town: with the sword / wand out, the camera turns toward whoever's coming at the player
     // (townsfolk / the law / bandits fighting them, raiding bandits close by at night); turning
     // by hand pauses it ──
-    if (town?.isActive() && playerControls && !playerDead && foamSword?.holder === playerControls && !_rodActive && !_weaponAim.active) {
+    if (town?.isActive() && playerControls && !playerDead && foamSword?.holder === playerControls && !_rodActive && !_oarActive && !_weaponAim.active) {
       const _nowT = performance.now();
       if (_townCamLastYaw !== null && Math.abs(wrapDeltaRad(playerControls.yaw - _townCamLastYaw)) > 0.01) {
         _townCamManualUntil = _nowT + TOWN_AIM_MANUAL_MS;
@@ -9880,7 +9979,7 @@ async function initCore(runtimeContext) {
         const _nowMs2 = Date.now();
         const _phoneSwordHitOk = _psw.swingActive ||
           (_nowMs2 / 1000 < _psw.slowHitWindow);
-        const _canSwordHit = swordMesh?.visible && !_wandActive && !_rodActive && !_psBossTalking &&
+        const _canSwordHit = swordMesh?.visible && !_wandActive && !_rodActive && !_oarActive && !_psBossTalking &&
           _phoneSwordHitOk &&
           (_nowMs2 - _he._playerSwordLastHit) > 1000;
         if (_canSwordHit) {
