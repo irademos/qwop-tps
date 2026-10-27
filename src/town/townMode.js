@@ -968,6 +968,9 @@ export function createTownMode(ctx) {
     // The phone's Block bar label while there's something to do (undefined: it stays Block; null:
     // interact, nothing to do — in the canoe, where Block means nothing)
     interactLabel: () => (T.active && T.acts.length ? T.acts[0].label : T.active && T.inCanoe() ? null : undefined),
+    // Whether the player can be on the flying broom (bootstrapGameApp.js / src/items/broom.js):
+    // out in town — not in a room / jail / the canoe, nor fishing, holding something or carried off
+    canRide: () => !!(T.active && T.ready && !T.inRoom && !T.jail && !T.sequence && !T.inCanoe() && !T.fishing && !T.held),
     // Standing in the canoe (townCanoe.js): the oar is the only thing in hand
     inCanoe: () => !!(T.active && T.ready && T.inCanoe()),
     // (dev console)

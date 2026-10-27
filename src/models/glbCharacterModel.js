@@ -32,6 +32,9 @@
  * suspended like death), then returns to walk/idle; actionProgress / actionActive
  * let the caller time events (e.g. the bomb thrower's release) against the clip.
  *
+ * Poses: playPose(url) loops a clip over the whole body (arm IK suspended) until endPose()
+ * (sitting on Town's broom — sitClip).
+ *
  * Mii characters (isMiiCharacterUrl) have no arm bones: solveArm() leaves the floating
  * hands where the game put them, getPalmWorldPosition() returns a point beside the body,
  * and the hands are drawn by the Wii sword they hold (swordModel.js).
@@ -69,6 +72,7 @@ export const glbCharacterConfig = {
   throwClip: '/models/animations/Throw.fbx', // bomb thrower's throw (playAction); right-handed
   runClip: '/models/animations/Slow Run.fbx',  // replaces the walk above runSpeed
   rollClip: '/models/animations/Roll.fbx',     // player's dodge roll (playAction)
+  sitClip: '/models/animations/Sitting.fbx',   // riding Town's broom (playPose)
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
   // Moving characters run once their measured ground speed (m/s, world space — every
   // player, remote player and enemy alike) goes above runSpeed, and walk again below
@@ -272,7 +276,7 @@ export class GLBCharacter {
     this._lastX = null;
     this._lastZ = null;
     this._dead = false;
-    this._action = null; // { started } while a playAction() clip owns the body
+    this._action = null; // { started, pose? } while a playAction() / playPose() clip owns the body
     if (!armIK) this._setArmIK(false);
     this.setMoving(false);
   }
@@ -417,6 +421,29 @@ export class GLBCharacter {
       });
   }
 
+  /**
+   * Loops `url` over the whole body (arm IK suspended) until endPose() — a held pose such as
+   * sitting. Same clip again: no-op. Ignored while dead; playAction() / playDeath() replace it.
+   */
+  playPose(url, { fade = 0.25 } = {}) {
+    if (this._dead || this._action?.pose === url) return;
+    const action = { started: false, pose: url };
+    this._action = action;
+    this._gaitClip = null;
+    this._setArmIK(false);
+    this.fluffy.play(url, { inPlace: true, fade, loop: true })
+      .then(() => { if (this._action === action) action.started = true; })
+      .catch((e) => {
+        console.warn('[GLBCharacter] pose clip load failed:', e);
+        if (this._action === action) this._endAction();
+      });
+  }
+
+  /** Back to walk / idle from playPose(). */
+  endPose() {
+    if (this._action?.pose) this._endAction();
+  }
+
   /** True from playAction() until its clip has finished. */
   get actionActive() { return !!this._action; }
 
@@ -480,7 +507,7 @@ export class GLBCharacter {
   animate(dt) {
     this._updateSpeed(dt);
     this.fluffy.animate(dt);
-    if (this._action?.started && this.fluffy.clipFinished) this._endAction();
+    if (this._action?.started && !this._action.pose && this.fluffy.clipFinished) this._endAction();
     // Bring the rig (and its ancestors) up to date so solveArm() works on this frame's pose
     this.fluffy.rigSpace.updateWorldMatrix(true, true);
   }

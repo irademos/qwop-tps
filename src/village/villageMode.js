@@ -40,6 +40,7 @@ import { raycastMapSegment } from '../environment/mapCollision.js';
 import { PEMBERTON_SCALE, addRedGlow } from '../characters/pembertonBoss.js';
 import { talkAutoHoldSeconds } from '../characters/stageBoss.js';
 import { createWandModel } from '../items/magicWand.js';
+import { createBroomModel, BROOM_SEAT_TO_END } from '../items/broom.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
@@ -302,6 +303,10 @@ const SHOP_ITEMS = [
   { id: 'treasure_chest', chest: true },
 ];
 
+// Town's wizard stall also has the flying broom (src/items/broom.js) standing by it: `at` = its
+// foot (stall units, x / z), `lean` back from upright (rad), `length` m
+const WIZARD_BROOM = { at: [-100, 92], lean: 0.24, yaw: 0, length: 0.95 };
+
 // Sitting by the campfire: until night / until morning
 const SIT_CHOICES = {
   night: { pref: 'night', button: 'Sit until night', fade: 'Night falls…', label: 'Night' },
@@ -401,10 +406,11 @@ export async function loadStallManaPotion() {
 // → { root (metres, the front toward +Z, standing at y 0), items: { life, mana, wand } (each in
 // the root's frame), keeper (where the stallkeeper stands, root-local m) }
 export async function loadWizardStall() {
-  const [stallGltf, lifeGltf, manaGltf] = await Promise.all([
+  const [stallGltf, lifeGltf, manaGltf, broomModel] = await Promise.all([
     loadProp(MARKET_STALL_MODEL),
     loadProp(LIFE_POTION_MODEL, { materials: false }),
     loadProp(MANA_POTION_MODEL, { materials: false }),
+    createBroomModel(WIZARD_BROOM.length),
   ]);
   const root = new THREE.Group();
   const stall = alignStallModel(markShared(stallGltf.scene.clone(true)));
@@ -426,10 +432,18 @@ export async function loadWizardStall() {
   wand.add(buildItemMesh('wand'));
   wand.position.set(wandDef.at[0], wandDef.at[1], wandDef.at[2]).multiplyScalar(STALL_UNIT);
   root.add(wand);
+  // (Town's flying broom: stood on its bristles, leaning on the stall's front left corner)
+  const broom = new THREE.Group();
+  broom.position.set(WIZARD_BROOM.at[0], 0, WIZARD_BROOM.at[1]).multiplyScalar(STALL_UNIT);
+  broom.rotation.set(-Math.PI / 2 - WIZARD_BROOM.lean, WIZARD_BROOM.yaw, 0, 'YXZ'); // (handle up, leaning back)
+  broomModel.position.z = WIZARD_BROOM.length * BROOM_SEAT_TO_END;
+  broom.add(broomModel);
+  root.add(broom);
   const items = {
     life: potion(lifeGltf, LIFE_POTION_SCALE, LIFE_POTION_OFFSET),
     mana: potion(manaGltf, MANA_POTION_SCALE, MANA_POTION_OFFSET),
     wand,
+    broom,
   };
   Object.values(items).forEach((o) => o.traverse((m) => { if (m.isMesh) m.castShadow = true; }));
   return { root, items, keeper: MERCHANT_OFFSET.clone().multiplyScalar(VILLAGE_PROP_SCALE) };

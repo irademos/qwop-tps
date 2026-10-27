@@ -84,9 +84,9 @@ export function installTownCanoe(T, ctx) {
     unregisterFloor ??= registerTerrainHeightOverride(floorAt);
     const s = canoe.standPoint();
     ctx.teleport(s.x, s.z, canoe.yaw);
+    ctx.setOar(true); // (first: off the flying broom, which lets go of the controls)
     ctx.holdStill(true);
     ctx.setPositionConstraint(pin);
-    ctx.setOar(true);
     canoe.facing = 'oar';
     T.feedLine((ctx.hasGyro()
       ? 'Swing the top of the phone down to the left to paddle on the left, down to the right to paddle on the right — down and back to back-paddle. The harder the swing, the stronger the stroke.'

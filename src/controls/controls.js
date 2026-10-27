@@ -136,6 +136,9 @@ export class PlayerControls {
     // Standing still wherever the game puts the player (Town's canoe): no walking, climbing or
     // rolling — the joystick / WASD are the game's to read
     this.holdStill = false;
+    // Riding Town's broom (with holdStill): { y, yaw } — the game moves playerX / playerZ, and
+    // the player's height and the body's facing are these (the camera's yaw stays this.yaw)
+    this.ride = null;
     // () => bool: whether a quick swipe on this screen rolls (false: it stays a camera drag —
     // this device is the gyro sword, so swipes are sword moves; the QR phone page still rolls)
     this.swipeRollAllowed = () => true;
@@ -617,6 +620,15 @@ export class PlayerControls {
       if (event) this.safePreventDefault(event);
     });
 
+    // Town's flying broom (bought from the wizard): on it ↔ off it (refreshActionButtons shows it)
+    this.psBroomBtn = createButton('ps-broom-btn', 'mobile-primary-action ps-broom-btn', 'Broom');
+    this.psBroomBtn.style.display = 'none';
+    bindPress(this.psBroomBtn, (event) => {
+      if (!this.enabled) return;
+      getAppState()?.toggleBroom?.();
+      if (event) this.safePreventDefault(event);
+    });
+
     // The Block bar does what fits the weapon in hand (getBlockBarMode), decided on press:
     // block while held (sword), fire on release (gun), back to the sword (shield), or the
     // shield up while held and the wand back on release (wand)
@@ -753,6 +765,13 @@ export class PlayerControls {
       button.style.display = w ? '' : 'none';
       button.classList.toggle('ps-wand-btn', w?.id === 'magic_wand');
     });
+    // Town's broom: Broom (get on) / Land (get off)
+    if (this.psBroomBtn) {
+      const riding = !!appState?.isRidingBroom?.();
+      this.psBroomBtn.style.display = appState?.hasBroom?.() ? '' : 'none';
+      this.psBroomBtn.textContent = riding ? 'Land' : 'Broom';
+      this.psBroomBtn.classList.toggle('ps-broom-active', riding);
+    }
     // Block bar: Block (sword / wand), Fire (gun), Sword (shield), Shield (wand + a shield)
     const showPunch = !!this.getBlockBarMode();
     this.punchButton.textContent = this.getMobileAttackLabel();
@@ -775,7 +794,7 @@ export class PlayerControls {
 
   // Block/fire button + two weapon switch buttons, bubble and bomb
   layoutMobileActionButtons() {
-    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBubbleBtn, this.psBombBtn].forEach((button) => {
+    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBubbleBtn, this.psBombBtn, this.psBroomBtn].forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
@@ -788,6 +807,7 @@ export class PlayerControls {
       const rows = [shown(gyro) ? 2 : 1, 0];   // next free row: [jump column, bomb column]
       if (shown(this.psBubbleBtn)) this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: rows[1]++ });
       if (shown(this.psBombBtn)) this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: rows[1]++ });
+      if (shown(this.psBroomBtn)) this.applyMobileButtonPosition(this.psBroomBtn, { x: 1, y: rows[1]++ });
       for (const b of [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5]) {
         if (!b.dataset.psWeaponId) continue;
         const col = rows[1] <= rows[0] ? 1 : 0;
@@ -819,6 +839,8 @@ export class PlayerControls {
     this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: blockInGrid ? 1 : 0 });
     // Bomb sits above the bubble (the jump/gyro column and weapon buttons stay clear)
     this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: blockInGrid ? 2 : 1 });
+    // (Town's broom: on top of the weapon column)
+    this.applyMobileButtonPosition(this.psBroomBtn, { x: 2, y: 4 });
   }
 
   setupEventListeners() {
@@ -829,6 +851,11 @@ export class PlayerControls {
       this.keysPressed.add(key);
       if (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === ' ') {
         this.safePreventDefault(e);
+      }
+      // B: on / off Town's flying broom
+      if (key === 'b' && !e.repeat && !e.target?.closest?.('input, textarea')) {
+        const appState = appContext.uiState.appState ?? window.appState;
+        if (appState?.hasBroom?.()) { appState.toggleBroom?.(); this.refreshActionButtons(); }
       }
       if (e.key === " ") {
         if (e.repeat) return;
@@ -1345,7 +1372,10 @@ export class PlayerControls {
       // (a hook that keeps the player inside an area — the pirate ship's deck on a voyage)
       if (typeof this.positionConstraint === 'function') this.positionConstraint(this);
 
-      if (!climbHandled && !window.phoneSwordAirborne) {
+      if (this.ride) {
+        // (riding Town's broom: it sets the height — no ground snap, no ledge falls)
+        if (Number.isFinite(this.ride.y)) this.playerY = this.ride.y;
+      } else if (!climbHandled && !window.phoneSwordAirborne) {
         // (under a bridge / an overhang: the ground under it, not the deck — _groundHeightAt)
         const groundY = this._groundHeightAt(this.playerX, this.playerZ);
         // Walked off a ledge: fall with the jump gravity (onLedgeFall hook) instead of
@@ -1382,7 +1412,7 @@ export class PlayerControls {
 
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
-        this.playerModel.rotation.set(0, roll ? roll.yaw : this.yaw, 0);
+        this.playerModel.rotation.set(0, roll ? roll.yaw : this.ride ? this.ride.yaw : this.yaw, 0);
         this.playerModel.up.set(0, 1, 0);
         this.camera.up.set(0, 1, 0);
 

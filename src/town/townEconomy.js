@@ -38,11 +38,12 @@ export const SHOP_GEAR = [
   { id: 'lockpick', kind: 'lockpick', label: 'Lock-pick', emoji: '🔧', price: 15, desc: 'Opens one locked door, then it breaks. A break-in is a crime if anyone sees.' },
 ];
 // The town wizard's stall out in the woods (townStalls.js 'wizard'): the wand and the potions,
-// as at the Showdown village's stall. life = health back to full (townTrade.js)
+// as at the Showdown village's stall, and the flying broom (src/items/broom.js). life = health back to full (townTrade.js)
 export const WIZARD_WARES = [
   { id: 'life',   kind: 'life',   label: 'Life Potion', emoji: '❤️', price: 25,  desc: 'Drink it for full health.' },
   { id: 'mana',   kind: 'mana',   label: 'Mana Potion', emoji: '🧪', price: 20,  needs: 'wand', desc: 'Fills the wand\'s mana.' },
   { id: 'wand',   kind: 'wand',   label: 'Magic Wand', emoji: '🪄', price: 150, desc: 'Swipe to cast fire / ice. Runs on mana.' },
+  { id: 'broom',  kind: 'broom',  label: 'Flying Broom', emoji: '🧹', price: 200, desc: 'Sit on it and fly — tilt the phone (or the joystick) the way to go.' },
 ];
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));

@@ -63,6 +63,7 @@ import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
 import { createSeaStart } from '../town/seaStart.js';
 import { OAR_REST_SWING, OAR_REST_TILT, OAR_STROKE_EXIT, oarStrokeDuration, oarStrokePose } from '../items/oar.js';
+import { createBroomRide } from '../items/broom.js';
 import { WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
@@ -802,8 +803,13 @@ async function initCore(runtimeContext) {
   // put back afterwards (matchCtx.startMatchLoadout / endMatchLoadout) — null outside one
   let _matchLoadout = null;
   // Town mode: the town's own gear, bought at its market, in place of the real inventory
-  // (startTownLoadout / endTownLoadout, further down) — { hasSword } while in Town, else null
+  // (startTownLoadout / endTownLoadout, further down) — { hasSword, hasRod, hasBroom } while in Town, else null
   let _townLoadout = null;
+  // Town's flying broom being ridden (src/items/broom.js; created with the town)
+  let _broomRide = null;
+  // Asks for a gyro recalibration when a gyro item comes out (set further down, once the
+  // calibration popup is in — _equipByPlayer / the broom)
+  let _gyroItemCalibPrompt = null;
   // Multiplayer duels (and the lobby) are sword only; battles use the pickups
   const _mpSwordOnly = () => !!duelMode?.isActive() && !_matchLoadout;
   var playerControls = null;
@@ -2862,6 +2868,11 @@ async function initCore(runtimeContext) {
   // it pointing down; townCanoe.js paddles with it); only while standing in the canoe, and then
   // nothing else comes out (the sea start's canoe: the rod too — seaStart.js)
   let _oarActive = false;
+  // Town's flying broom: the phone's pose (the gyro loop) and its pose when the player got on
+  // (or last recalibrated — `needRest`); the lean between them steers the broom (src/items/broom.js)
+  const _broomGyro = { q: new THREE.Quaternion(), rest: new THREE.Quaternion(), needRest: true, at: 0 };
+  const _broomTiltQ = new THREE.Quaternion();
+  const _broomTiltV = new THREE.Vector3();
   const isOarAllowed = () => !!town?.inCanoe?.() || !!seaStart?.isActive();
   const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
   // ── Paddling (OAR_TILT_*): the phone's tilt moves the oar along the stroke (oarStrokePose),
@@ -3184,6 +3195,15 @@ async function initCore(runtimeContext) {
     }
   }
 
+  // An equip the player asked for (a weapon button, the phone's): a gyro item coming out asks
+  // for a recalibration if it's been a while (_gyroItemCalibPrompt)
+  function _equipByPlayer(itemId) {
+    const before = getEquippedInventoryItemIdForHand('right');
+    equipInventoryItem(itemId);
+    const after = getEquippedInventoryItemIdForHand('right');
+    if (after && after !== before) _gyroItemCalibPrompt?.();
+  }
+
   function equipInventoryItem(itemId) {
     // Town's fishing rod: no inventory entry of its own (the sword's holds it, as for the wand)
     if (itemId === FISHING_ROD_ITEM_ID || itemId === OAR_ITEM_ID) {
@@ -3197,6 +3217,8 @@ async function initCore(runtimeContext) {
     // Multiplayer duels are sword only
     if (_mpSwordOnly() && itemId !== FOAM_SWORD_ITEM_ID) return;
     if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
+    // (off Town's broom first: hands on the weapon)
+    if (_broomRide?.isRiding()) _broomRide.dismount();
     // The wand (and Town's fishing rod) is the sword weapon in another form: switching between
     // them just swaps the model
     if (itemId === MAGIC_WAND_ITEM_ID || itemId === FOAM_SWORD_ITEM_ID || itemId === FISHING_ROD_ITEM_ID || itemId === OAR_ITEM_ID) {
@@ -6016,6 +6038,8 @@ async function initCore(runtimeContext) {
     _resetSwordCalibDrift();
     // Gun / shield gyro aim: the current pose becomes its neutral too (re-captured next frame)
     _stopWeaponGyroAim();
+    // (and the broom's rest)
+    _broomGyro.needRest = true;
   };
 
   // Gun / shield aim from the phone gyro (sword or "Use This Device"). Neutral = the phone
@@ -6301,6 +6325,15 @@ async function initCore(runtimeContext) {
     phoneSwordConnectCalib.classList.remove('hidden');
   };
   const _isSwordCalibPromptOpen = () => !!phoneSwordConnectCalib && !phoneSwordConnectCalib.classList.contains('hidden');
+  // A gyro item coming out (the sword, wand, rod, oar, gun, shield, the broom): the calibration
+  // popup if a gyro's connected and it's been GYRO_ITEM_CALIB_FRESH_MS since the last one
+  // (the game doesn't wait on it)
+  const GYRO_ITEM_CALIB_FRESH_MS = 90000;
+  _gyroItemCalibPrompt = () => {
+    if (!window.phoneSwordGyro?.connected) return;
+    if (performance.now() - _swordCalibratedAtMs < GYRO_ITEM_CALIB_FRESH_MS) return;
+    _promptSwordCalibration();
+  };
 
   // ── Phone controller input (phone-sword.html) ─────────────────────────────
   // Besides gyro + block, the phone page has a joystick and bomb/gun/fire/shield/bubble/jump
@@ -6361,7 +6394,7 @@ async function initCore(runtimeContext) {
   // Back from the gun / shield / wand: the sword, or (Town without one) empty hands
   const _backToSword = () => {
     if (_townLoadout && !_townLoadout.hasSword) _putWeaponsAway();
-    else equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    else _equipByPlayer(FOAM_SWORD_ITEM_ID);
   };
   const _toggleRemoteWeapon = (itemId) => {
     const appStateRef = window.appState;
@@ -6370,7 +6403,7 @@ async function initCore(runtimeContext) {
     const equippedId = playerControls?.getEquippedWeapon?.('right')?.itemId;
     // Pressing the held weapon again goes back to the sword (Town without one: empty hands)
     if (equippedId === itemId) _backToSword();
-    else appStateRef.equipInventoryItem?.(itemId);
+    else _equipByPlayer(itemId);
     playerControls?.refreshActionButtons?.();
   };
   const _handlePhoneAction = (action) => {
@@ -6406,24 +6439,27 @@ async function initCore(runtimeContext) {
       // Magic wand ↔ sword
       if (!isWandAllowed()) return;
       if (isWandEquipped()) _backToSword();
-      else equipInventoryItem(MAGIC_WAND_ITEM_ID);
+      else _equipByPlayer(MAGIC_WAND_ITEM_ID);
       playerControls?.refreshActionButtons?.();
     } else if (action === 'rod') {
       // The sea start: the rod (from the oar)
       if (seaStart?.isActive()) { seaStart.pick('rod'); return; }
       // Town: fishing rod ↔ the sword (or empty hands); in the canoe, ↔ the oar
       if (!isRodAllowed()) return;
-      if (isRodEquipped() && town?.inCanoe?.()) equipInventoryItem(OAR_ITEM_ID);
+      if (isRodEquipped() && town?.inCanoe?.()) _equipByPlayer(OAR_ITEM_ID);
       else if (isRodEquipped()) _backToSword();
-      else equipInventoryItem(FISHING_ROD_ITEM_ID);
+      else _equipByPlayer(FISHING_ROD_ITEM_ID);
       playerControls?.refreshActionButtons?.();
     } else if (action === 'sword') {
       // Town: 🗡 Sword out ↔ ✋ Hands (nothing in hand); something grabbed: drop it
       if (!_townLoadout || isOarAllowed()) return; // (in the canoe the oar stays in hand)
       if (town?.holding()) { town.dropHeld(); return; }
       if (_heldWeaponId()) _putWeaponsAway();
-      else equipInventoryItem(FOAM_SWORD_ITEM_ID);
+      else _equipByPlayer(FOAM_SWORD_ITEM_ID);
       playerControls?.refreshActionButtons?.();
+    } else if (action === 'broom') {
+      // Town: on / off the flying broom
+      _toggleBroom();
     } else if (action === 'wandShieldDown') {
       setWandShieldHold(true);
     }
@@ -6480,6 +6516,9 @@ async function initCore(runtimeContext) {
       // Town: the sword is bought; 🗡 / ✋ puts everything away; the fishing rod once bought
       hasSword: _townLoadout ? _townLoadout.hasSword : true,
       hasRod: isRodAllowed(),
+      // Town's flying broom (once bought): on it / off it
+      hasBroom: !!_townLoadout?.hasBroom,
+      onBroom: !!_broomRide?.isRiding(),
       canUnequip: !!_townLoadout,
       // (the shield held up from the wand: Block keeps saying Shield until it's let go)
       wandShieldHeld: _wandShieldHold,
@@ -7077,6 +7116,10 @@ async function initCore(runtimeContext) {
     isRodEquipped: () => isRodEquipped(),
     isOarEquipped: () => isOarEquipped(),
     isInCanoe: () => isOarAllowed(),
+    // Town's flying broom (bought from the wizard): owned / being ridden / on ↔ off
+    hasBroom: () => !!_townLoadout?.hasBroom,
+    isRidingBroom: () => !!_broomRide?.isRiding(),
+    toggleBroom: () => _toggleBroom(),
     // Town: something grabbed — the Block bar is its mode (the hose's 'water'; null: none), held
     // down: useTownHeld(true), let go: false
     getTownHeldBar: () => (town?.isActive() ? town.heldBar() : null),
@@ -7093,7 +7136,7 @@ async function initCore(runtimeContext) {
     getEquippedInventoryItemIds: () => getEquippedInventoryItemIds(),
     isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
     getInventoryItemActions: (itemId) => getInventoryItemActions(itemId),
-    equipInventoryItem: (itemId) => equipInventoryItem(itemId),
+    equipInventoryItem: (itemId) => _equipByPlayer(itemId),
     unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
@@ -8499,6 +8542,7 @@ async function initCore(runtimeContext) {
     health: statsState.health,
     sword: !!_townLoadout?.hasSword,
     rod: !!_townLoadout?.hasRod,
+    broom: !!_townLoadout?.hasBroom,
     gun: (inventoryState.pistol?.count ?? 0) > 0,
     ammo: getPistolAmmoCount(),
     shield: (inventoryState[SHIELD_ITEM_ID]?.count ?? 0) > 0
@@ -8520,6 +8564,7 @@ async function initCore(runtimeContext) {
   const _setTownItems = (items = {}) => {
     _townLoadout.hasSword = !!items.sword;
     _townLoadout.hasRod = !!items.rod;
+    _townLoadout.hasBroom = !!items.broom;
     // (the wand and the rod are the sword in another form: they need the sword's inventory entry too)
     if (items.sword || items.wand || items.rod) inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
     else delete inventoryState[FOAM_SWORD_ITEM_ID];
@@ -8543,7 +8588,7 @@ async function initCore(runtimeContext) {
     TOWN_ASIDE_STATS.forEach((key) => { aside.stats[key] = statsState[key]; });
     TOWN_ITEM_IDS.forEach((id) => { aside.inventory[id] = inventoryState[id] ?? null; });
     _saveAside = aside;
-    _townLoadout = { hasSword: false, hasRod: false };
+    _townLoadout = { hasSword: false, hasRod: false, hasBroom: false };
     _setTownItems(items);
     // The town's own wallet and hearts (a save from before Town had its own: a few coins)
     statsState.coins = Number.isFinite(items.coins) ? Math.max(0, Math.floor(items.coins)) : TOWN_START_COINS;
@@ -8555,6 +8600,7 @@ async function initCore(runtimeContext) {
   // Back to the real inventory; returns the town's gear (for its save)
   const endTownLoadout = () => {
     if (!_townLoadout) return null;
+    _broomRide?.dismount();
     const items = _townItems();
     _putWeaponsAway();
     deactivatePlayerBubble();
@@ -8573,14 +8619,15 @@ async function initCore(runtimeContext) {
     _refreshGearUI();
     return items;
   };
-  // A purchase at the town's market: 'sword' | 'gun' | 'ammo' | 'shield' | 'bomb' | 'bubble' |
-  // 'wand' | 'mana' (n: how many bullets / bombs). Returns false when it can't be had.
+  // A purchase at the town's market: 'sword' | 'rod' | 'gun' | 'ammo' | 'shield' | 'bomb' | 'bubble' |
+  // 'wand' | 'mana' | 'broom' (n: how many bullets / bombs). Returns false when it can't be had.
   const grantTownItem = (kind, n = 1) => {
     if (!_townLoadout) return false;
     const items = _townItems();
     const nothingInHand = !_heldWeaponId();
     if (kind === 'sword') items.sword = true;
     else if (kind === 'rod') { if (items.rod) return false; items.rod = true; }
+    else if (kind === 'broom') { if (items.broom) return false; items.broom = true; }
     else if (kind === 'gun') { items.ammo = (items.gun ? items.ammo : 0) + TOWN_GUN_AMMO; items.gun = true; }
     else if (kind === 'ammo') { if (!items.gun) return false; items.ammo += n; }
     else if (kind === 'shield') items.shield = MATCH_SHIELD_HEALTH;
@@ -8919,7 +8966,7 @@ async function initCore(runtimeContext) {
     // (the blade paddles); held still in it, carried along as it moves
     setOar: (on) => {
       _oarStrokeReset();
-      if (on) { _putWeaponsAway(); equipInventoryItem(OAR_ITEM_ID); } else if (_oarActive) _putWeaponsAway();
+      if (on) { _putWeaponsAway(); _equipByPlayer(OAR_ITEM_ID); } else if (_oarActive) _putWeaponsAway();
       _refreshGearUI();
       _phoneSwordStatusNow?.();
     },
@@ -8944,13 +8991,14 @@ async function initCore(runtimeContext) {
     // Phone buzz on a fishing cue (status → the phone vibrates when its fishCue changes)
     refreshPhone: () => _phoneSwordStatusNow?.(),
     grantItem: (kind, n) => grantTownItem(kind, n),
-    // Arrested: the guards take every weapon (a fishing rod's no weapon: kept)
+    // Arrested: the guards take every weapon (a fishing rod / the broom are no weapons: kept)
     confiscate: () => {
       if (!_townLoadout) return;
-      const rod = _townLoadout.hasRod;
+      const { hasRod: rod, hasBroom: broom } = _townLoadout;
+      _broomRide?.dismount();
       _putWeaponsAway();
       deactivatePlayerBubble();
-      _setTownItems({ rod });
+      _setTownItems({ rod, broom });
       _refreshGearUI();
     },
     magicDamage: { fire: MAGIC_FIRE_DAMAGE, ice: MAGIC_ICE_DAMAGE },
@@ -8960,6 +9008,47 @@ async function initCore(runtimeContext) {
     heal: (n) => setStat('health', Math.min(effectiveMaxHealthSegments(), statsState.health + n)),
   });
   window.town = town; // (dev console: town.debug())
+  // Town's flying broom (bought from the wizard): sat on, floating, steered by the phone's lean
+  // (the joystick / WASD without a gyro); the camera swings round behind it (src/items/broom.js)
+  _broomRide = createBroomRide({
+    scene,
+    getControls: () => playerControls,
+    getPlayerModel: () => playerModel,
+    getGroundY: (x, z) => getTerrainHeight(x, z),
+    getWaterY: (x, z) => _activeMap?.water?.(x, z) ?? null,
+    // (the rotation from the rest pose, in the game's frame: the way its up leans)
+    getTilt: () => {
+      if (!window.phoneSwordGyro?.connected || _broomGyro.needRest || performance.now() - _broomGyro.at > 500) return null;
+      _broomTiltQ.copy(_broomGyro.rest).invert().premultiply(_broomGyro.q);
+      const up = _broomTiltV.set(0, 1, 0).applyQuaternion(_broomTiltQ);
+      return { x: up.x, z: up.z };
+    },
+    getSteer: _getSteer,
+  });
+  const _canRideBroom = () => !!_townLoadout?.hasBroom && !playerDead && !_gamePaused && !!town?.canRide();
+  const _toggleBroom = () => {
+    if (_broomRide.isRiding()) _broomRide.dismount();
+    else if (_canRideBroom()) {
+      _putWeaponsAway();
+      // (the phone's pose now is its rest — level flight)
+      _broomGyro.needRest = true;
+      if (_broomRide.mount()) _gyroItemCalibPrompt?.();
+    }
+    playerControls?.refreshActionButtons?.();
+    _phoneSwordStatusNow?.();
+  };
+  // (each frame, before the controls) Off it when Town can't have it any more (a room, jail,
+  // the canoe, going down, leaving Town…)
+  const _updateBroom = (dt) => {
+    if (!_broomRide.isRiding()) return;
+    if (!_townLoadout?.hasBroom || playerDead || !town?.canRide()) {
+      _broomRide.dismount();
+      playerControls?.refreshActionButtons?.();
+      _phoneSwordStatusNow?.();
+      return;
+    }
+    _broomRide.update(dt);
+  };
   // Town at night, out past the houses (town.wantsLantern): a lantern on the player's left
   // hand — the game 'right' floating hand (labels are mirrored); with `lanternHeld` set,
   // updateProceduralPlayerRig poses that arm for it and grips weapons with the other hand only
@@ -9007,8 +9096,8 @@ async function initCore(runtimeContext) {
     refreshPhone: () => _phoneSwordStatusNow?.(),
     // 'rod' | 'oar' in hand, or null: nothing
     hold: (kind) => {
-      if (kind === 'rod') equipInventoryItem(FISHING_ROD_ITEM_ID);
-      else if (kind === 'oar') equipInventoryItem(OAR_ITEM_ID);
+      if (kind === 'rod') _equipByPlayer(FISHING_ROD_ITEM_ID);
+      else if (kind === 'oar') _equipByPlayer(OAR_ITEM_ID);
       else _putWeaponsAway();
       _refreshGearUI();
       _phoneSwordStatusNow?.();
@@ -9204,7 +9293,11 @@ async function initCore(runtimeContext) {
     updateRoadLightsNearPlayer();
     // A voyage on the pirate ship: it sails, carrying everyone aboard (before the player moves)
     _voyageUpdate(frameDelta);
+    // Town's flying broom: it moves the player (before the controls place them), then sits
+    // under them (after)
+    _updateBroom(frameDelta);
     playerControls.update();
+    _broomRide?.afterControls();
     updateBloodEffects(frameDelta);
     updateBulletImpacts(frameDelta);
     updateExplosionEffects(frameDelta);
@@ -9413,6 +9506,10 @@ async function initCore(runtimeContext) {
           (_pmUD.gyroArmQuat ??= new THREE.Quaternion()).copy(activeGyroQ).multiply(_phoneSwordBaseQ);
           _pmUD.gyroArmTime = performance.now();
         }
+        // (Town's broom: the phone's pose — its lean from the rest pose steers it)
+        _broomGyro.q.copy(activeGyroQ);
+        if (_broomGyro.needRest) { _broomGyro.rest.copy(activeGyroQ); _broomGyro.needRest = false; }
+        _broomGyro.at = performance.now();
       }
     } else if (foamSword?.holder === playerControls) {
       // No phone / gyro: hold the sword in the neutral pose (blade straight up) instead of
@@ -10052,7 +10149,7 @@ async function initCore(runtimeContext) {
       if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
-        if (!_classicMode && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic
+        if (!_classicMode && !_broomRide?.isRiding() && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic (or on the broom)
           _psJumpVelY = PS_JUMP_FORCE;
           window.phoneSwordAirborne = true;
         }
