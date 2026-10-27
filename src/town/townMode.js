@@ -600,14 +600,20 @@ export function createTownMode(ctx) {
       }
     }
     T.ready = true;
+    // (the sea start's guest: what they caught out there comes ashore with them)
+    if (T.broughtGoods) {
+      for (const [g, n] of Object.entries(T.broughtGoods)) if (n > 0 && g in T.goods) T.gain(g, n);
+      T.broughtGoods = null;
+    }
     save();
   };
 
-  // arrival: { x, z, yaw } — where the player comes in (the sea start's guest stepping ashore by
-  // the fishing spot), else the town's spawn
+  // arrival: { x, z, yaw, goods? } — where the player comes in (the sea start's guest stepping
+  // ashore by the fishing spot, with what they caught), else the town's spawn
   const enter = ({ arrival = null } = {}) => {
     if (T.active) return;
     T.active = true;
+    T.broughtGoods = arrival?.goods ?? null;
     T.ready = false;
     const token = ++T.enterToken;
     document.body.classList.add('town-mode');

@@ -23,6 +23,12 @@
 // spot is dry), and, if spots should differ, a per-water-body table (sea / lake / river → which
 // fish, bite times, sizes) looked up from what the water sampler hit.
 
+//
+// The guest's sea start (seaStart.js) installs this too, on a small stand-in for the town's
+// state: its fishing spot is where the canoe starts out, with its own reach (T.fishSpotReach, m)
+// and room for the canoe's drift (T.fishCancelReach, m) and its own line for out of reach
+// (T.fishAwayText).
+
 import * as THREE from 'three';
 import { createFishingRig } from '../items/fishingRod.js';
 import {
@@ -94,7 +100,7 @@ export function installTownFishing(T, ctx) {
     const s = spot();
     if (!s) return false;
     const p = T.playerPos();
-    return dist2(p.x, p.z, s.x, s.z) < FISH_SPOT_RADIUS * FISH_SPOT_RADIUS;
+    return dist2(p.x, p.z, s.x, s.z) < (T.fishSpotReach ?? FISH_SPOT_RADIUS * FISH_SPOT_RADIUS);
   };
   // Where the bobber lands: the water nearest `dist` m in front of the player
   const _fwd = new THREE.Vector3();
@@ -180,7 +186,7 @@ export function installTownFishing(T, ctx) {
   const cast = (power) => {
     if (T.fishing || !ctx.isRodEquipped() || T.sequence || ctx.isPlayerDead()) return false;
     if (!atSpot()) {
-      if (T.simT - awayHintAt > 5) { awayHintAt = T.simT; say('Fish at the fishing spot by the water.'); }
+      if (T.simT - awayHintAt > 5) { awayHintAt = T.simT; say(T.fishAwayText ?? 'Fish at the fishing spot by the water.'); }
       return false;
     }
     if (T.bagRoom() <= 0) { T.bagFullNote(); return false; }
@@ -260,7 +266,7 @@ export function installTownFishing(T, ctx) {
     let load = 0;
     if (f) {
       const p = T.playerPos();
-      if (dist2(p.x, p.z, f.x, f.z) > FISH_CANCEL_DIST * FISH_CANCEL_DIST || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
+      if (dist2(p.x, p.z, f.x, f.z) > (T.fishCancelReach ?? FISH_CANCEL_DIST * FISH_CANCEL_DIST) || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
         if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.stop(); }
         else { if (f.fish) say('It got away.'); finish(); }
         refreshHud();
