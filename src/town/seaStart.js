@@ -314,7 +314,7 @@ export function createSeaStart(ctx, config) {
       boat.w = 0;
       if (Math.abs(d) <= step) { boat.yaw = aimYaw; aimYaw = null; } else boat.yaw += Math.sign(d) * step;
     }
-    if (held === 'oar' && aimYaw == null) boat.paddle(dt, ctx.getOarModel(), ctx.getSteer());
+    if (held === 'oar' && aimYaw == null) boat.paddle(dt, ctx.getOarModel(), ctx.getSteer(), ctx.getOarStroke());
     else boat.blade = null;
     boat.move(dt, simT);
     const s = boat.standPoint();

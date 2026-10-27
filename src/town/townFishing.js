@@ -1,6 +1,8 @@
 // Town: fishing. The rod is bought at the shop (SHOP_GEAR 'rod') and held like the
 // sword — it is the sword weapon in rod form, swung with the phone's gyro (bootstrapGameApp.js).
-// At the fishing spot (one for now — the shore spot nearest the middle, `places.fishSpot`):
+// At the fishing spot (one for now — the shore spot nearest the middle, `places.fishSpot`), or
+// anywhere out in the canoe (T.fishAnywhere — townCanoe.js: the rod comes out there too, the
+// water round it — T.fishWater — is what a cast lands on, and it may drift FISH_CANOE_DRIFT):
 //   • cast: swing the rod forward — the harder, the farther the bobber flies (FISH_CAST_*)
 //   • wait: the bobber floats; a nibble first sometimes (pulling on it scares the fish off)
 //   • bite: the bobber goes under (the phone buzzes) — pull the rod back within FISH_HOOK_S
@@ -32,7 +34,7 @@
 import * as THREE from 'three';
 import { createFishingRig } from '../items/fishingRod.js';
 import {
-  FISH_CANCEL_DIST, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER,
+  FISH_CANCEL_DIST, FISH_CANOE_DRIFT, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER,
   FISH_HOOK_S, FISH_KEY_REEL, FISH_LAND_DIST, FISH_LINE_MAX, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S, FISH_PULL_KEEP,
   FISH_PULL_SWING, FISH_PULL_TENSION, FISH_REEL_M, FISH_RUN_S, FISH_RUN_SPEED, FISH_SETTLE_S, FISH_SIZES,
   FISH_SPOT_RADIUS, FISH_TENSION_DECAY, FISH_TENSION_PER_TURN, FISH_TIRED_S, FISH_WAIT_S, NAV_CELL,
@@ -96,7 +98,9 @@ export function installTownFishing(T, ctx) {
 
   // ── Where: the fishing spot, and the water a cast can reach from it ──
   const spot = () => T.layout?.places.fishSpot ?? null;
+  const anywhere = () => !!T.fishAnywhere?.();
   const atSpot = () => {
+    if (anywhere()) return true;
     const s = spot();
     if (!s) return false;
     const p = T.playerPos();
@@ -117,7 +121,7 @@ export function installTownFishing(T, ctx) {
       for (let dx = -r; dx <= r; dx += NAV_CELL / 2) {
         const x = p.x + dx;
         const z = p.z + dz;
-        if (dx * dx + dz * dz < 1.5 * 1.5 || !nav.isWater(nav.indexAt(x, z))) continue;
+        if (dx * dx + dz * dz < 1.5 * 1.5 || !(T.fishWater?.(x, z) ?? nav.isWater(nav.indexAt(x, z)))) continue;
         const d = dist2(x, z, aimX, aimZ);
         if (d < bestD) { bestD = d; best = { x, z }; }
       }
@@ -266,7 +270,8 @@ export function installTownFishing(T, ctx) {
     let load = 0;
     if (f) {
       const p = T.playerPos();
-      if (dist2(p.x, p.z, f.x, f.z) > (T.fishCancelReach ?? FISH_CANCEL_DIST * FISH_CANCEL_DIST) || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
+      const reach = anywhere() ? FISH_CANOE_DRIFT * FISH_CANOE_DRIFT : (T.fishCancelReach ?? FISH_CANCEL_DIST * FISH_CANCEL_DIST);
+      if (dist2(p.x, p.z, f.x, f.z) > reach || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
         if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.stop(); }
         else { if (f.fish) say('It got away.'); finish(); }
         refreshHud();

@@ -733,9 +733,9 @@ export class PlayerControls {
     // (Town: the sword is bought like the rest, and ✋ Hands puts everything away)
     const unarmedAllowed = !!appState?.isUnarmedAllowed?.();
     const hasSword = appState?.ownsSword?.() ?? true;
-    // (in Town's canoe the oar is all there is: no weapon buttons)
+    // (in Town's canoe: just the oar, and the rod to fish from it)
     const inCanoe = !!appState?.isInCanoe?.();
-    const weapons = inCanoe ? [] : [
+    const weapons = inCanoe ? (hasRod ? [{ id: 'canoe_oar', label: 'Oar' }, { id: 'fishing_rod', label: 'Rod' }] : []) : [
       ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
       ...(hasWand ? [{ id: 'magic_wand', label: 'Wand' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
