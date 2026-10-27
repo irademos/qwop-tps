@@ -3,9 +3,9 @@
 // CANOE_MIN_DEPTH. Shared by Town's canoe (townCanoe.js — moored by the fishing spot, got in and
 // out of) and the guest's sea start (seaStart.js — out on the open sea).
 //
-// Paddling is a stroke of the oar (oar.js — auto-animated, started by a tilt of the phone or
-// the joystick; bootstrapGameApp.js): through its pull it pushes the canoe CANOE_STROKE_DV (m/s,
-// × the tilt's strength; a back stroke CANOE_PADDLE_BACK as hard and the other way) and, since
+// Paddling is a stroke of the oar (oar.js — moved along by the phone's tilt, or auto-animated
+// for the joystick; bootstrapGameApp.js): through its pull it pushes the canoe CANOE_STROKE_DV
+// (m/s, × the stroke's strength; a back stroke CANOE_PADDLE_BACK as hard and the other way) and, since
 // it's off to one side, turns it CANOE_STROKE_TURN (rad/s): a forward stroke on the left drives
 // it forward and a little to the right, on the right forward and a little to the left. The
 // joystick / WASD paddle too (without a gyro the strokes they show are only for the look). The
@@ -37,8 +37,8 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     blade: null,        // the oar blade's last world position + time
     bladeIn: false,     // its blade in the water (for the splash going in / coming out)
     splashAt: 0,        // s (real clock): the next drops off a stroke
-    strokeId: null,     // the stroke pushing it, and how far through its pull it has pushed
-    strokeDone: 0,
+    strokeId: null,     // the stroke pushing it, and how far through its pull it was last frame
+    strokePull: 0,
   };
   // (world space: put beside the canoe in whatever holds it, the first time it moves)
   const splash = createWaterSplash();
@@ -86,14 +86,15 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     const c = boat;
     const fwdX = Math.sin(c.yaw);
     const fwdZ = Math.cos(c.yaw);
-    // The stroke's pull: what's left of its push since last frame (by how far through it is, so
-    // a slow frame doesn't lose any)
+    // The stroke's pull: how far the blade went back through it since last frame (by how far
+    // through it is, so a slow frame doesn't lose any; going the other way — the phone's tilt
+    // taking it back, lifted — pushes nothing, and it pushes again on the way back through)
     let pulling = false;
     if (stroke && !stroke.visual) {
-      if (stroke.id !== c.strokeId) { c.strokeId = stroke.id; c.strokeDone = 0; }
       const p = oarStrokePull(stroke.u);
-      const dp = p - c.strokeDone;
-      c.strokeDone = Math.max(c.strokeDone, p);
+      if (stroke.id !== c.strokeId) { c.strokeId = stroke.id; c.strokePull = stroke.u > 0.02 ? p : 0; }
+      const dp = p - c.strokePull;
+      c.strokePull = p;
       pulling = p > 0 && p < 1;
       if (dp > 0) {
         const dv = dp * stroke.strength * CANOE_STROKE_DV * stroke.dir * (stroke.dir < 0 ? CANOE_PADDLE_BACK : 1);

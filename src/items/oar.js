@@ -19,12 +19,13 @@ export const OAR_SUPPORT_AT = 0.55; // m down the shaft from the grip: the lower
 export const OAR_HAND_OUT = 0.3;    // m out to the side the blade's on: the top hand (FoamSword.oarLean)
 export const OAR_BLADE_AT = SHAFT_LENGTH + BLADE_LENGTH / 2; // m down from the grip: the blade's middle
 
-// ── A paddle stroke, auto-animated (the phone's tilt only starts it — bootstrapGameApp.js) ──
+// ── A paddle stroke: driven along by the phone's tilt, or auto-animated (the joystick) — bootstrapGameApp.js ──
 // u: 0…1 through the stroke. The blade's way from the top hand is a tilt from straight down
 // and a swing fore / aft (+ ahead) of straight out to the side: it reaches ahead and dips in
 // (catch), sweeps back through the water (pull — canoeBoat.js pushes the canoe meanwhile),
 // lifts out (exit) and comes back to rest beside the hull, lifted. A back stroke runs the
-// swing the other way. A stronger stroke (further tilt of the phone) is quicker.
+// swing the other way. A timed stroke at a higher strength is quicker. lift (0…1) raises the
+// blade out of the water — the tilt taking the oar back along the stroke.
 export const OAR_STROKE_CATCH = 0.2;   // u: in the water from here…
 export const OAR_STROKE_PULL = 0.62;   // …pulling till here…
 export const OAR_STROKE_EXIT = 0.78;   // …out of it by here (the next stroke may start)
@@ -42,8 +43,8 @@ export const oarStrokeDuration = (strength) => OAR_STROKE_S[0] + (OAR_STROKE_S[1
 /** How far through the pull at u (0…1). */
 export const oarStrokePull = (u) => Math.min(1, Math.max(0, (u - OAR_STROKE_CATCH) / (OAR_STROKE_PULL - OAR_STROKE_CATCH)));
 const ease = (a, b, t) => a + (b - a) * (t * t * (3 - 2 * t));
-/** The blade's pose at u of a stroke (dir: 1 forward, −1 back): { tilt, swing } in radians. */
-export function oarStrokePose(u, dir = 1) {
+/** The blade's pose at u of a stroke (dir: 1 forward, −1 back; lift 0…1 out of the water): { tilt, swing } in radians. */
+export function oarStrokePose(u, dir = 1, lift = 0) {
   let tilt;
   let swing;
   if (u < OAR_STROKE_CATCH) {
@@ -63,6 +64,7 @@ export function oarStrokePose(u, dir = 1) {
     tilt = ease(OUT_TILT, OAR_REST_TILT, t);
     swing = ease(-BEHIND * dir * 1.2, OAR_REST_SWING, t);
   }
+  if (lift > 0) tilt = Math.max(tilt, tilt + (OUT_TILT - tilt) * Math.min(1, lift));
   return { tilt, swing };
 }
 
