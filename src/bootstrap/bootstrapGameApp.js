@@ -8903,6 +8903,7 @@ async function initCore(runtimeContext) {
         const fighter = createBossFighter({ ..._bossFighterCtx(enemy), name, gear, hud: false, glow: false });
         enemy._townGear = fighter;
         enemy.onAfterUpdate = () => { if (!enemy._townPassive) fighter.update(); };
+        if (gear.wand) enemy.onCast = (cast) => _castEnemySpell(enemy, cast); // (its wand spells)
       }
       if (passive) _townSetFighterPassive(enemy, true);
       return enemy;
@@ -10023,10 +10024,22 @@ async function initCore(runtimeContext) {
       }
     }
 
+    // ── Town: in a talk, the camera turns to whoever's talking to the player ──
+    const _townTalker = town?.isActive() && playerControls && !playerDead ? town.talkFocus() : null;
+    if (_townTalker) {
+      const _pp = playerModel.position;
+      const _dx = _townTalker.x - _pp.x;
+      const _dz = _townTalker.z - _pp.z;
+      if (Math.hypot(_dx, _dz) > 0.3) {
+        playerControls.yaw += wrapDeltaRad(Math.atan2(_dx, _dz) - playerControls.yaw) * Math.min(1, frameDelta * 4);
+      }
+      _aimCameraPitchAt(_townTalker, frameDelta);
+    }
+
     // ── Town: with the sword / wand out, the camera turns toward whoever's coming at the player
     // (townsfolk / the law / bandits fighting them, raiding bandits close by at night); turning
     // by hand pauses it ──
-    if (town?.isActive() && playerControls && !playerDead && foamSword?.holder === playerControls && !_rodActive && !_oarActive && !_weaponAim.active) {
+    if (!_townTalker && town?.isActive() && playerControls && !playerDead && foamSword?.holder === playerControls && !_rodActive && !_oarActive && !_weaponAim.active) {
       const _nowT = performance.now();
       if (_townCamLastYaw !== null && Math.abs(wrapDeltaRad(playerControls.yaw - _townCamLastYaw)) > 0.01) {
         _townCamManualUntil = _nowT + TOWN_AIM_MANUAL_MS;

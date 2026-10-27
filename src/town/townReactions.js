@@ -21,6 +21,8 @@ export function installTownReactions(T, ctx) {
   const followers = () => T.npcs.filter((n) => n.alive && n.following);
   // Guards carry a shield; the sheriff a gun too once it's ★★★; bandits' gear is their role's
   const fighterGear = (n) => {
+    // (bandits: more gear the bigger the gang — townBandits.js)
+    if (n.def.outlaw) return T.banditGear(n);
     if (n.def.gear) return n.def.gear;
     if (n.role === 'sheriff') return T.law.stars >= 3 ? { gun: true, shield: true } : { shield: true };
     if (n.def.law) return { shield: true };
@@ -72,7 +74,7 @@ export function installTownReactions(T, ctx) {
       return;
     }
     if (n.attitude < GRUDGE_ATTITUDE && d < AVOID_DIST && T.simT > n.avoidAt && !n.def.law
-      && !['flee', 'sleep', 'brawl', 'arrest', 'mug', 'raid', 'burgle', 'prowl'].includes(n.task?.type)) {
+      && !['flee', 'sleep', 'brawl', 'arrest', 'mug', 'raid', 'burgle', 'prowl', 'holdup'].includes(n.task?.type)) {
       n.avoidAt = T.simT + 20;
       T.say(n, pickOf(SHOUT_STAY_BACK));
       T.flee(n);
@@ -264,6 +266,7 @@ export function installTownReactions(T, ctx) {
       }
       case 'guide': return T.updateGuide(n, t, dt); // (the first day — townIntro.js)
       case 'seek': return T.updateSeek(n, t, dt); // (the sheriff coming over — townBandits.js)
+      case 'holdup': return T.updateHoldup(n, t, dt); // (a bandit robbing the player — townBandits.js)
       case 'mug': {
         const v = t.target;
         if (!v?.alive || v.fighter || v.inside || v.jailedUntil > T.simT) { n.task = null; T.decide(n); return true; }
