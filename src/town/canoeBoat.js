@@ -3,13 +3,14 @@
 // CANOE_MIN_DEPTH. Shared by Town's canoe (townCanoe.js — moored by the fishing spot, got in and
 // out of) and the guest's sea start (seaStart.js — out on the open sea).
 //
-// Paddling is a stroke of the oar (oar.js — auto-animated, started by a swing of the phone or
-// the joystick; bootstrapGameApp.js): through its pull it pushes the canoe CANOE_STROKE_DV (m/s,
-// × the swing's strength; a back stroke CANOE_PADDLE_BACK as hard and the other way) and, since
+// Paddling is a stroke of the oar (oar.js — moved along by the phone's tilt, or auto-animated
+// for the joystick; bootstrapGameApp.js): through its pull it pushes the canoe CANOE_STROKE_DV
+// (m/s, × the stroke's strength; a back stroke CANOE_PADDLE_BACK as hard and the other way) and, since
 // it's off to one side, turns it CANOE_STROKE_TURN (rad/s): a forward stroke on the left drives
 // it forward and a little to the right, on the right forward and a little to the left. The
 // joystick / WASD paddle too (without a gyro the strokes they show are only for the look). The
-// hull slides along easily and hardly sideways (CANOE_DRAG / CANOE_SIDE_DRAG).
+// hull slides along easily and hardly sideways (CANOE_DRAG / CANOE_SIDE_DRAG). Up against the
+// shore or a dock it slides / turns along it, pushed off a little (bump), instead of stopping dead.
 //
 // The blade splashes (waterSplash.js): going in and coming out, and drops thrown back off it
 // through the pull (CANOE_SPLASH_EVERY, more for a stronger stroke).
@@ -36,8 +37,8 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     blade: null,        // the oar blade's last world position + time
     bladeIn: false,     // its blade in the water (for the splash going in / coming out)
     splashAt: 0,        // s (real clock): the next drops off a stroke
-    strokeId: null,     // the stroke pushing it, and how far through its pull it has pushed
-    strokeDone: 0,
+    strokeId: null,     // the stroke pushing it, and how far through its pull it was last frame
+    strokePull: 0,
   };
   // (world space: put beside the canoe in whatever holds it, the first time it moves)
   const splash = createWaterSplash();
@@ -85,14 +86,15 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     const c = boat;
     const fwdX = Math.sin(c.yaw);
     const fwdZ = Math.cos(c.yaw);
-    // The stroke's pull: what's left of its push since last frame (by how far through it is, so
-    // a slow frame doesn't lose any)
+    // The stroke's pull: how far the blade went back through it since last frame (by how far
+    // through it is, so a slow frame doesn't lose any; going the other way — the phone's tilt
+    // taking it back, lifted — pushes nothing, and it pushes again on the way back through)
     let pulling = false;
     if (stroke && !stroke.visual) {
-      if (stroke.id !== c.strokeId) { c.strokeId = stroke.id; c.strokeDone = 0; }
       const p = oarStrokePull(stroke.u);
-      const dp = p - c.strokeDone;
-      c.strokeDone = Math.max(c.strokeDone, p);
+      if (stroke.id !== c.strokeId) { c.strokeId = stroke.id; c.strokePull = stroke.u > 0.02 ? p : 0; }
+      const dp = p - c.strokePull;
+      c.strokePull = p;
       pulling = p > 0 && p < 1;
       if (dp > 0) {
         const dv = dp * stroke.strength * CANOE_STROKE_DV * stroke.dir * (stroke.dir < 0 ? CANOE_PADDLE_BACK : 1);
@@ -150,6 +152,61 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     if (Math.abs(steer.turn) > 0.05) c.w -= steer.turn * CANOE_STEER_TURN * dt;
   };
 
+  // Up against the shore / a dock: the way off it (world, unit) — toward deeper water from the
+  // hull probes that touch ground at that pose (else from them toward the middle); null if none do
+  const SLOPE_STEP = 0.4; // m
+  const awayFromShallow = (fx, fz, fyaw) => {
+    let ax = 0;
+    let az = 0;
+    let mx = 0;
+    let mz = 0;
+    for (const [lx, lz] of HULL_PROBES) {
+      const p = toWorld({ x: fx, z: fz }, lx, lz, fyaw);
+      if (waterDepth(p.x, p.z) >= CANOE_MIN_DEPTH) continue;
+      const deep = (x2, z2) => Math.min(CANOE_MIN_DEPTH * 2, waterDepth(x2, z2));
+      ax += deep(p.x + SLOPE_STEP, p.z) - deep(p.x - SLOPE_STEP, p.z);
+      az += deep(p.x, p.z + SLOPE_STEP) - deep(p.x, p.z - SLOPE_STEP);
+      mx += fx - p.x;
+      mz += fz - p.z;
+    }
+    if (Math.hypot(ax, az) < 1e-6) { ax = mx; az = mz; }
+    const l = Math.hypot(ax, az);
+    return l > 1e-6 ? { x: ax / l, z: az / l } : null;
+  };
+  // The move to (nx, nz, nyaw) ran it aground: rather than stopping dead, it turns / slides
+  // along the bank, pushed off it a little if it has to — and loses only the speed into it
+  const bump = (nx, nz, nyaw) => {
+    const c = boat;
+    const away = awayFromShallow(nx, nz, nyaw) || awayFromShallow(c.x, c.z, c.yaw);
+    let into = 0;
+    if (away) {
+      into = Math.min(0, c.vx * away.x + c.vz * away.z);
+      // (along the bank: the move without the part into it)
+      const dx = nx - c.x;
+      const dz = nz - c.z;
+      const d = Math.min(0, dx * away.x + dz * away.z);
+      const sx = c.x + dx - away.x * d;
+      const sz = c.z + dz - away.z * d;
+      // (keeping the turn if it can, pushed off as little as will do)
+      for (const [px, pz, pyaw] of [[sx, sz, nyaw], [c.x, c.z, nyaw], [sx, sz, c.yaw]]) {
+        for (const push of [0, 0.03, 0.08, 0.15]) {
+          const tx = px + away.x * push;
+          const tz = pz + away.z * push;
+          if (!fits(tx, tz, pyaw)) continue;
+          c.x = tx; c.z = tz;
+          if (pyaw !== nyaw) c.w = 0;
+          c.yaw = pyaw;
+          c.vx -= away.x * into;
+          c.vz -= away.z * into;
+          return;
+        }
+      }
+    }
+    if (fits(c.x, c.z, nyaw)) { c.yaw = nyaw; c.vx = 0; c.vz = 0; }
+    else if (fits(nx, nz, c.yaw)) { c.x = nx; c.z = nz; c.w = 0; }
+    else { c.vx = 0; c.vz = 0; c.w = 0; }
+  };
+
   // Drag (along it, sideways — it hardly slides —, turning), then moving it unless that runs it
   // aground; placed on the water at t. Returns its yaw before the move.
   const move = (dt, t) => {
@@ -174,9 +231,7 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
       const nyaw = c.yaw + c.w * dt;
       // (stuck somewhere too shallow already: let it move off)
       if (fits(nx, nz, nyaw) || !fits(c.x, c.z, c.yaw)) { c.x = nx; c.z = nz; c.yaw = nyaw; }
-      else if (fits(c.x, c.z, nyaw)) { c.yaw = nyaw; c.vx = 0; c.vz = 0; }
-      else if (fits(nx, nz, c.yaw)) { c.x = nx; c.z = nz; c.w = 0; }
-      else { c.vx = 0; c.vz = 0; c.w = 0; }
+      else bump(nx, nz, nyaw);
     }
     place(t);
     const holder = boat.group.parent;
