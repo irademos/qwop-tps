@@ -23,6 +23,8 @@ export {
   loadShowdownCharacters,
   hasCompletedTutorial,
   saveTutorialCompleted,
+  loadTownSave,
+  saveTownSave,
   randomGuestName,
   buildGuestProfile
 } from '../player/playerProfile.js';

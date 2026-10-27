@@ -183,6 +183,7 @@ export function installTownWire(T, ctx) {
   const applyFull = (s) => {
     if (!s || !Array.isArray(s.people)) return;
     if (!T.ready) {
+      if (!T.cloudDone) return; // (the player's saves aren't in yet: the next one)
       T.spawnTown(s, T.loadPersonal());
       placeFromDyn(s.dyn);
       T.topPlace.textContent = `${TOWN_NAME} · ${T.net.playerCount()} online`;
@@ -363,9 +364,11 @@ export function installTownWire(T, ctx) {
   };
   // Waiting on the room: its host loads the town (or founds it), the rest ask the host for it
   const tickJoin = () => {
+    // (the player's saves in Firebase first — townMode.js fetchCloud, which times out itself)
+    if (!T.cloudDone) return;
     const now = performance.now();
     if (T.netFailed || now > T.joinUntil) {
-      const why = T.net.lastError() ?? (T.net.isOn() ? 'no answer from the town\'s other players' : 'timed out');
+      const why = T.net.lastError() ?? (T.net.isHost() ? 'timed out' : T.net.joinTrouble());
       console.warn(`[Town] playing alone: ${why}`);
       T.net.stop();
       T.netMode = 'off';
@@ -402,8 +405,11 @@ export function installTownWire(T, ctx) {
       // (lost the room: everyone's ours, a town of our own from here)
       becomeHost();
       T.netMode = 'off';
-      T.topPlace.textContent = `${TOWN_NAME}`;
-      T.feedLine('Lost the connection — the town carries on, just you now.');
+      T.topPlace.textContent = `${TOWN_NAME} · just you`;
+      T.feedLine(T.leftWhileAway
+        ? 'You were away, so you left the shared town — go back to the lobby and into Town to rejoin.'
+        : 'Lost the connection — the town carries on, just you now.');
+      T.leftWhileAway = false;
       return;
     }
     if (!T.net.ready()) return;
