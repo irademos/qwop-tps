@@ -4,8 +4,8 @@ import * as THREE from 'three';
 // but pointing the other way, along −Z: held as the sword weapon in oar form (FoamSword.oar),
 // the phone held straight up holds the oar straight down, by its handle, the blade in the water.
 // The top hand is on the grip (the origin, the T-handle just above it), the other hand lower
-// down the shaft (OAR_SUPPORT_AT); the blade's middle is the `oar-blade` object (townCanoe.js
-// reads where it is and how fast it moves through the water), its end `oar-tip`.
+// down the shaft (OAR_SUPPORT_AT); the blade's middle is the `oar-blade` object (canoeBoat.js
+// splashes where it goes in and out of the water), its end `oar-tip`.
 
 const SHAFT_COLOR = 0x9a6a3c;
 const BLADE_COLOR = 0xb98250;
@@ -18,6 +18,53 @@ const BLADE_THICK = 0.014;
 export const OAR_SUPPORT_AT = 0.55; // m down the shaft from the grip: the lower hand
 export const OAR_HAND_OUT = 0.3;    // m out to the side the blade's on: the top hand (FoamSword.oarLean)
 export const OAR_BLADE_AT = SHAFT_LENGTH + BLADE_LENGTH / 2; // m down from the grip: the blade's middle
+
+// ── A paddle stroke, auto-animated (the phone's swing only starts it — bootstrapGameApp.js) ──
+// u: 0…1 through the stroke. The blade's way from the top hand is a tilt from straight down
+// and a swing fore / aft (+ ahead) of straight out to the side: it reaches ahead and dips in
+// (catch), sweeps back through the water (pull — canoeBoat.js pushes the canoe meanwhile),
+// lifts out (exit) and comes back to rest beside the hull, lifted. A back stroke runs the
+// swing the other way. A stronger swing of the phone makes a quicker stroke.
+export const OAR_STROKE_CATCH = 0.2;   // u: in the water from here…
+export const OAR_STROKE_PULL = 0.62;   // …pulling till here…
+export const OAR_STROKE_EXIT = 0.78;   // …out of it by here (the next stroke may start)
+const OAR_STROKE_S = [0.95, 0.6];      // s: a stroke at no / full strength
+const DEG = Math.PI / 180;
+export const OAR_REST_TILT = 62 * DEG; // from straight down: at rest, lifted clear
+const IN_TILT = 33 * DEG;              // in the water
+const OUT_TILT = 74 * DEG;             // lifted out at the end of the pull
+const AHEAD = 42 * DEG;                // swing at the catch…
+const BEHIND = 40 * DEG;               // …and at the end of the pull
+export const OAR_REST_SWING = 8 * DEG;
+
+/** How long a stroke of this strength (0…1) takes, s. */
+export const oarStrokeDuration = (strength) => OAR_STROKE_S[0] + (OAR_STROKE_S[1] - OAR_STROKE_S[0]) * Math.min(1, Math.max(0, strength));
+/** How far through the pull at u (0…1). */
+export const oarStrokePull = (u) => Math.min(1, Math.max(0, (u - OAR_STROKE_CATCH) / (OAR_STROKE_PULL - OAR_STROKE_CATCH)));
+const ease = (a, b, t) => a + (b - a) * (t * t * (3 - 2 * t));
+/** The blade's pose at u of a stroke (dir: 1 forward, −1 back): { tilt, swing } in radians. */
+export function oarStrokePose(u, dir = 1) {
+  let tilt;
+  let swing;
+  if (u < OAR_STROKE_CATCH) {
+    const t = u / OAR_STROKE_CATCH;
+    tilt = ease(OAR_REST_TILT, IN_TILT, t);
+    swing = ease(OAR_REST_SWING, AHEAD * dir, t);
+  } else if (u < OAR_STROKE_PULL) {
+    const t = oarStrokePull(u);
+    tilt = IN_TILT - 5 * DEG * Math.sin(t * Math.PI); // (a little deeper mid-stroke)
+    swing = ease(AHEAD * dir, -BEHIND * dir, t);
+  } else if (u < OAR_STROKE_EXIT) {
+    const t = (u - OAR_STROKE_PULL) / (OAR_STROKE_EXIT - OAR_STROKE_PULL);
+    tilt = ease(IN_TILT, OUT_TILT, t);
+    swing = -BEHIND * dir * (1 + 0.2 * t);
+  } else {
+    const t = Math.min(1, (u - OAR_STROKE_EXIT) / (1 - OAR_STROKE_EXIT));
+    tilt = ease(OUT_TILT, OAR_REST_TILT, t);
+    swing = ease(-BEHIND * dir * 1.2, OAR_REST_SWING, t);
+  }
+  return { tilt, swing };
+}
 
 const along = (geometry) => geometry.rotateX(Math.PI / 2); // cylinder axis Y → Z
 const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.02, ...extra });

@@ -2,8 +2,13 @@
 // spot along the bank with water deep enough for all of it); walk up to it → 🛶 Get in the
 // canoe. Standing in it (the player held still on its floor — a terrain height override while
 // aboard, the controls' `holdStill` + a position constraint; carried along as it moves and
-// turns) the oar comes out: the sword weapon in oar form (bootstrapGameApp.js / foamSword.js),
-// held by its handle pointing down, so the phone straight up holds it straight down.
+// turns) the oar comes out: the sword weapon in oar form (bootstrapGameApp.js / foamSword.js).
+// A swing of the phone's top down to one side paddles there (down and forward: a forward stroke,
+// down and back: a back stroke, its speed the stroke's strength) — the stroke itself plays out by
+// itself (oar.js / bootstrapGameApp.js). With a fishing rod bought, the rod comes out in the
+// canoe too (its weapon button / the phone's): the player turns to face over the side and can
+// fish wherever the canoe is (T.fishAnywhere / T.fishWater — townFishing.js), the canoe coming
+// to rest meanwhile; the oar back, they face the bow again.
 //
 // Paddling and how it moves on the water: canoeBoat.js (shared with the guest's sea start). The
 // joystick / WASD paddle too (forward / back, turn) — without a gyro that's the only way.
@@ -16,6 +21,8 @@
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { createCanoeBoat } from './canoeBoat.js';
 import { CANOE_BOARD_DIST, CANOE_SHORE_DIST, dist2 } from './townConfig.js';
+
+const NO_STEER = { fwd: 0, turn: 0 };
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownCanoe(T, ctx) {
@@ -80,9 +87,11 @@ export function installTownCanoe(T, ctx) {
     ctx.holdStill(true);
     ctx.setPositionConstraint(pin);
     ctx.setOar(true);
-    T.feedLine(ctx.hasGyro()
-      ? 'Hold the phone up — the oar points down — and sweep the blade back through the water beside the canoe. Left side: forward and right. Right side: forward and left.'
-      : 'Paddle with W / S or the joystick, turn with A / D.');
+    canoe.facing = 'oar';
+    T.feedLine((ctx.hasGyro()
+      ? 'Swing the top of the phone down to the left to paddle on the left, down to the right to paddle on the right — down and back to back-paddle. The harder the swing, the stronger the stroke.'
+      : 'Paddle with W / S or the joystick, turn with A / D.')
+      + (ctx.isRodAllowed() ? ' Take the rod out to fish from the canoe.' : ''));
     T.actsAt = 0;
   };
   // Out of it where it is (dying, an arrest, a room, leaving Town); the controls let go
@@ -136,7 +145,15 @@ export function installTownCanoe(T, ctx) {
       if (!canoe) return;
     }
     if (canoe.aboard && (ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom)) leave();
-    if (canoe.aboard) canoe.paddle(dt, ctx.getOarModel(), ctx.getSteer());
+    // (the rod out: no paddling, it comes to rest, the player facing over its side to fish)
+    const rodOut = canoe.aboard && ctx.isRodEquipped();
+    if (canoe.aboard && canoe.facing !== (rodOut ? 'rod' : 'oar')) {
+      canoe.facing = rodOut ? 'rod' : 'oar';
+      const s = canoe.standPoint();
+      ctx.teleport(s.x, s.z, canoe.yaw + (rodOut ? -Math.PI / 2 : 0));
+    }
+    if (rodOut) { canoe.paddle(dt, null, NO_STEER); canoe.settle(dt); }
+    else if (canoe.aboard) canoe.paddle(dt, ctx.getOarModel(), ctx.getSteer(), ctx.getOarStroke());
     const oldYaw = canoe.move(dt, T.simT);
     if (canoe.aboard) {
       const s = canoe.standPoint();
@@ -162,6 +179,9 @@ export function installTownCanoe(T, ctx) {
     canoe.place(0);
   };
   const inCanoe = () => !!canoe?.aboard;
+  // Fishing (townFishing.js): from the canoe, anywhere; a cast lands on water, not in the canoe
+  const fishAnywhere = inCanoe;
+  const fishWater = (x, z) => (canoe?.aboard ? canoe.floorAt(x, z) === undefined && ctx.waterDepth(x, z) > 0.4 : undefined);
 
-  Object.assign(T, { canoeActs, inCanoe, resetCanoe, updateCanoe });
+  Object.assign(T, { canoeActs, fishAnywhere, fishWater, inCanoe, resetCanoe, updateCanoe });
 }

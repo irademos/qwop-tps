@@ -171,8 +171,8 @@ export function installTownActs(T, ctx) {
       out.push(...T.fishingActs(false)); // (the reel / the rod do the rest; no gyro: ⬆ Pull)
       return out;
     }
-    // In the canoe (townCanoe.js): 🛶 Get out by the shore, nothing else
-    if (T.inCanoe()) return T.canoeActs(false);
+    // In the canoe (townCanoe.js): 🛶 Get out by the shore, and (no gyro, the rod out) Cast
+    if (T.inCanoe()) return [...T.canoeActs(false), ...T.fishingActs(true)];
     if (T.cooking) {
       out.push(...T.cookActs());
       return out;

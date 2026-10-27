@@ -172,6 +172,7 @@ export const FISH_LINE_MAX = 14;            // m — it takes all the line: gone
 export const FISH_LAND_DIST = 1.4;          // m — reeled in this close: landed
 export const FISH_KEY_REEL = 1.6;           // turns / s holding R (no phone)
 export const FISH_CANCEL_DIST = 1.2;        // m — walking off reels in
+export const FISH_CANOE_DRIFT = 4;          // m — fishing from the canoe: drifting this far reels in
 export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, snapped, lost) before the HUD says Pull / Reel in
 
 // Canoe (townCanoe.js): moored by the fishing spot; standing in it the oar comes out (held by
@@ -184,20 +185,17 @@ export const CANOE_BOARD_DIST = 3;          // m from its middle: 🛶 Get in
 export const CANOE_SHORE_DIST = 4;          // m — 🛶 Get out with dry ground this close
 export const CANOE_STAND_Z = -0.35;         // m along it (bow = +): where the player stands
 export const CANOE_MIN_DEPTH = 0.25;        // m of water it needs under it (else it runs aground)
-export const CANOE_PADDLE_PUSH = 1.625;     // per s: the push from the blade's speed past the canoe…
-export const CANOE_PADDLE_BACK = 0.6;       // …a stroke forward (backing up) this much as hard…
-export const CANOE_PADDLE_TURN = 1.16;      // …and how much of its turning moment turns it
-export const CANOE_BLADE_DEPTH = 0.12;      // m under the water: the blade's full bite (a quarter just at the surface)
-export const CANOE_BLADE_MAX_SPEED = 20;    // m/s — only a jump in the oar's pose (not a stroke) is this fast
-export const CANOE_STROKE_SPEED = 2;        // m/s — the push grows by its own size per this much stroke speed
+export const CANOE_STROKE_DV = 0.8;         // m/s: a full-strength stroke's push (× the phone swing's strength)…
+export const CANOE_PADDLE_BACK = 0.6;       // …a back stroke this much as hard…
+export const CANOE_STROKE_TURN = 0.4;       // rad/s: …and the turn it gives (off to one side)
 export const CANOE_DRAG = 0.3;              // per s, along it
 export const CANOE_SIDE_DRAG = 3.5;         // per s, sideways (the hull won't slide)
 export const CANOE_TURN_DRAG = 1.8;         // per s
 export const CANOE_MAX_SPEED = 30;          // m/s
 export const CANOE_STEER_ACCEL = 1.25;      // m/s² — no gyro: the joystick / WASD paddle for you (back: CANOE_PADDLE_BACK as hard)…
 export const CANOE_STEER_TURN = 8;          // rad/s² — …and turn it
-export const CANOE_SPLASH_STROKE = 0.6;     // m/s of stroke along the hull: drops thrown off the blade…
-export const CANOE_SPLASH_EVERY = 0.06;     // s — …this often (more of them the harder it strokes)
+export const CANOE_SPLASH_EVERY = 0.06;     // s — drops thrown off the blade through a stroke's pull this often
+export const CANOE_SETTLE_DRAG = 1.5;       // per s — the rod out: the canoe coming to rest
 export const CANOE_BOB = 0.015;             // m up and down on the water
 
 // ── Reactions ──
