@@ -223,6 +223,9 @@
     #btn-sword.shown { display: block; }
     #btn-rod { background: rgba(13, 148, 136, 0.42); border-color: rgba(153, 246, 228, 0.6); display: none; }
     #btn-rod.owned { display: block; }
+    /* Town: the flying broom once bought (on it ↔ off it) */
+    #btn-broom { background: rgba(146, 64, 14, 0.5); border-color: rgba(253, 230, 138, 0.6); display: none; }
+    #btn-broom.owned { display: block; }
     /* Town fishing with the line out: the reel takes the joystick's place (and the Block bar
        goes) — crank the handle round (clockwise) to wind the line in; the middle says Pull /
        Reel in only once the player's been getting it wrong */
@@ -446,6 +449,8 @@ Shield</button>
 Wand</button>
       <button class="ctl-btn row-btn" id="btn-rod" data-action="rod">🎣
 Rod</button>
+      <button class="ctl-btn row-btn" id="btn-broom" data-action="broom">🧹
+Broom</button>
       <button class="ctl-btn row-btn" id="btn-bomb" data-action="bomb">💣
 0</button>
       <button class="ctl-btn row-btn" id="btn-bubble" data-action="bubble">🫧
@@ -672,16 +677,17 @@ Rod</button>
     const btnWand = document.getElementById('btn-wand');
     const btnSword = document.getElementById('btn-sword');
     const btnRod = document.getElementById('btn-rod');
+    const btnBroom = document.getElementById('btn-broom');
     // The button row above Block holds up to ACTION_ROW_MAX of the buttons shown; any more go
     // in the slots beside Block (left, then right)
     const ACTION_ROW_MAX = 5;
     const actionRow = document.getElementById('action-grid');
     const blockSides = [document.getElementById('block-side-left'), document.getElementById('block-side-right')];
-    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnRod, btnBomb, btnBubble];
+    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnRod, btnBroom, btnBomb, btnBubble];
     function layoutRowButtons() {
       let n = 0;
       rowButtons.forEach((b) => {
-        const shown = b === btnWand || b === btnRod ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
+        const shown = b === btnWand || b === btnRod || b === btnBroom ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
         const parent = !shown || n < ACTION_ROW_MAX ? actionRow : blockSides[n - ACTION_ROW_MAX] ?? actionRow;
         if (shown) n += 1;
         parent.appendChild(b); // (re-appended in order, so the order holds)
@@ -710,6 +716,10 @@ Rod</button>
       btnRod.classList.toggle('owned', !!st.hasRod);
       btnRod.classList.toggle('equipped', st.equipped === 'fishing_rod');
       btnRod.textContent = st.equipped === 'fishing_rod' ? back : '🎣\nRod';
+      // Town's flying broom (once bought): get on / land
+      btnBroom.classList.toggle('owned', !!st.hasBroom);
+      btnBroom.classList.toggle('equipped', !!st.onBroom);
+      btnBroom.textContent = st.onBroom ? '🧹\nLand' : '🧹\nBroom';
       // The line out: the bar's a reel
       const reeling = !!st.reelMode;
       if (reeling && !document.body.classList.contains('reel-mode') && pressMode) releaseBar();

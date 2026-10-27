@@ -216,6 +216,7 @@ export function installTownTrade(T, ctx) {
     if (id === 'shield') return items.shield >= ctx.shieldMax;
     if (id === 'gun') return items.gun;
     if (id === 'wand') return items.wand;
+    if (id === 'broom') return items.broom;
     if (id === 'mana') return items.mana >= ctx.maxMana;
     if (id === 'lockpick') return T.lockpicks >= LOCKPICK_MAX;
     if (id === 'seeds') return T.seeds >= SEEDS_MAX;
@@ -224,7 +225,7 @@ export function installTownTrade(T, ctx) {
   };
   const gearHave = (id, items) => {
     if (!items) return '';
-    if (id === 'sword' || id === 'gun' || id === 'wand' || id === 'rod') return items[id] ? 'You have one' : '';
+    if (id === 'sword' || id === 'gun' || id === 'wand' || id === 'rod' || id === 'broom') return items[id] ? 'You have one' : '';
     if (id === 'shield') return items.shield > 0 ? `Shield ${items.shield} / ${ctx.shieldMax}` : '';
     if (id === 'ammo') return items.gun ? `You have ${items.ammo}` : '';
     if (id === 'bomb') return `You have ${items.bombs}`;

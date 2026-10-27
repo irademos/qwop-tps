@@ -4,7 +4,7 @@
 // things for sale sit on the counters, tap one (or swipe / ‹ › / arrow keys) for its buy card.
 //   • the shop sells everything: the goods (wood / fish / veg + seeds) on the back counter, where
 //     the merchant townsperson stands behind it, the gear on the side counters, the mystery chest
-//   • the wizard's stall: the magic wand and the potions (the wizard townsperson behind it)
+//   • the wizard's stall: the magic wand, the potions and the flying broom (the wizard townsperson behind it)
 // A button by the shop's back counter (by the stall) frames the camera on it (focus); tapping a
 // thing on a counter does too. At a counter, tapping anywhere else, Esc, ⬅ Back or walking off
 // goes back. Selling stays in the market panel (townMarketPanel.js).
@@ -53,7 +53,7 @@ const SHOP_ITEMS = [
   { id: 'chest', chest: true },
 ];
 // The wizard's stall: what loadWizardStall puts on its counter
-const WIZARD_ITEMS = [{ id: 'life' }, { id: 'mana' }, { id: 'wand' }];
+const WIZARD_ITEMS = [{ id: 'life' }, { id: 'mana' }, { id: 'wand' }, { id: 'broom' }];
 export const STALL_ITEMS = { shop: SHOP_ITEMS, wizard: WIZARD_ITEMS };
 const CHEST_AT = { x: -2.45, z: 3.85, yaw: Math.PI / 2 - 0.25 };
 
