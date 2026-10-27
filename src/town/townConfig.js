@@ -14,6 +14,7 @@ export const NAV_CELL = 1.25;
 export const NAV_START = { x: -24.9, z: -31.5 };
 export const BUILDING_RE = /house|building|cabin/i;
 export const TREE_RE = /tree/i;
+export const STUMP_RE = /tree_12\.glb/i;   // the pack's cut stump (a "tree" file): not chopped; felled trees leave one (townTrees.js)
 // Where each house model's front door is (its own frame — the GLB's axes): the wall it's in
 // ('+x' / '-x' / '+z' / '-z'), how far along that wall from its middle (`at`, -1 … 1 of the
 // half width: x along a ±z wall, z along a ±x wall) and how far the door sits in from the
@@ -108,10 +109,15 @@ export const DOOR_ENTER_DIST = 0.2;         // m from a door with no house (an o
 export const HOME_VISIT_CHANCE = 0.2;       // a stroll in the day: a while at home instead
 export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the shop's gear
 export const CHEST_PRICE = 30;              // the shop's mystery chest
-export const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
-export const TREE_WOOD = 3;                 // 🪵 a tree gives before it needs to grow back…
-export const TREE_REGROW_S = 40;            // …one per this many seconds
-export const CHOP_REACH = 0.85;             // m from the sword tip to the trunk
+// Chopping trees (townTrees.js)
+export const TREE_FELL_HITS = 5;            // sword hits that fell a tree
+export const TREE_LOGS = 3;                 // logs a felled tree leaves (fewer if it's short / fell in water)…
+export const LOG_LENGTH = 1.1;              // …each this long (m); a sword hit splits one: +1 🪵
+export const TREE_LIE_S = 1.4;              // s a felled tree lies there before sinking away
+export const TREE_SINK_S = 1;               // s it takes to sink away
+export const TREE_STUMP_S = 90;             // s the stump stands before a sapling comes up…
+export const TREE_GROW_S = 150;             // …and grows back into the tree
+export const CHOP_REACH = 0.45;             // m from the sword tip to the trunk's bark
 export const CROP_REGROW_S = 70;            // s until a picked crop is back
 export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
 // The wizard's stall (townStalls.js 'wizard', the wizard townsperson behind it): out in the woods

@@ -4756,6 +4756,11 @@ async function initCore(runtimeContext) {
     return out.set(p.x, pos.y, p.z);
   };
   let _psAutoWalking = false;
+  // Town: when the first day's guide last walked the player along (the town ctx's autoWalk)
+  let _townAutoWalkAt = -Infinity;
+  // A sword swing steps the player forward (into a blocked swing / a missed one) — in Town only
+  // while walked along
+  const _swingStepAllowed = () => !town?.isActive() || performance.now() - _townAutoWalkAt < 250;
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
   let _psWinShown = false;
@@ -8701,7 +8706,8 @@ async function initCore(runtimeContext) {
     // The player's model (the fishing rod is held by it)
     getPlayerModel: () => playerModel,
     pathAt: (x, z) => _activeMap?.paths?.(x, z) ?? null,
-    // The active map's placed objects (houses, trees…) with their centres inside `b`
+    // The active map's placed objects (houses, trees…) with their centres inside `b` (`object`:
+    // its placement wrapper — Town's trees are felled by posing it, townTrees.js)
     getMapObjects: (b) => {
       const out = [];
       const visit = (o) => {
@@ -8723,7 +8729,7 @@ async function initCore(runtimeContext) {
               });
               out.push({
                 file: mo.modelFile ?? '', x: c.x, z: c.z, radius: Math.max(size.x, size.z) / 2,
-                local, matrix: o.matrixWorld.clone(),
+                local, matrix: o.matrixWorld.clone(), id: mo.id, object: o,
               });
             }
           }
@@ -8759,6 +8765,7 @@ async function initCore(runtimeContext) {
     // toward it
     autoWalk: (dirX, dirZ, step, dt) => {
       if (!playerControls || !(step > 0)) return;
+      _townAutoWalkAt = performance.now();
       playerControls.queueAutoMove(dirX * step, dirZ * step);
       const dYaw = ((Math.atan2(dirX, dirZ) - playerControls.yaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
       playerControls.yaw += dYaw * Math.min(1, dt * 5);
@@ -8849,7 +8856,11 @@ async function initCore(runtimeContext) {
     spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
     playSfx: (kind) => { // (no coin sound: the coin pop-up shows)
       if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
-      else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 400 });
+      else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 300 });
+      else if (kind === 'fell') { // (a tree hitting the ground: a low boom under a thump)
+        audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.12, { cooldownKey: 'town-fell', cooldownMs: 600 });
+        audioManager?.playSFX('SFX/Footsteps/Dirt/Dirt Walk 1.ogg', 0.9, { cooldownKey: 'town-fell-thud', cooldownMs: 600 });
+      }
     },
     dropCoins: (pos, n) => {
       for (let i = 0; i < n; i++) {
@@ -9486,14 +9497,16 @@ async function initCore(runtimeContext) {
                 audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
                 _startSwordBounce();
                 // Small step forward into the blocked swing (instead of the miss lunge)
-                const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
-                _blockFwd.y = 0; _blockFwd.normalize();
-                const _bsx = playerModel.position.x + _blockFwd.x * 0.09;
-                const _bsz = playerModel.position.z + _blockFwd.z * 0.09;
-                playerModel.position.x = _bsx; playerModel.position.z = _bsz;
-                playerControls.playerX = _bsx; playerControls.playerZ = _bsz;
-                playerControls.lastPosition?.set(_bsx, playerModel.position.y, _bsz);
-                if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _bsx, y: playerModel.position.y + 0.6, z: _bsz });
+                if (_swingStepAllowed()) {
+                  const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
+                  _blockFwd.y = 0; _blockFwd.normalize();
+                  const _bsx = playerModel.position.x + _blockFwd.x * 0.09;
+                  const _bsz = playerModel.position.z + _blockFwd.z * 0.09;
+                  playerModel.position.x = _bsx; playerModel.position.z = _bsz;
+                  playerControls.playerX = _bsx; playerControls.playerZ = _bsz;
+                  playerControls.lastPosition?.set(_bsx, playerModel.position.y, _bsz);
+                  if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _bsx, y: playerModel.position.y + 0.6, z: _bsz });
+                }
                 _swingHitOccurred = true; // blocked swing doesn't lunge
                 _he._playerSwordLastHit = _nowMsPS; // this swing is spent
               } else if (_reachesBody) {
@@ -9607,7 +9620,7 @@ async function initCore(runtimeContext) {
       }
       if (_wandActive) {
         _updateWandSwipe(_tipWorld, _nowSecPS, _blockingNow || _blockToggleSettling);
-      } else if (!_wandOut && _playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy) {
+      } else if (!_wandOut && _playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy && _swingStepAllowed()) {
         const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
         _missFwd.y = 0; _missFwd.normalize();
         const _msx = playerModel.position.x + _missFwd.x * 0.15;

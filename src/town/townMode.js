@@ -72,7 +72,7 @@
 //   spawnFighter({ x, z, yaw, url, hearts, swingChance, gear, name }) → EnemyPlayer,
 //   removeFighter(enemy), releaseFighterGear(enemy), carryPlayerOff({ carrierUrl, onDone }),
 //   cancelCarry(), isPlayerArmed()
-//   spawnBlood(position, groundY), playSfx('hit' | 'chop'), dropCoins(position, n)
+//   spawnBlood(position, groundY), playSfx('hit' | 'chop' | 'fell'), dropCoins(position, n)
 //   getCoins(), addCoins(delta) (coins past the wallet's cap drop at the player's feet), profileKey() → string | null,
 //   memberKey() (the player's key in a shared town — their house)
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
@@ -114,6 +114,7 @@ import { installTownLights } from './townLights.js';
 import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
 import { installTownCanoe } from './townCanoe.js';
+import { installTownTrees } from './townTrees.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -670,6 +671,7 @@ export function createTownMode(ctx) {
     T.closeMarket();
     T.resetHomes();
     T.resetFarm();
+    T.resetTrees();
     jobTalk.close();
     lockpick.stop();
     ctx.cancelCarry();
@@ -771,6 +773,7 @@ export function createTownMode(ctx) {
     T.updateIntroWalk(dt);
     T.updateCooking(dt);
     T.updateFarm(dt);
+    T.updateTrees(dt);
     if (T.simT > T.growAt) { T.growAt = T.simT + 1; T.updateRegrowth(); }
     // (the market panel shuts when the merchant leaves the counter or the player walks off)
     if (marketPanel.isOpen() && (!T.marketOpen() || !T.nearStall())) T.closeMarket();
@@ -789,7 +792,7 @@ export function createTownMode(ctx) {
 
   // The player's sword swing reached `tip` (world), moving along swingDir: hits the
   // townsperson it passes through (those fighting are EnemyPlayers — the stage code hits
-  // them), or chops the tree it's in
+  // them), or chops the tree / log it's in (townTrees.js)
   const trySwordHit = (tip, swingDir) => {
     if (!T.active || !T.ready || T.sequence || T.inRoom) return false;
     for (const n of T.npcs) {
@@ -843,6 +846,7 @@ export function createTownMode(ctx) {
   installTownLights(T, ctx);
   installTownGrab(T, ctx);
   installTownFarming(T, ctx);
+  installTownTrees(T, ctx);
   installTownCanoe(T, ctx);
 
   // ── Settings → Town (settingsPanel.js): everyone in town, their coins and a few stats ──

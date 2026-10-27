@@ -10,8 +10,8 @@ import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
 import { createTownRooms } from './townRooms.js';
 import {
-  CHEST_PRICE, CHOP_HITS, LOCKPICK_MAX, SEEDS_MAX, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
-  DOOR_DIST, DOOR_ENTER_HALF_WIDTH, DOOR_ENTER_PAST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
+  CHEST_PRICE, LOCKPICK_MAX, SEEDS_MAX, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
+  DOOR_DIST, DOOR_ENTER_HALF_WIDTH, DOOR_ENTER_PAST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
 
@@ -35,34 +35,6 @@ export function installTownTrade(T, ctx) {
     ctx.heal(GOODS[g].heal);
     T.renderGoods();
     T.feedLine(`Ate a ${GOODS[g].label.toLowerCase()}. +${GOODS[g].heal} health`);
-  };
-  // Chop: the sword tip in a trunk (CHOP_HITS hits a log)
-  const tryChop = (tip) => {
-    const p = T.playerPos();
-    for (const t of T.layout.trees) {
-      if (dist2(t.x, t.z, p.x, p.z) > 3) continue;
-      if (dist2(t.x, t.z, tip.x, tip.z) > CHOP_REACH) continue;
-      const gy = T.groundAt(t.x, t.z);
-      if (tip.y < gy + 0.1 || tip.y > gy + 2.6) continue;
-      if (T.simT - t.hitAt < 0.45) return true;
-      t.hitAt = T.simT;
-      ctx.playSfx('chop');
-      if (T.bagRoom() <= 0) { T.bagFullNote(); return true; }
-      if (t.wood <= 0) {
-        T.feedLine('This tree needs time to grow back.');
-        return true;
-      }
-      t.hits += 1;
-      if (t.hits >= CHOP_HITS) {
-        t.hits = 0;
-        t.wood -= 1;
-        if (t.growAt <= T.simT) t.growAt = T.simT + TREE_REGROW_S; // (grows back one at a time)
-        gain('wood');
-        T.feedLine(`+1 Wood (${T.goods.wood})`);
-      }
-      return true;
-    }
-    return false;
   };
   const ripeCropNear = () => {
     const p = T.playerPos();
@@ -94,12 +66,6 @@ export function installTownTrade(T, ctx) {
   };
   // Trees and crops grow back
   const updateRegrowth = () => {
-    for (const t of T.layout.trees) {
-      if (t.wood < TREE_WOOD && T.simT > t.growAt) {
-        t.wood += 1;
-        t.growAt = T.simT + TREE_REGROW_S;
-      }
-    }
     for (const f of T.layout.places.fields) {
       for (const c of f.crops) {
         if (!c.ripe && T.simT > c.growAt) { c.ripe = true; c.mesh.visible = true; }
@@ -560,7 +526,7 @@ export function installTownTrade(T, ctx) {
   Object.assign(T, {
     buyFood, calmNow, closeMarket, deliverGoods, eat, enterRoom, focusStall, gain, getMagicTargets,
     getWeaponTargets, leaveRoom, marketOpen, nearDoor, nearStall, nearestStall, noteStock,
-    openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen, tryChop,
+    openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen,
     updateRegrowth, updateRooms, workingMerchant, workingWizard,
   });
 }
