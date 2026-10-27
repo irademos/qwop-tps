@@ -139,18 +139,23 @@ const MAGIC_WAND_ITEM_ID = 'magic_wand';
 // Town's fishing rod (bought at the shop): the sword weapon in rod form, like the wand
 const FISHING_ROD_ITEM_ID = 'fishing_rod';
 const OAR_ITEM_ID = 'canoe_oar';
-// Town's canoe oar (and the sea start's): tilting the phone's top away from upright past
-// OAR_TILT_START paddles at once — tilted to one side, on that side; back past OAR_TILT_BACK (of
+// Town's canoe oar (and the sea start's): tilting the phone's top past OAR_TILT_START from
+// where it rests paddles at once — tilted to one side, on that side; back past OAR_TILT_BACK (of
 // its sideways lean) a back stroke; straight forward, on the other side from the last stroke.
 // The further it's tilted the stronger the stroke (OAR_TILT_MIN_STRENGTH … full at
-// OAR_TILT_FULL). The next stroke waits for the phone to come back within OAR_TILT_REARM of
-// upright. The stroke itself is animated (oar.js — oarStrokePose).
+// OAR_TILT_FULL). Its rest is how the player holds it between strokes, not the calibration (the
+// sea start never calibrates): it follows the phone (OAR_REST_FOLLOW_S) while it's within
+// OAR_TILT_REARM of it, and after a stroke the next waits for the phone to come back there — or
+// to be held still OAR_REST_STILL_S somewhere else, which becomes the rest.
 const OAR_TILT_START = 22 * Math.PI / 180;
 const OAR_TILT_REARM = 12 * Math.PI / 180;
 const OAR_TILT_FULL = 55 * Math.PI / 180;
 const OAR_TILT_BACK = 0.5;
 const OAR_TILT_SIDE = 0.3;     // of the lean: sideways enough to pick that side
 const OAR_TILT_MIN_STRENGTH = 0.6;
+const OAR_REST_FOLLOW_S = 1.5;
+const OAR_REST_STILL_S = 1.2;
+const OAR_REST_STILL_SPEED = 0.6; // rad/s: held still below this
 const OAR_POSE_RATE = 16;  // per s: the oar easing into the stroke's pose
 const OAR_LEAN_RATE = 6;   // per s: the hands moving over to the other side
 const MAX_MANA = 100;
@@ -2884,22 +2889,41 @@ async function initCore(runtimeContext) {
     _oarStroke.u = u;
     return _oarStroke;
   };
-  const _oarStrokeReset = () => { _oarStroke = null; _oarStrokeNext = null; _oarTilt.armed = false; };
+  const _oarStrokeReset = () => { _oarStroke = null; _oarStrokeNext = null; _oarTilt.at = 0; };
   // The phone's tilt (q: the phone's hold — its +Z the phone's top, player-local)
-  const _oarTilt = { armed: false };
+  const _oarTilt = { armed: false, at: 0, stillSince: 0, rest: new THREE.Vector3(), last: new THREE.Vector3() };
   const _oarTop = new THREE.Vector3();
-  const _detectOarTilt = (q) => {
+  const _oarDelta = new THREE.Vector3();
+  const _detectOarTilt = (q, now) => {
+    const ot = _oarTilt;
     _oarTop.set(0, 0, 1).applyQuaternion(q);
-    const tilt = Math.acos(THREE.MathUtils.clamp(_oarTop.y, -1, 1));
-    if (!_oarTilt.armed) {
-      if (tilt < OAR_TILT_REARM) _oarTilt.armed = true;
+    const span = now - ot.at;
+    // (just started, or the gyro went quiet: rest where it is now)
+    if (!ot.at || span > 0.5) {
+      ot.rest.copy(_oarTop); ot.last.copy(_oarTop); ot.at = now; ot.stillSince = now; ot.armed = true;
       return;
     }
-    if (tilt < OAR_TILT_START) return;
-    _oarTilt.armed = false;
-    const lean = Math.hypot(_oarTop.x, _oarTop.z) || 1;
-    const side = Math.abs(_oarTop.x) > OAR_TILT_SIDE * lean ? Math.sign(_oarTop.x) : -_oarSide;
-    const dir = _oarTop.z < -OAR_TILT_BACK * Math.abs(_oarTop.x) && _oarTop.z < -0.05 ? -1 : 1;
+    if (span <= 1e-4) return;
+    const speed = ot.last.angleTo(_oarTop) / span;
+    ot.last.copy(_oarTop);
+    ot.at = now;
+    if (speed > OAR_REST_STILL_SPEED) ot.stillSince = now;
+    const tilt = ot.rest.angleTo(_oarTop);
+    if (!ot.armed) {
+      if (tilt < OAR_TILT_REARM) ot.armed = true;
+      else if (now - ot.stillSince > OAR_REST_STILL_S) { ot.rest.copy(_oarTop); ot.armed = true; }
+      return;
+    }
+    if (tilt < OAR_TILT_START) {
+      if (tilt < OAR_TILT_REARM) ot.rest.lerp(_oarTop, 1 - Math.exp(-span / OAR_REST_FOLLOW_S)).normalize();
+      return;
+    }
+    ot.armed = false;
+    ot.stillSince = now;
+    _oarDelta.subVectors(_oarTop, ot.rest);
+    const lean = _oarDelta.length() || 1;
+    const side = Math.abs(_oarDelta.x) > OAR_TILT_SIDE * lean ? Math.sign(_oarDelta.x) : -_oarSide;
+    const dir = _oarDelta.z < -OAR_TILT_BACK * Math.abs(_oarDelta.x) && _oarDelta.z < -0.05 ? -1 : 1;
     const k = THREE.MathUtils.clamp((tilt - OAR_TILT_START) / (OAR_TILT_FULL - OAR_TILT_START), 0, 1);
     _startOarStroke(side, dir, OAR_TILT_MIN_STRENGTH + (1 - OAR_TILT_MIN_STRENGTH) * k);
   };
@@ -9379,7 +9403,7 @@ async function initCore(runtimeContext) {
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
           // (the oar: the phone's swing starts a stroke, the stroke poses it)
-          if (_oarActive) { _detectOarTilt(foamSword._holdQuaternion); _oarPose(foamSword._holdQuaternion); }
+          if (_oarActive) { _detectOarTilt(foamSword._holdQuaternion, nowSec); _oarPose(foamSword._holdQuaternion); }
         }
         // Unarmed (village): the gyro moves the player's right arm (updateProceduralPlayerRig)
         const _pmUD = playerControls?.playerModel?.userData;
