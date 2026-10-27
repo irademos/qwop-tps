@@ -7,8 +7,8 @@ import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import {
-  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, TOWN_BOUNDS, TREE_RE,
-  TREE_TRUNK_RADIUS, TREE_WOOD, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
+  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
+  TREE_TRUNK_RADIUS, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -25,7 +25,7 @@ export function installTownLayout(T, ctx) {
     });
     const objects = ctx.getMapObjects(TOWN_BOUNDS);
     const buildings = objects.filter((o) => BUILDING_RE.test(o.file));
-    const trees = objects.filter((o) => TREE_RE.test(o.file));
+    const trees = objects.filter((o) => TREE_RE.test(o.file) && !STUMP_RE.test(o.file));
     // Trees aren't ground (the height raycast skips them): walk round their trunks (out of
     // town too — the way to the bandit camp)
     const woods = ctx.getMapObjects(NAV_BOUNDS).filter((t) => TREE_RE.test(t.file));
@@ -299,11 +299,15 @@ export function installTownLayout(T, ctx) {
         return i >= 0 ? cellPos(i) : { ...fire };
       })(),
     };
-    // Every tree in town can be chopped (wood: what it has left; it grows back)
-    const choppable = trees.map((t) => ({ x: t.x, z: t.z, wood: TREE_WOOD, hits: 0, growAt: 0, hitAt: -1 }));
+    // Every tree in town can be chopped down (townTrees.js; it grows back)
+    const choppable = trees.map((t) => ({ x: t.x, z: t.z, id: t.id, object: t.object }));
     // (the houses, shops included: out of their reach at night the player carries a lantern)
     const houses = buildings.map((b) => ({ x: b.x, z: b.z, radius: b.radius }));
-    return { nav, places, trees: choppable, buildings: houses, props: buildProps(places) };
+    const props = buildProps(places);
+    // (the felled trees' stumps: the pack's own stump model, wherever it was placed)
+    const stump = ctx.getMapObjects({ minX: -1e5, maxX: 1e5, minZ: -1e5, maxZ: 1e5 }).find((o) => STUMP_RE.test(o.file));
+    T.buildTrees(props.group, choppable, stump?.object ?? null);
+    return { nav, places, trees: choppable, buildings: houses, props };
   };
 
   // ── Props: the shops, campfire, jail cell, fields ──

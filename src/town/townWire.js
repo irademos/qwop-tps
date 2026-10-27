@@ -256,6 +256,7 @@ export function installTownWire(T, ctx) {
     // (who owns which house, a player asking for one / buying it — townHomes.js)
     if (T.handleHomesNet(from, d)) return;
     if (T.handleFarmNet(from, d)) return;
+    if (T.handleTreeNet(from, d)) return;
     // (the night raid's call, a player's house broken into — townBandits.js)
     if (T.handleBanditNet(from, d)) return;
     switch (d.op) {
