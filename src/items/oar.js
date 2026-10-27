@@ -19,12 +19,12 @@ export const OAR_SUPPORT_AT = 0.55; // m down the shaft from the grip: the lower
 export const OAR_HAND_OUT = 0.3;    // m out to the side the blade's on: the top hand (FoamSword.oarLean)
 export const OAR_BLADE_AT = SHAFT_LENGTH + BLADE_LENGTH / 2; // m down from the grip: the blade's middle
 
-// ── A paddle stroke, auto-animated (the phone's swing only starts it — bootstrapGameApp.js) ──
+// ── A paddle stroke, auto-animated (the phone's tilt only starts it — bootstrapGameApp.js) ──
 // u: 0…1 through the stroke. The blade's way from the top hand is a tilt from straight down
 // and a swing fore / aft (+ ahead) of straight out to the side: it reaches ahead and dips in
 // (catch), sweeps back through the water (pull — canoeBoat.js pushes the canoe meanwhile),
 // lifts out (exit) and comes back to rest beside the hull, lifted. A back stroke runs the
-// swing the other way. A stronger swing of the phone makes a quicker stroke.
+// swing the other way. A stronger stroke (further tilt of the phone) is quicker.
 export const OAR_STROKE_CATCH = 0.2;   // u: in the water from here…
 export const OAR_STROKE_PULL = 0.62;   // …pulling till here…
 export const OAR_STROKE_EXIT = 0.78;   // …out of it by here (the next stroke may start)

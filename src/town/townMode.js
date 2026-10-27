@@ -960,9 +960,6 @@ export function createTownMode(ctx) {
     // Something grabbed in hand (townGrab.js): its Block bar mode ('water' — the hose; null: none),
     // the bar held down / let go, dropping it (the phone's 🗡/✋ button)
     holding: () => !!(T.active && T.ready && T.held),
-    // A panel / counter / talk / sequence has the player (no gyro turning or lean walking)
-    handsBusy: () => !!(T.active && T.ready && (T.sequence || T.marketPanel.isOpen() || T.storage.isOpen()
-      || T.stalls.focused() || T.lockpick.isOpen() || T.jobTalk.isOpen() || T.cooking)),
     heldBar: () => (T.active && T.ready ? T.heldBar() : null),
     useHeld: (on) => { if (T.active) T.useHeld(on); },
     dropHeld: () => { if (T.active) T.dropHeld(); },

@@ -139,21 +139,18 @@ const MAGIC_WAND_ITEM_ID = 'magic_wand';
 // Town's fishing rod (bought at the shop): the sword weapon in rod form, like the wand
 const FISHING_ROD_ITEM_ID = 'fishing_rod';
 const OAR_ITEM_ID = 'canoe_oar';
-// Town's canoe oar (and the sea start's): a swing of the phone's top down to one side paddles
-// on that side — it starts once the phone turns faster than OAR_SWING_START_SPEED going down
-// and ends when it slows below OAR_SWING_END_SPEED (or after OAR_SWING_MAX_S); it counts if it
-// turned OAR_SWING_MIN_ANGLE and its top dropped OAR_SWING_MIN_DROP (of a unit). Its sideways
-// way picks the side, back past OAR_SWING_BACK (of its sideways travel) makes it a back stroke,
-// its peak speed the stroke's strength (OAR_SWING_MIN_STRENGTH at the start speed … full at
-// OAR_SWING_FULL_SPEED). The stroke itself is animated (oar.js — oarStrokePose).
-const OAR_SWING_START_SPEED = 2.4;  // rad/s
-const OAR_SWING_END_SPEED = 1.1;    // rad/s
-const OAR_SWING_MAX_S = 0.7;
-const OAR_SWING_MIN_ANGLE = 18 * Math.PI / 180;
-const OAR_SWING_MIN_DROP = 0.12;
-const OAR_SWING_BACK = 0.35;
-const OAR_SWING_FULL_SPEED = 8;     // rad/s
-const OAR_SWING_MIN_STRENGTH = 0.3;
+// Town's canoe oar (and the sea start's): tilting the phone's top away from upright past
+// OAR_TILT_START paddles at once — tilted to one side, on that side; back past OAR_TILT_BACK (of
+// its sideways lean) a back stroke; straight forward, on the other side from the last stroke.
+// The further it's tilted the stronger the stroke (OAR_TILT_MIN_STRENGTH … full at
+// OAR_TILT_FULL). The next stroke waits for the phone to come back within OAR_TILT_REARM of
+// upright. The stroke itself is animated (oar.js — oarStrokePose).
+const OAR_TILT_START = 22 * Math.PI / 180;
+const OAR_TILT_REARM = 12 * Math.PI / 180;
+const OAR_TILT_FULL = 55 * Math.PI / 180;
+const OAR_TILT_BACK = 0.5;
+const OAR_TILT_SIDE = 0.3;     // of the lean: sideways enough to pick that side
+const OAR_TILT_MIN_STRENGTH = 0.6;
 const OAR_POSE_RATE = 16;  // per s: the oar easing into the stroke's pose
 const OAR_LEAN_RATE = 6;   // per s: the hands moving over to the other side
 const MAX_MANA = 100;
@@ -2859,7 +2856,7 @@ async function initCore(runtimeContext) {
   let _oarActive = false;
   const isOarAllowed = () => !!town?.inCanoe?.() || !!seaStart?.isActive();
   const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
-  // ── Paddling (OAR_SWING_*): the phone's swing starts a stroke, which then plays out by itself
+  // ── Paddling (OAR_TILT_*): tilting the phone starts a stroke, which then plays out by itself
   // (oarStrokePose), the canoe pushed through its pull (canoeBoat.js, via the ctx's
   // getOarStroke). Joystick / WASD paddling shows strokes too — for the look only (visual: its
   // push is canoeBoat's steer).
@@ -2887,42 +2884,24 @@ async function initCore(runtimeContext) {
     _oarStroke.u = u;
     return _oarStroke;
   };
-  const _oarStrokeReset = () => { _oarStroke = null; _oarStrokeNext = null; _oarSwing.active = false; _oarSwing.lastAt = 0; };
-  // The phone's swing (q: the phone's hold — its +Z the phone's top, player-local)
-  const _oarSwing = { active: false, lastAt: 0, speed: 0, peak: 0, startAt: 0, last: new THREE.Vector3(), start: new THREE.Vector3() };
+  const _oarStrokeReset = () => { _oarStroke = null; _oarStrokeNext = null; _oarTilt.armed = false; };
+  // The phone's tilt (q: the phone's hold — its +Z the phone's top, player-local)
+  const _oarTilt = { armed: false };
   const _oarTop = new THREE.Vector3();
-  const _oarDelta = new THREE.Vector3();
-  const _detectOarSwing = (q, now) => {
-    const sw = _oarSwing;
+  const _detectOarTilt = (q) => {
     _oarTop.set(0, 0, 1).applyQuaternion(q);
-    const span = now - sw.lastAt;
-    if (span <= 1e-4) return;
-    if (span > 0.25) { sw.last.copy(_oarTop); sw.lastAt = now; sw.speed = 0; sw.active = false; return; }
-    const w = sw.last.angleTo(_oarTop) / span;
-    const goingDown = _oarTop.y < sw.last.y;
-    sw.speed += (w - sw.speed) * (1 - Math.exp(-span / 0.04));
-    if (!sw.active) {
-      if (sw.speed > OAR_SWING_START_SPEED && goingDown) {
-        sw.active = true;
-        sw.startAt = now;
-        sw.peak = sw.speed;
-        sw.start.copy(sw.last); // (from just before it got going)
-      }
-    } else {
-      sw.peak = Math.max(sw.peak, sw.speed);
-      if (sw.speed < OAR_SWING_END_SPEED || now - sw.startAt > OAR_SWING_MAX_S) {
-        sw.active = false;
-        _oarDelta.subVectors(_oarTop, sw.start);
-        if (sw.start.angleTo(_oarTop) >= OAR_SWING_MIN_ANGLE && -_oarDelta.y >= OAR_SWING_MIN_DROP) {
-          const side = Math.abs(_oarDelta.x) > 0.05 ? Math.sign(_oarDelta.x) : Math.sign(_oarTop.x) || _oarSide;
-          const dir = _oarDelta.z < -OAR_SWING_BACK * Math.abs(_oarDelta.x) && _oarDelta.z < -0.05 ? -1 : 1;
-          const k = THREE.MathUtils.clamp((sw.peak - OAR_SWING_START_SPEED) / (OAR_SWING_FULL_SPEED - OAR_SWING_START_SPEED), 0, 1);
-          _startOarStroke(side, dir, OAR_SWING_MIN_STRENGTH + (1 - OAR_SWING_MIN_STRENGTH) * k);
-        }
-      }
+    const tilt = Math.acos(THREE.MathUtils.clamp(_oarTop.y, -1, 1));
+    if (!_oarTilt.armed) {
+      if (tilt < OAR_TILT_REARM) _oarTilt.armed = true;
+      return;
     }
-    sw.last.copy(_oarTop);
-    sw.lastAt = now;
+    if (tilt < OAR_TILT_START) return;
+    _oarTilt.armed = false;
+    const lean = Math.hypot(_oarTop.x, _oarTop.z) || 1;
+    const side = Math.abs(_oarTop.x) > OAR_TILT_SIDE * lean ? Math.sign(_oarTop.x) : -_oarSide;
+    const dir = _oarTop.z < -OAR_TILT_BACK * Math.abs(_oarTop.x) && _oarTop.z < -0.05 ? -1 : 1;
+    const k = THREE.MathUtils.clamp((tilt - OAR_TILT_START) / (OAR_TILT_FULL - OAR_TILT_START), 0, 1);
+    _startOarStroke(side, dir, OAR_TILT_MIN_STRENGTH + (1 - OAR_TILT_MIN_STRENGTH) * k);
   };
   // (in place) The oar's hold for the stroke going on (or at rest, lifted beside the hull on
   // its side): the blade's way from the top hand eased toward the stroke's pose, crossing over
@@ -6029,22 +6008,8 @@ async function initCore(runtimeContext) {
   const WEAPON_AIM_PITCH_MIN = THREE.MathUtils.degToRad(-50);
   const WEAPON_AIM_PITCH_MAX = THREE.MathUtils.degToRad(65);
   const WEAPON_AIM_SMOOTH = 18;          // 1/s — takes the edge off amplified sensor noise
-  // Empty hands (Town's ✋ Hands): the same turn as the shield (no aim pitch). Settings →
-  // Sword Gyro turns it off (`sq:handsGyroMove`, window.phoneSwordHandsMove).
-  const HANDS_GYRO_MOVE_KEY = 'sq:handsGyroMove';
-  window.phoneSwordHandsMove = (() => {
-    try { return localStorage.getItem(HANDS_GYRO_MOVE_KEY) !== '0'; } catch (_) { return true; }
-  })();
-  window.setPhoneSwordHandsMove = (on) => {
-    window.phoneSwordHandsMove = !!on;
-    try { localStorage.setItem(HANDS_GYRO_MOVE_KEY, on ? '1' : '0'); } catch (_) { /* ignore */ }
-  };
-  const _handsGyroWanted = () => !!_townLoadout && window.phoneSwordHandsMove !== false
-    && !!town?.isActive() && !town.handsBusy?.() && _heldWeaponId() == null
-    && !!playerControls?.enabled && !_gamePaused && !isPlayerFrozen() && !playerRoll;
   const _weaponAim = {
     active: false,
-    hands: false,
     neutralQ: new THREE.Quaternion(),
     earthToGameQ: new THREE.Quaternion(),
     baseYaw: 0,
@@ -6063,17 +6028,13 @@ async function initCore(runtimeContext) {
   const _updateWeaponGyroAim = (dt) => {
     const g = window.phoneSwordGyro;
     const holding = !!playerControls && (pistol?.holder === playerControls || shield?.holder === playerControls);
-    const hands = !holding && _handsGyroWanted();
-    if ((!holding && !hands) || playerDead || !g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) {
+    if (!holding || playerDead || !g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) {
       if (_weaponAim.active) _stopWeaponGyroAim();
       return;
     }
-    // Switching between a weapon and empty hands starts over from the current pose
-    if (_weaponAim.active && _weaponAim.hands !== hands) _stopWeaponGyroAim();
     _pswDeviceQuat(Number.isFinite(g.alpha) ? g.alpha : 0, g.beta, g.gamma, _weaponAimDevQ);
     if (!_weaponAim.active) {
       _weaponAim.active = true;
-      _weaponAim.hands = hands;
       _weaponAim.neutralQ.copy(_weaponAimDevQ);
       _pswEarthToGame(_weaponAim.neutralQ, _weaponAim.earthToGameQ);
       _weaponAim.baseYaw = playerControls.yaw;
@@ -6106,7 +6067,6 @@ async function initCore(runtimeContext) {
     const yawOffset = THREE.MathUtils.clamp(_weaponAim.phoneYaw * WEAPON_AIM_YAW_GAIN, -WEAPON_AIM_YAW_OFFSET_MAX, WEAPON_AIM_YAW_OFFSET_MAX);
     playerControls.yaw = _weaponAim.baseYaw + yawOffset;
     _weaponAim.lastYaw = playerControls.yaw;
-    if (hands) return;
     // Read by PlayerControls (aim direction + camera pitch) and the pistol (arms + gun pitch)
     playerControls.weaponAimPitch = THREE.MathUtils.clamp(
       _weaponAim.phonePitch * WEAPON_AIM_PITCH_GAIN, WEAPON_AIM_PITCH_MIN, WEAPON_AIM_PITCH_MAX
@@ -9419,7 +9379,7 @@ async function initCore(runtimeContext) {
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
           // (the oar: the phone's swing starts a stroke, the stroke poses it)
-          if (_oarActive) { _detectOarSwing(foamSword._holdQuaternion, nowSec); _oarPose(foamSword._holdQuaternion); }
+          if (_oarActive) { _detectOarTilt(foamSword._holdQuaternion); _oarPose(foamSword._holdQuaternion); }
         }
         // Unarmed (village): the gyro moves the player's right arm (updateProceduralPlayerRig)
         const _pmUD = playerControls?.playerModel?.userData;
