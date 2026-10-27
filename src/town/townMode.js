@@ -118,6 +118,13 @@ import { installTownTrees } from './townTrees.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
+let _memoryOwn = null;
+// Signed-in players' saves also go to Firebase (townSaves/<key> — localStorage is per site, so
+// each deployment URL would start from nothing): read on entering (the town waits on it, up to
+// CLOUD_LOAD_MS), written at most every CLOUD_SAVE_MS
+const CLOUD_LOAD_MS = 6000;
+const CLOUD_SAVE_MS = 10000;
+const HIDDEN_LEAVE_MS = 15000;
 
 export function createTownMode(ctx) {
   // The town's state and functions, shared by the townMode*.js modules (each adds its own)
@@ -335,8 +342,94 @@ export function createTownMode(ctx) {
 
   // ── Persistence ──
   const saveKey = () => { const k = ctx.profileKey(); return k ? `${SAVE_PREFIX}${k}` : null; };
+  const ownKey = () => { const k = ctx.profileKey(); return k ? `${SAVE_PREFIX}own_${k}` : null; };
+  const readLocal = (key) => {
+    if (!key) return null;
+    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (_) { return null; }
+  };
+  const writeLocal = (key, data) => {
+    if (key) { try { localStorage.setItem(key, JSON.stringify(data)); } catch (_) { /* storage blocked */ } }
+  };
+  const newest = (...saves) => saves.filter(Boolean).reduce((a, b) => ((b.at || 0) > (a?.at || 0) ? b : a), null);
+  // The cloud copy (fetched on entering): written only once it was read, so a failed read never
+  // puts a fresh town over the real one
+  T.cloud = null;
+  T.cloudOk = false;
+  T.cloudDone = true;
+  T.cloudLoad = Promise.resolve();
+  const cloudQueue = new Map(); // part → data
+  let cloudSentAt = 0;
+  let cloudTimer = null;
+  const flushCloud = () => {
+    clearTimeout(cloudTimer);
+    cloudTimer = null;
+    if (!T.cloudOk) { cloudQueue.clear(); return; }
+    cloudSentAt = Date.now();
+    for (const [part, data] of cloudQueue) ctx.saveCloud?.(part, data);
+    cloudQueue.clear();
+  };
+  const queueCloud = (part, data) => {
+    if (!T.cloudOk || !ctx.profileKey()) return;
+    cloudQueue.set(part, data);
+    if (!cloudTimer) cloudTimer = setTimeout(flushCloud, Math.max(0, cloudSentAt + CLOUD_SAVE_MS - Date.now()));
+  };
+  // A phone locked / the tab put away: saved now (it may never come back). A shared town's
+  // game stops running when hidden, so after HIDDEN_LEAVE_MS it leaves the room — the others
+  // would otherwise wait on a host that doesn't answer (or never get the town when joining)
+  let hiddenTimer = null;
+  document.addEventListener('visibilitychange', () => {
+    clearTimeout(hiddenTimer);
+    hiddenTimer = null;
+    if (!document.hidden || !T.active) return;
+    if (T.ready) { save(); flushCloud(); }
+    if (!net) return;
+    hiddenTimer = setTimeout(() => {
+      hiddenTimer = null;
+      if (!document.hidden || !T.active || !net.isOn() || T.netMode === 'joining' || T.netMode === 'off') return;
+      if (T.ready) { save(); flushCloud(); }
+      T.leftWhileAway = true;
+      net.stop();
+    }, HIDDEN_LEAVE_MS);
+  });
+  const fetchCloud = (token) => {
+    T.cloud = null;
+    T.cloudOk = false;
+    if (!ctx.profileKey() || !ctx.loadCloudSave) { T.cloudDone = true; T.cloudLoad = Promise.resolve(); return; }
+    T.cloudDone = false;
+    T.cloudLoad = Promise.race([
+      ctx.loadCloudSave(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), CLOUD_LOAD_MS)),
+    ]).then((c) => {
+      if (token !== T.enterToken) return;
+      T.cloud = c || null;
+      T.cloudOk = true;
+    }).catch((e) => {
+      console.warn('[Town] cloud save not read (this visit saves on this device only):', e);
+    }).finally(() => {
+      if (token === T.enterToken) T.cloudDone = true;
+    });
+  };
+  // The player's belongings — the same whichever town they're in (their own / a shared one)
+  const ownSnapshot = (s) => ({
+    v: 1, at: s.at, goods: s.goods, items: s.items, store: s.store, lockpicks: s.lockpicks, seeds: s.seeds,
+  });
+  const loadOwn = () => newest(readLocal(ownKey()), T.cloud?.own, _memoryOwn);
+  const saveOwn = (s) => {
+    const own = ownSnapshot(s);
+    _memoryOwn = own;
+    writeLocal(ownKey(), own);
+    queueCloud('own', own);
+  };
+  // A save with the newer belongings put in (they were last saved in the other kind of town)
+  const withOwn = (s) => {
+    const own = loadOwn();
+    if (!own || (s && (own.at || 0) <= (s.at || 0))) return s;
+    const { v, at, ...things } = own;
+    return { ...(s || {}), ...things };
+  };
   const snapshot = () => ({
     v: 1,
+    at: Date.now(),
     day: clock.day,
     minutes: clock.minutes,
     people: T.npcs.filter((n) => n.alive).map((n) => ({
@@ -386,6 +479,7 @@ export function createTownMode(ctx) {
   });
   const personalSnapshot = () => ({
     v: 1,
+    at: Date.now(),
     goods: { ...goods },
     items: ctx.getItems() ?? T.lastItems,
     att: Object.fromEntries(T.npcs.filter((n) => n.alive && Math.abs(n.attitude) > 0.01).map((n) => [n.id, Math.round(n.attitude * 100) / 100])),
@@ -407,14 +501,10 @@ export function createTownMode(ctx) {
     return k && room ? `${MP_SAVE_PREFIX}${k}_${room}` : null;
   };
   const loadPersonal = () => {
-    const key = personalKey();
-    if (key) {
-      try {
-        const s = JSON.parse(localStorage.getItem(key) || 'null');
-        if (s?.v === 1) return s;
-      } catch (_) { /* fresh */ }
-    }
-    return T.memoryPersonal && T.memoryPersonal.room === net?.roomId() ? T.memoryPersonal.s : null;
+    const local = readLocal(personalKey());
+    const cloud = T.cloud?.mp?.[net?.roomId()];
+    const mem = T.memoryPersonal && T.memoryPersonal.room === net?.roomId() ? T.memoryPersonal.s : null;
+    return withOwn(newest(local?.v === 1 ? local : null, cloud?.v === 1 ? cloud : null, mem));
   };
   // What's the player's own in a shared town (attitude, grudges, followers) back on the townsfolk
   const applyOwn = (own) => {
@@ -438,26 +528,19 @@ export function createTownMode(ctx) {
     if (T.mp()) {
       const s = personalSnapshot();
       T.memoryPersonal = { room: net.roomId(), s };
-      const key = personalKey();
-      if (key) { try { localStorage.setItem(key, JSON.stringify(s)); } catch (_) { /* storage blocked */ } }
+      writeLocal(personalKey(), s);
+      queueCloud(`mp/${net.roomId()}`, s);
+      saveOwn(s);
       return;
     }
     const state = snapshot();
     _memoryState = state;
-    const key = saveKey();
-    if (!key) return;
-    try { localStorage.setItem(key, JSON.stringify(state)); } catch (_) { /* storage blocked */ }
+    writeLocal(saveKey(), state);
+    queueCloud('solo', state);
+    saveOwn(state);
   };
-  const load = () => {
-    const key = saveKey();
-    if (key) {
-      try {
-        const s = JSON.parse(localStorage.getItem(key) || 'null');
-        if (s?.v === 1 && Array.isArray(s.people)) return s;
-      } catch (_) { /* fresh town */ }
-    }
-    return _memoryState;
-  };
+  const isTown = (s) => (s?.v === 1 && Array.isArray(s.people) ? s : null);
+  const load = () => (saveKey() ? newest(isTown(readLocal(saveKey())), isTown(T.cloud?.solo)) : null) ?? _memoryState;
 
   // ── Arrivals (newcomers take the place of the dead) ──
   const usedNames = () => new Set([...T.npcs.filter((n) => n.alive).map((n) => firstName(n.name)), ...T.departed]);
@@ -528,7 +611,7 @@ export function createTownMode(ctx) {
   // ── Lifecycle ──
   // state: the town (a save of your own, or a shared town's world); own: the player's things
   // (the same save for a town of your own)
-  const spawnTown = (state = load(), own = state) => {
+  const spawnTown = (state = load(), own = withOwn(state)) => {
     T.npcs = [];
     T.gossip = [];
     T.arrivals = [];
@@ -635,6 +718,8 @@ export function createTownMode(ctx) {
       net.start().then((ok) => { if (!ok && token === T.enterToken) T.netFailed = true; })
         .catch(() => { if (token === T.enterToken) T.netFailed = true; });
     }
+    // (the signed-in player's saves in Firebase: the town starts once they're in)
+    fetchCloud(token);
     // (built on the next frame: the first nav grid samples a few thousand ground heights)
     setTimeout(() => {
       if (!T.active || token !== T.enterToken) return;
@@ -657,14 +742,18 @@ export function createTownMode(ctx) {
       }
       T.laidOut = true;
       if (T.netMode === 'joining') { feedLine(`Finding your town…`); return; }
-      spawnTown();
-      feedLine(`Welcome to ${TOWN_NAME}! Walk up to people to talk.`);
+      T.cloudLoad.then(() => {
+        if (!T.active || token !== T.enterToken || T.ready) return;
+        spawnTown();
+        feedLine(`Welcome to ${TOWN_NAME}! Walk up to people to talk.`);
+      });
     }, 30);
   };
 
   const exit = () => {
     if (!T.active) return;
     save();
+    flushCloud();
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;

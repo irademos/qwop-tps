@@ -273,7 +273,7 @@ export const RAID_HOUR = 22;                // a guarded field is raided at this
 export const HOUSE_PRICE = 100;             // coins for the player's house
 export const MIN_TOWNSFOLK = 6;             // a player moving in never pushes the town below this (FOUNDING_ROLES' first ones)
 export const BAG_MAX = 15;                  // goods the player can carry (the rest stays in the chest at home)
-export const WALLET_MAX = 150;              // coins in the player's wallet (more stays on the ground / in the chest)
+export const WALLET_MAX = 300;              // coins in the player's wallet (more stays on the ground / in the chest)
 export const LOCKPICK_MAX = 3;              // lock-picks carried (single use)
 // The jail (townRooms.js ROOM_TYPES.jail — home_interior.glb with a cell of bars and the
 // sheriff's desk) is one of the town's houses
@@ -294,7 +294,7 @@ export const SAVE_PREFIX = 'town_';
 export const NET_SEND_S = 0.25;             // townsfolk positions (host → everyone, a claimant → host)
 export const NET_WORLD_S = 1;               // the clock + the market's stock
 export const NET_FULL_S = 15;               // the whole town (late joiners, a new host)
-export const NET_JOIN_TIMEOUT_S = 20;       // no shared town by then: a town of your own
+export const NET_JOIN_TIMEOUT_S = 30;       // no shared town by then: a town of your own
 export const NET_CLAIM_TIMEOUT_S = 10;      // a claimant not heard from: the host takes them back
 export const NET_CLAIM_GRACE_S = 3;         // s a fresh claim / release waits on the host's word
 export const BOUNTY_PER_STAR = 10;          // coins for bringing a wanted player down

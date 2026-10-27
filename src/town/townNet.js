@@ -112,6 +112,7 @@ export function createTownNet(ctx) {
   let plSentAt = 0;
   let hostSeen = { id: null, since: 0 };
   let lastError = null;       // why there's no shared town (shown in the town's HUD)
+  const heardAt = new Map();  // peer id → when a message of theirs last came in (why a join failed)
   const players = new Map(); // peer id → { name, url, stars, coins, hp, maxHp, swordTarget, hand, blocking, sword, lastAt, combat }
 
   const mp = () => (on ? ctx.getMultiplayer() : null);
@@ -147,6 +148,7 @@ export function createTownNet(ctx) {
     startToken += 1;
     if (!on) return;
     for (const pid of [...players.keys()]) dropPlayer(pid);
+    heardAt.clear();
     on = false;
     roomId = null;
     ctx.stopMultiplayer();
@@ -189,6 +191,7 @@ export function createTownNet(ctx) {
 
   const handleMessage = (from, data) => {
     if (!on || !data || typeof data.op !== 'string') return;
+    heardAt.set(from, Date.now());
     if (data.w) { ctx.onWorldMessage(from, data); return; }
     switch (data.op) {
       case 'pl': {
@@ -404,6 +407,16 @@ export function createTownNet(ctx) {
     peerIds,
     roomId: () => roomId,
     lastError: () => lastError,
+    // Why the room's host hasn't sent the town (a failed join's message)
+    joinTrouble: () => {
+      if (!on) return lastError ?? 'the room wasn\'t found';
+      if (!id()) return 'the multiplayer connection didn\'t start';
+      const h = hostId();
+      if (!h) return 'no host in the room';
+      if (!mp()?.connections?.[h]?.open) return 'couldn\'t connect to the host player\'s game — the network may block peer-to-peer';
+      if (!heardAt.has(h)) return 'the host player\'s game didn\'t answer — its tab may be in the background';
+      return 'the town didn\'t arrive from the host';
+    },
     canSave: () => !!ctx.profileKey(),
     send,
     broadcast,

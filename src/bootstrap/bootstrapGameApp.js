@@ -92,6 +92,8 @@ import {
   loadShowdownCharacters,
   hasCompletedTutorial,
   saveTutorialCompleted,
+  loadTownSave,
+  saveTownSave,
   randomGuestName,
   buildGuestProfile
 } from '../features/persistenceFeature.js';
@@ -8949,6 +8951,10 @@ async function initCore(runtimeContext) {
     profileKey: () => profileNameKey,
     // (a shared town's key for this player — the house kept for them, townHomes.js)
     memberKey: () => profileNameKey || `guest_${_guestDeviceId().replace(/[^a-z0-9-]/gi, '')}`,
+    // The signed-in player's town saves in Firebase (localStorage is per site: each deployment
+    // URL has its own) — townSaves/<key> in playerProfile.js
+    loadCloudSave: () => (profileNameKey ? loadTownSave(profileNameKey) : Promise.resolve(null)),
+    saveCloud: (part, data) => { if (profileNameKey) void saveTownSave(profileNameKey, part, data); },
     // The town's own gear (see the Town loadout above)
     startLoadout: (items) => startTownLoadout(items),
     endLoadout: () => endTownLoadout(),

@@ -338,6 +338,35 @@ export async function loadShowdownCharacters(nameKey) {
   }
 }
 
+// Town saves, per signed-in player, kept out of profiles/<key> (leaderboards download profiles):
+//   townSaves/<key>/solo        = a town of their own (townMode.js snapshot)
+//   townSaves/<key>/mp/<roomId> = their own things in a shared town (personalSnapshot)
+//   townSaves/<key>/own         = their belongings (coins, gear, goods, chest…), whichever town
+// Each is { at, json } — JSON text, so the save's shape (undefined, empty arrays, keys) is kept.
+export async function loadTownSave(nameKey) {
+  if (!nameKey) return null;
+  const snap = await get(ref(db, `townSaves/${nameKey}`));
+  const raw = snap.val();
+  if (!raw) return null;
+  const parse = (e) => {
+    if (!e || typeof e.json !== 'string') return null;
+    try { return JSON.parse(e.json); } catch (_) { return null; }
+  };
+  const mp = {};
+  for (const [room, e] of Object.entries(raw.mp || {})) mp[room] = parse(e);
+  return { solo: parse(raw.solo), mp, own: parse(raw.own) };
+}
+
+// part: 'solo' | 'own' | `mp/<roomId>`
+export async function saveTownSave(nameKey, part, data) {
+  if (!nameKey || !data) return;
+  try {
+    await set(ref(db, `townSaves/${nameKey}/${part}`), { at: data.at || Date.now(), json: JSON.stringify(data) });
+  } catch (err) {
+    console.warn('Failed to save the town:', err);
+  }
+}
+
 // Sword Showdown tutorial: profiles/<nameKey>/tutorialCompleted = true once finished
 export function hasCompletedTutorial(profile) {
   return profile?.tutorialCompleted === true;
@@ -505,6 +534,16 @@ export async function renameProfile(currentName, currentNameKey, nextName) {
   };
 
   await set(newProfileRef, nextProfile);
+  // (the town saves go along — townSaves/<key>)
+  try {
+    const town = (await get(ref(db, `townSaves/${currentNameKey}`))).val();
+    if (town) {
+      await set(ref(db, `townSaves/${nextNameKey}`), town);
+      await set(ref(db, `townSaves/${currentNameKey}`), null);
+    }
+  } catch (err) {
+    console.warn('Failed to move the town saves:', err);
+  }
   await Promise.all([set(oldProfileRef, null), set(oldClaimRef, null)]);
   clearStoredPin(currentName);
   rememberPinHash(nextNameKey, pinHash);
@@ -704,7 +743,8 @@ export async function deleteProfileData(nameKey, playerName) {
   try {
     await Promise.all([
       set(ref(db, `profiles/${nameKey}`), null),
-      set(ref(db, `nameClaims/${nameKey}`), null)
+      set(ref(db, `nameClaims/${nameKey}`), null),
+      set(ref(db, `townSaves/${nameKey}`), null)
     ]);
     if (playerName) {
       clearStoredPin(playerName);
