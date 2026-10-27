@@ -16,6 +16,8 @@ const BLADE_LENGTH = 0.45;
 const BLADE_WIDTH = 0.18;
 const BLADE_THICK = 0.014;
 export const OAR_SUPPORT_AT = 0.55; // m down the shaft from the grip: the lower hand
+export const OAR_HAND_OUT = 0.3;    // m out to the side the blade's on: the top hand (FoamSword.oarLean)
+export const OAR_BLADE_AT = SHAFT_LENGTH + BLADE_LENGTH / 2; // m down from the grip: the blade's middle
 
 const along = (geometry) => geometry.rotateX(Math.PI / 2); // cylinder axis Y → Z
 const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, metalness: 0.02, ...extra });

@@ -4,7 +4,7 @@ import { Weapon } from './weapon.js';
 import { loadAllSwordModelTemplates, createSwordModelInstance, swordVariantForCharacter } from './swordModel.js';
 import { createWandModel } from './magicWand.js';
 import { createFishingRodModel, ROD_HOLD_PITCH } from './fishingRod.js';
-import { createOarModel, OAR_SUPPORT_AT } from './oar.js';
+import { createOarModel, OAR_HAND_OUT, OAR_SUPPORT_AT } from './oar.js';
 import { characterHold } from '../models/glbCharacterModel.js';
 
 export const FOAM_SWORD_ITEM_ID = 'foamSword';
@@ -28,10 +28,11 @@ const FS_HAND_CENTER_Y = 0.82;
 const FS_HAND_Z        = 0.50;
 // Town's canoe oar (held by its handle, pointing down — the phone straight up holds it straight
 // down): the top hand's height, raised as the phone tilts away from upright (so the blade comes
-// out of the water when tilted well over), how far it follows the phone sideways / forward
+// out of the water when tilted well over), how far it follows the phone forward; sideways the
+// hands go out over the gunwale on the side the blade's on (oarLean — set by the gyro loop in
+// bootstrapGameApp.js, which also keeps the blade out of the hull)
 const OAR_HAND_Y      = 0.95;
 const OAR_HAND_LIFT   = 0.35;
-const OAR_HAND_SIDE   = 0.22;
 const OAR_HAND_Z      = 0.32;
 const OAR_HAND_FWD    = 0.25;
 
@@ -103,6 +104,8 @@ export class FoamSword extends Weapon {
     // Town's canoe oar: the same again, upside down (blade along −Z — see oar.js); townCanoe.js
     // paddles with its blade
     this.oar = false;
+    // The oar's side: −1 … 1, player-local +X (the player's left) = the blade on that side
+    this.oarLean = 0;
   }
 
   /** The oar model on the hand, or null. */
@@ -182,11 +185,11 @@ export class FoamSword extends Weapon {
       }
       const tgt = pm.userData.foamSwordHandTarget;
       if (this.oar) {
-        // The oar: the top hand on the handle, a little toward where the phone leans (the blade
-        // goes the other way), the other hand down the shaft (foamSwordSupport, playerModel.js);
+        // The oar: the top hand on the handle, out over the side the blade's on, the other hand
+        // down the shaft (foamSwordSupport, playerModel.js);
         // sized with the character like the hands' grip (the small village boy's is shorter)
         const grip = characterHold(pm.userData.qwopRig?.characterUrl).grip || 1;
-        tgt.x = THREE.MathUtils.clamp(_fsSwordDir.x * OAR_HAND_SIDE, -0.4, 0.4);
+        tgt.x = THREE.MathUtils.clamp(this.oarLean, -1, 1) * OAR_HAND_OUT;
         tgt.y = OAR_HAND_Y + OAR_HAND_LIFT * (1 - Math.abs(_fsSwordDir.y));
         tgt.z = THREE.MathUtils.clamp(OAR_HAND_Z + _fsSwordDir.z * OAR_HAND_FWD, 0.1, 0.65);
         _fsOarDir.copy(_fsSwordDir).multiplyScalar(-OAR_SUPPORT_AT);

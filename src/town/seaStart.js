@@ -14,11 +14,17 @@
 // oar's blade with a gyro, else W / S / A / D or — touch screens — the joystick). Near the spot with
 // dry ground in reach, 🛶 Get out → onLanded: Town starts there as the guest, normal UI.
 // ⬅ Lobby → onLobby (the start screen); Sign In → onSignIn (the login form).
+//
+// Where the canoe starts out is a fishing spot: Town's fishing (townFishing.js) is installed on a
+// small stand-in for the town's state (`F`), the spot where the canoe starts (within
+// SEA_FISH_REACH), all water but the canoe itself; what's caught (up to BAG_MAX) is shown by the
+// tools and comes ashore into Town with the player (onLanded's `goods`).
 
 import * as THREE from 'three';
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { createCanoeBoat } from './canoeBoat.js';
-import { CANOE_SHORE_DIST, dist2, el } from './townConfig.js';
+import { installTownFishing } from './townFishing.js';
+import { BAG_MAX, CANOE_SHORE_DIST, dist2, el } from './townConfig.js';
 
 const SEA_START_DIST = 140;       // m out from the fishing spot, the way its bank faces…
 const SEA_START_SIDE = 4;         // …and this far to one side (headings exactly along a diagonal
@@ -29,6 +35,9 @@ const SEA_LAND_CHECK_S = 0.25;    // s between looks for the shore
 const OCEAN_SIZE = 2400;          // m — the stand-in ocean, centred on the start
 const SEABED_DEPTH = 7;           // m under the surface
 const SEABED_COLOR = 0x1f5f78;
+const SEA_FISH_REACH = 30;        // m from where the canoe starts: its fishing spot
+const SEA_FISH_DRIFT = 4;         // m the canoe may drift with the line out before it's reeled in
+const SEA_NOTE_MS = 4000;         // a note's time on screen
 
 // ctx: the game (bootstrapGameApp.js); config: MAPS.islandTown.seaStart
 //   { seaLevel, fishSpot: { x, z }, face: { x, z } (unit: from the spot out to the water) }
@@ -95,12 +104,88 @@ export function createSeaStart(ctx, config) {
   const outBtn = btn('sea-out ui-btn hidden', 'Get out', () => getOut());
   const tools = el('div', 'sea-tools');
   tools.append(rodBtn, oarBtn);
-  hud.append(lobbyBtn, signInBtn, outBtn, tools);
+  // (fishing: no gyro → Cast / Pull buttons; the catch; a note now and then)
+  const acts = el('div', 'sea-acts');
+  const catchEl = el('div', 'sea-catch ui-chip hidden');
+  const noteEl = el('div', 'sea-note ui-panel hidden');
+  hud.append(lobbyBtn, signInBtn, catchEl, noteEl, outBtn, acts, tools);
+  let noteTimer = 0;
+  const note = (text) => {
+    noteEl.textContent = text;
+    noteEl.classList.remove('hidden');
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => noteEl.classList.add('hidden'), SEA_NOTE_MS);
+  };
+  let actsKey = '';
+  const renderActs = () => {
+    const list = held === 'rod' && !landSpot ? F.fishingActs(true) : [];
+    const key = list.map((a) => a.key).join('|');
+    if (key === actsKey) return;
+    actsKey = key;
+    acts.replaceChildren(...list.map((a) => btn('sea-tool ui-btn', a.label, a.onClick)));
+  };
   const renderTools = () => {
     rodBtn.classList.toggle('is-active', held === 'rod');
     oarBtn.classList.toggle('is-active', held === 'oar');
+    renderActs();
     // (touch screens with no gyro paddle with the joystick: it shows while the oar's out)
     document.body.classList.toggle('sea-steer', held === 'oar' && ctx.isTouch() && !ctx.hasGyro());
+  };
+
+  // ── Fishing: Town's (townFishing.js) on a stand-in for the town's state ──
+  // (the spot: where the canoe started; water: anywhere but in the canoe)
+  const F = {
+    hud,
+    simT: 0,
+    fishing: null,
+    sequence: null,
+    jail: null,
+    goods: { fish: 0 },
+    fishSpotReach: SEA_FISH_REACH,
+    fishCancelReach: SEA_FISH_DRIFT,
+    fishAwayText: 'Too far out — fish where you started, or paddle on to the island.',
+    layout: {
+      places: { fishSpot: null },
+      nav: {
+        indexAt: (x, z) => ({ x, z }),
+        isWater: (p) => !!boat && boat.floorAt(p.x, p.z) === undefined && waterDepth(p.x, p.z) > 0.4,
+      },
+    },
+    playerPos: () => ctx.getPlayerModel().position,
+    feedLine: (text) => note(text),
+    bagRoom: () => Math.max(0, BAG_MAX - F.goods.fish),
+    bagFullNote: () => note(`Your bag's full (${BAG_MAX}).`),
+    gain: (g, n = 1) => {
+      const got = Math.min(n, F.bagRoom());
+      if (got < n) F.bagFullNote();
+      F.goods[g] = (F.goods[g] ?? 0) + got;
+      catchEl.textContent = `🐟 ${F.goods.fish}`;
+      catchEl.classList.toggle('hidden', !F.goods.fish);
+      return got;
+    },
+    introNote: () => {},
+    calmNow: () => true,
+    stalls: { focused: () => false },
+    marketPanel: { isOpen: () => false },
+    jobTalk: { isOpen: () => false },
+  };
+  installTownFishing(F, {
+    scene: ctx.scene,
+    getPlayerModel: ctx.getPlayerModel,
+    getRodModel: ctx.getRodModel,
+    isRodEquipped: () => active && held === 'rod' && !!ctx.getRodModel(),
+    isPlayerDead: () => false,
+    getWaterY: (x, z) => waterY(x, z),
+    getGroundY: ctx.getGroundY,
+    hasGyro: ctx.hasGyro,
+    takeReel: ctx.takeReel,
+    isPhoneConnected: ctx.isPhoneConnected,
+    refreshPhone: ctx.refreshPhone,
+  });
+  const stopFishing = () => {
+    F.fishing = null;
+    F.stopFishingRig();
+    F.hideFishingHud();
   };
 
   // ── Rod / oar ──
@@ -111,6 +196,7 @@ export function createSeaStart(ctx, config) {
   };
   const pick = (kind) => {
     if (!active) return;
+    if (kind !== 'rod' && F.fishing) stopFishing();
     held = kind;
     ctx.hold(kind);
     faceFor(kind);
@@ -141,7 +227,7 @@ export function createSeaStart(ctx, config) {
   };
   const getOut = () => {
     if (!active || !landSpot) return;
-    const spot = landSpot;
+    const spot = { ...landSpot, goods: F.goods.fish ? { fish: F.goods.fish } : null };
     exit();
     ctx.teleport(spot.x, spot.z, spot.yaw);
     ctx.onLanded(spot);
@@ -168,6 +254,9 @@ export function createSeaStart(ctx, config) {
     const x = fishSpot.x + face.x * SEA_START_DIST - face.z * SEA_START_SIDE;
     const z = fishSpot.z + face.z * SEA_START_DIST + face.x * SEA_START_SIDE;
     const yaw = Math.atan2(fishSpot.x - x, fishSpot.z - z);
+    F.layout.places.fishSpot = { x, z };
+    F.goods.fish = 0;
+    F.gain('fish', 0);
     boat = createCanoeBoat({ waterY, waterDepth, x, z, yaw });
     boat.place(0);
     ctx.scene.add(boat.group);
@@ -184,11 +273,19 @@ export function createSeaStart(ctx, config) {
     document.body.append(hud);
     outBtn.classList.add('hidden');
     pick('rod');
+    note(ctx.hasGyro()
+      ? 'A good spot for fishing. Swing the rod forward to cast; pull it back when the bobber goes under.'
+      : 'A good spot for fishing. Cast, wait for a bite, then pull.');
   };
 
   const exit = () => {
     if (!active) return;
     active = false;
+    stopFishing();
+    clearTimeout(noteTimer);
+    noteEl.classList.add('hidden');
+    actsKey = '';
+    acts.replaceChildren();
     held = null;
     unregisterFloor?.();
     unregisterFloor = null;
@@ -196,6 +293,7 @@ export function createSeaStart(ctx, config) {
     ctx.setPositionConstraint(null);
     ctx.hold(null);
     boat.group.parent?.remove(boat.group);
+    boat.dispose();
     boat = null;
     removeOcean();
     hud.remove();
@@ -221,6 +319,8 @@ export function createSeaStart(ctx, config) {
     boat.move(dt, simT);
     const s = boat.standPoint();
     ctx.carryPlayer(s.x, boat.floorY(), s.z, boat.yaw - yawBefore);
+    F.simT = simT;
+    F.updateFishing(dt);
     if (simT >= landAt) {
       landAt = simT + SEA_LAND_CHECK_S;
       landSpot = findLandSpot();
@@ -234,6 +334,8 @@ export function createSeaStart(ctx, config) {
     exit,
     update,
     isActive: () => active,
+    // The phone's reel while the line's out (as Town's — _phoneControllerStatus)
+    fishingHud: () => (active ? F.fishingHud() : null),
     // The phone's Block bar as an interact button: 🛶 Get out at the spot, else 🛶 Oar
     interactLabel: () => (!active ? null : landSpot ? 'Get out' : held === 'oar' ? null : 'Oar'),
     interact: () => {
@@ -242,5 +344,6 @@ export function createSeaStart(ctx, config) {
       else if (held !== 'oar') pick('oar');
     },
     pick,
+    debug: () => ({ F, boat, held }),
   };
 }

@@ -4796,6 +4796,39 @@ body.sea-start.sea-steer > #joystick-container { display: block !important; }
   font-size: 17px;
   font-weight: 800;
 }
+/* (fishing where the canoe starts: Cast / Pull without a gyro, the catch, notes; the hint and the
+   on-screen reel are Town's — .town-fishing / .town-reel) */
+.sea-acts {
+  position: absolute;
+  left: 50%;
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+}
+.sea-catch {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text);
+  pointer-events: none;
+}
+.sea-note {
+  position: absolute;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(440px, calc(100% - 32px));
+  padding: 10px 16px;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+}
+.sea-hud .town-fishing { bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
 .sea-hud .hidden { display: none; }
 /* (touch, no gyro: the joystick sits to the left of the Rod / Oar buttons, above them on narrow screens) */
 @media (max-width: 520px) {

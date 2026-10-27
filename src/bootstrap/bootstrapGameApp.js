@@ -62,6 +62,8 @@ import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
 import { createSeaStart } from '../town/seaStart.js';
+import { CANOE_HALF_WIDTH } from '../items/canoe.js';
+import { OAR_BLADE_AT, OAR_HAND_OUT } from '../items/oar.js';
 import { WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
@@ -151,6 +153,16 @@ const OAR_OUT_TILT = 75 * DEG_RAD;
 const OAR_SNAP_TILT = 52 * DEG_RAD;
 const OAR_SNAP_WIDTH = 5 * DEG_RAD;
 const OAR_GUIDE = 0.65;
+// …and with the blade down (tilted less than OAR_SNAP_TILT) kept out beside the hull, not
+// through it: eased by OAR_SIDE_ASSIST toward OAR_SIDE_REACH m out from the middle (so only the
+// stroke fore and aft is up to the phone), never closer than OAR_HULL_CLEAR (the canoe's half
+// width + a little). It stays on its side (the hands out over that gunwale — FoamSword.oarLean)
+// until it's lifted out, or the phone puts it OAR_SIDE_SWITCH m out over the other side.
+const OAR_SIDE_REACH = 0.68;
+const OAR_HULL_CLEAR = CANOE_HALF_WIDTH + 0.1;
+const OAR_SIDE_ASSIST = 0.6;
+const OAR_SIDE_SWITCH = 0.35;
+const OAR_LEAN_RATE = 6;   // per s: the hands moving over to the other side
 const MAX_MANA = 100;
 const WAND_MANA_COST = 10;               // per blast; mana potions refill it
 const WAND_SWIPE_START_SPEED = 405;      // deg/s: a swipe starts…
@@ -2869,8 +2881,45 @@ async function initCore(runtimeContext) {
     const settled = OAR_IN_TILT + (OAR_OUT_TILT - OAR_IN_TILT) / (1 + Math.exp(-(amp - OAR_SNAP_TILT) / OAR_SNAP_WIDTH));
     const guide = OAR_GUIDE * THREE.MathUtils.smoothstep(amp, 3 * DEG_RAD, 14 * DEG_RAD);
     const extra = amp + (settled - amp) * guide - tilt;
-    if (Math.abs(extra) < 1e-5) return q;
-    return q.premultiply(_oarExtra.setFromAxisAngle(_oarAxis.normalize(), extra));
+    if (Math.abs(extra) >= 1e-5) q.premultiply(_oarExtra.setFromAxisAngle(_oarAxis.normalize(), extra));
+    _keepOarBeside(q);
+    return q;
+  };
+  // (in place) The blade beside the hull, on its side (OAR_SIDE_*), and the hands over there.
+  // Player-local, the player facing the bow (as they do with the oar out); in the oar's own
+  // units (scaled with the character — characterHold's grip)
+  let _oarSide = 0;
+  let _oarLeanAt = 0;
+  const _oarNew = new THREE.Vector3();
+  const _keepOarBeside = (q) => {
+    const grip = characterHold(playerModel?.userData?.qwopRig?.characterUrl).grip || 1;
+    _oarDir.set(0, 0, 1).applyQuaternion(q);
+    const handX = (foamSword?.oarLean ?? 0) * OAR_HAND_OUT;
+    const bladeX = handX - _oarDir.x * OAR_BLADE_AT; // (the oar's +Z is toward the handle)
+    if (!_oarSide) _oarSide = Math.sign(bladeX) || 1;
+    if (_oarUp.angleTo(_oarDir) >= OAR_SNAP_TILT) {
+      // Lifted out: free to go over to either side
+      if (Math.abs(bladeX) * grip > 0.05) _oarSide = Math.sign(bladeX);
+    } else {
+      if (Math.sign(bladeX) === -_oarSide && Math.abs(bladeX) * grip > OAR_SIDE_SWITCH) _oarSide = -_oarSide;
+      let want = bladeX + (_oarSide * OAR_SIDE_REACH / grip - bladeX) * OAR_SIDE_ASSIST;
+      if (want * _oarSide < OAR_HULL_CLEAR / grip) want = _oarSide * OAR_HULL_CLEAR / grip;
+      // (the new sideways lean; its tilt fore / aft kept)
+      const nx = THREE.MathUtils.clamp((handX - want) / OAR_BLADE_AT, -0.95, 0.95);
+      const yz = Math.hypot(_oarDir.y, _oarDir.z);
+      if (yz > 1e-4) {
+        const k = Math.sqrt(1 - nx * nx) / yz;
+        _oarNew.set(nx, _oarDir.y * k, _oarDir.z * k);
+        q.premultiply(_oarExtra.setFromUnitVectors(_oarDir, _oarNew));
+      }
+    }
+    // The hands drift over to that side
+    if (foamSword) {
+      const now = performance.now() / 1000;
+      const dt = Math.min(0.1, Math.max(0, now - _oarLeanAt));
+      _oarLeanAt = now;
+      foamSword.oarLean += (_oarSide - foamSword.oarLean) * (1 - Math.exp(-OAR_LEAN_RATE * dt));
+    }
   };
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
   const _wandSwipe = {
@@ -6360,7 +6409,7 @@ async function initCore(runtimeContext) {
   const _phoneControllerStatus = () => {
     const status = _phoneControllerGearStatus();
     // Town fishing, the line out: the bar is a reel (cranked round on the phone's screen)
-    const fishing = town?.isActive() ? town.fishingHud() : null;
+    const fishing = town?.isActive() ? town.fishingHud() : seaStart?.isActive() ? seaStart.fishingHud() : null;
     if (fishing?.reel) return { ...status, reelMode: true, fishCue: fishing.cue, fishText: fishing.text };
     // Town, something grabbed (the hose): the bar is its mode (💧 Water — held), 🗡/✋ drops it
     if (town?.isActive() && town.holding()) return { ...status, holding: true, heldBar: town.heldBar() };
@@ -8903,6 +8952,12 @@ async function initCore(runtimeContext) {
     carryPlayer: _carryPlayer,
     getSteer: _getSteer,
     getOarModel: () => (isOarEquipped() ? foamSword?.getOarModel?.() ?? null : null),
+    // Fishing where the canoe starts out (Town's fishing — townFishing.js): as the town ctx's
+    getPlayerModel: () => playerModel,
+    getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
+    takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
+    isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
+    refreshPhone: () => _phoneSwordStatusNow?.(),
     // 'rod' | 'oar' in hand, or null: nothing
     hold: (kind) => {
       if (kind === 'rod') equipInventoryItem(FISHING_ROD_ITEM_ID);
@@ -8925,6 +8980,7 @@ async function initCore(runtimeContext) {
     },
     onSignIn: () => arcadeOverlay.signIn(),
   }, MAPS[DEFAULT_MAP].seaStart);
+  window.seaStart = seaStart; // (dev console: seaStart.debug())
   const startSeaMode = () => {
     _resetForMenu();
     _putWeaponsAway();
