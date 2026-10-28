@@ -148,24 +148,29 @@ const OAR_ITEM_ID = 'canoe_oar';
 // fore / aft tilt count (from where the phone was when it went in): the top toward the paddler
 // sweeps the blade back — a forward stroke, the canoe pushed on — the top away sweeps it ahead —
 // a back stroke; the first OAR_SWEEP_PICK of it picks which, then the blade follows the tilt up
-// to OAR_SWEEP_FULL (going back toward the middle, it's lifted — pushing nothing). Straightening
-// the sideways tilt below OAR_DIP_OUT lifts it out and back to rest, and the next stroke waits for
-// the phone to come back within OAR_TILT_RELOCK of its rest. The boat is pushed whenever the blade
-// moves through the pull (canoeBoat.js). The rest is how it's held between strokes, not the
+// to OAR_SWEEP_FULL, where it comes out by itself (going back toward the middle, it's lifted —
+// pushing nothing). Straightening the sideways tilt below OAR_DIP_OUT lifts it out too. The next
+// stroke waits for the sideways tilt back near the middle — within OAR_REARM of the rest, or held
+// still (OAR_STILL_S, under OAR_STILL_SPEED) anywhere within OAR_REARM_LOOSE (then a stroke on
+// that side starts a little past where it's held — `base`); the fore / aft tilt doesn't matter. The boat is pushed whenever the blade moves
+// through the pull (canoeBoat.js). The rest is how it's held between strokes, not the
 // calibration (the sea start never calibrates): between strokes it follows the phone
 // (OAR_REST_FOLLOW_S) while it's within OAR_REST_ZONE of it, and very slowly (OAR_REST_DRIFT_S) otherwise.
-const OAR_TILT_DEAD = 4 * Math.PI / 180;
-const OAR_DIP_FULL = 22 * Math.PI / 180;
-const OAR_DIP_OUT = 11 * Math.PI / 180;
-const OAR_SWEEP_PICK = 4 * Math.PI / 180;
-const OAR_SWEEP_FULL = 35 * Math.PI / 180;
-const OAR_TILT_RELOCK = 8 * Math.PI / 180;
+const OAR_TILT_DEAD = 7 * Math.PI / 180;
+const OAR_DIP_FULL = 15 * Math.PI / 180;
+const OAR_DIP_OUT = 9 * Math.PI / 180;
+const OAR_SWEEP_PICK = 3 * Math.PI / 180;
+const OAR_SWEEP_FULL = 20 * Math.PI / 180;
+const OAR_REARM = 6 * Math.PI / 180;
+const OAR_REARM_LOOSE = 16 * Math.PI / 180;
+const OAR_STILL_S = 0.25;
+const OAR_STILL_SPEED = 25 * Math.PI / 180; // rad/s of sideways tilt
 const OAR_TILT_FOLLOW = 18;    // per s: the oar easing to the tilt's place along the stroke
 const OAR_LIFT_RATE = 8;       // per s: lifting the blade out going back / dipping it going on
-const OAR_RETURN_RATE = 1.8;   // per s of u: lifted out, back to rest
-const OAR_REST_ZONE = 5 * Math.PI / 180;
-const OAR_REST_FOLLOW_S = 2;
-const OAR_REST_DRIFT_S = 12;
+const OAR_RETURN_RATE = 3;     // per s of u: lifted out, back to rest
+const OAR_REST_ZONE = 8 * Math.PI / 180;
+const OAR_REST_FOLLOW_S = 1.5;
+const OAR_REST_DRIFT_S = 10;
 const OAR_POSE_RATE = 16;  // per s: the oar easing into the stroke's pose
 const OAR_LEAN_RATE = 6;   // per s: the hands moving over to the other side
 const MAX_MANA = 100;
@@ -2895,7 +2900,7 @@ async function initCore(runtimeContext) {
   // (free to start a stroke) → 'dip' (going in on its side) → 'pull' (in: the fore / aft tilt
   // sweeps it, from pitch0) → 'out' (lifted, back to rest) → 'wait' (for the phone back at the middle)
   const _oarTilt = {
-    live: null, at: 0, phase: 'rest', pitch0: 0, picked: false,
+    live: null, at: 0, phase: 'rest', pitch0: 0, picked: false, lastRoll: 0, still: 0, base: 0, from: 0,
     rest: new THREE.Vector3(),
   };
   // The stroke going on now (its u: 0…1 through it), or null — the tilt's first
@@ -2909,7 +2914,7 @@ async function initCore(runtimeContext) {
     _oarStroke.u = u;
     return _oarStroke;
   };
-  const _oarStrokeReset = () => { _oarStroke = null; _oarTilt.live = null; _oarTilt.at = 0; _oarTilt.phase = 'rest'; };
+  const _oarStrokeReset = () => { _oarStroke = null; _oarTilt.live = null; _oarTilt.at = 0; _oarTilt.phase = 'rest'; _oarTilt.base = 0; };
   const _oarTop = new THREE.Vector3();
   // (the angle of a unit vector's lean along one axis)
   const _oarLean = (v) => Math.asin(THREE.MathUtils.clamp(v, -1, 1));
@@ -2919,7 +2924,7 @@ async function initCore(runtimeContext) {
     const span = now - ot.at;
     // (just started, or the gyro went quiet: rest where it is now)
     if (!ot.at || span > 0.5) {
-      ot.rest.copy(_oarTop); ot.at = now; ot.phase = 'rest';
+      ot.rest.copy(_oarTop); ot.at = now; ot.phase = 'rest'; ot.base = 0;
       ot.live = { id: ++_oarStrokeSeq, side: _oarSide, dir: 1, strength: 1, visual: false, mid: true, u: 0, lift: 0 };
       return;
     }
@@ -2930,6 +2935,9 @@ async function initCore(runtimeContext) {
     // (sideways: + = the top to the left, player-local +X; fore / aft: + = the top away)
     const roll = _oarLean(_oarTop.x) - _oarLean(ot.rest.x);
     const pitch = _oarLean(_oarTop.z) - _oarLean(ot.rest.z);
+    // (held still a moment: how long the sideways tilt's barely moved)
+    ot.still = Math.abs(roll - ot.lastRoll) / span < OAR_STILL_SPEED ? ot.still + span : 0;
+    ot.lastRoll = roll;
     const follow = 1 - Math.exp(-OAR_TILT_FOLLOW * span);
     const toward = (target) => {
       const du = (target - live.u) * follow;
@@ -2939,8 +2947,17 @@ async function initCore(runtimeContext) {
     };
     if (ot.phase === 'rest' || ot.phase === 'wait') {
       ot.rest.lerp(_oarTop, 1 - Math.exp(-span / (tilt < OAR_REST_ZONE ? OAR_REST_FOLLOW_S : OAR_REST_DRIFT_S))).normalize();
-      if (ot.phase === 'wait' && tilt < OAR_TILT_RELOCK) ot.phase = 'rest';
-      if (ot.phase === 'rest' && Math.abs(roll) > OAR_TILT_DEAD) {
+      if (ot.phase === 'wait') {
+        if (Math.abs(roll) < OAR_REARM) { ot.phase = 'rest'; ot.base = 0; }
+        // (held still short of the middle: ready again, a stroke on that side starting from there)
+        else if (Math.abs(roll) < OAR_REARM_LOOSE && ot.still > OAR_STILL_S) { ot.phase = 'rest'; ot.base = roll; }
+      }
+      // (coming on back toward the middle: that side's start comes along)
+      const sameSide = ot.base && Math.sign(roll) === Math.sign(ot.base);
+      if (ot.phase === 'rest' && ot.base && (!sameSide || Math.abs(roll) < Math.abs(ot.base))) ot.base = sameSide ? roll : 0;
+      // (a stroke starts OAR_TILT_DEAD out — or, on the side it was held still, a little further than that)
+      ot.from = sameSide ? Math.max(OAR_TILT_DEAD, Math.abs(ot.base) + OAR_SWEEP_PICK) : OAR_TILT_DEAD;
+      if (ot.phase === 'rest' && Math.abs(roll) > ot.from) {
         Object.assign(live, { id: ++_oarStrokeSeq, side: Math.sign(roll), dir: 1, u: 0, lift: 0 });
         ot.phase = 'dip';
       } else {
@@ -2950,16 +2967,16 @@ async function initCore(runtimeContext) {
     }
     if (ot.phase === 'dip') {
       // (back through the middle: the other side, a fresh stroke)
-      if (Math.abs(roll) > OAR_TILT_DEAD && Math.sign(roll) !== live.side) Object.assign(live, { id: ++_oarStrokeSeq, side: Math.sign(roll), u: 0, lift: 0 });
-      const k = THREE.MathUtils.clamp((Math.abs(roll) - OAR_TILT_DEAD) / (OAR_DIP_FULL - OAR_TILT_DEAD), 0, 1);
-      if (Math.abs(roll) < OAR_TILT_DEAD && live.u < 0.01) { ot.phase = 'rest'; live.u = 0; return; }
+      if (Math.abs(roll) > OAR_TILT_DEAD && Math.sign(roll) !== live.side) { Object.assign(live, { id: ++_oarStrokeSeq, side: Math.sign(roll), u: 0, lift: 0 }); ot.base = 0; ot.from = OAR_TILT_DEAD; }
+      const k = THREE.MathUtils.clamp((Math.abs(roll) - ot.from) / (OAR_DIP_FULL - OAR_TILT_DEAD), 0, 1);
+      if (Math.abs(roll) < ot.from && live.u < 0.01) { ot.phase = 'rest'; live.u = 0; return; }
       toward(k * OAR_STROKE_CATCH);
       if (k >= 1) { live.u = OAR_STROKE_CATCH; live.lift = 0; ot.phase = 'pull'; ot.pitch0 = pitch; ot.picked = false; }
       if (live.u > 0.002) _oarStroke = null;
       return;
     }
     if (ot.phase === 'pull') {
-      if (Math.abs(roll) < OAR_DIP_OUT || Math.sign(roll) !== live.side) { ot.phase = 'out'; }
+      if (Math.abs(roll) < ot.from + OAR_DIP_OUT - OAR_TILT_DEAD || Math.sign(roll) !== live.side) { ot.phase = 'out'; }
       else {
         const sweep = pitch - ot.pitch0;
         // (the top toward the paddler: the blade back — forward; away: ahead — back)
@@ -2967,13 +2984,16 @@ async function initCore(runtimeContext) {
         const k = ot.picked ? THREE.MathUtils.clamp(-sweep * live.dir / OAR_SWEEP_FULL, 0, 1) : 0;
         toward(OAR_STROKE_CATCH + k * (OAR_STROKE_PULL - OAR_STROKE_CATCH));
         _oarStroke = null;
-        return;
+        // (swept all the way: out it comes, no dragging it there)
+        if (k < 1 || live.u < OAR_STROKE_PULL - 0.02) return;
+        live.u = OAR_STROKE_PULL;
+        ot.phase = 'out';
       }
     }
     // 'out': lifted first, then back along the stroke to rest; the next one once it's centred
     live.lift += (1 - live.lift) * (1 - Math.exp(-OAR_LIFT_RATE * 1.5 * span));
     if (live.lift > 0.6) live.u = Math.max(0, live.u - OAR_RETURN_RATE * span);
-    if (live.u <= 0) ot.phase = tilt < OAR_TILT_RELOCK ? 'rest' : 'wait';
+    if (live.u <= 0) { ot.phase = Math.abs(roll) < OAR_REARM ? 'rest' : 'wait'; ot.base = 0; }
   };
   // (in place) The oar's hold for the stroke going on (or at rest, lifted beside the hull on
   // its side): the blade's way from the top hand eased toward the stroke's pose, crossing over
