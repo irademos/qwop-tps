@@ -20,7 +20,7 @@ import { createCanoe, CANOE_FLOOR_Y, CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from 
 import { OAR_STROKE_SWEEP, oarStrokePull } from '../items/oar.js';
 import { createWaterSplash } from '../items/waterSplash.js';
 import {
-  CANOE_BOB, CANOE_DRAG, CANOE_MAX_SPEED, CANOE_MIN_DEPTH, CANOE_PADDLE_BACK, CANOE_SETTLE_DRAG,
+  CANOE_BACK_TURN, CANOE_BOB, CANOE_DRAG, CANOE_MAX_SPEED, CANOE_MIN_DEPTH, CANOE_PADDLE_BACK, CANOE_SETTLE_DRAG,
   CANOE_SIDE_DRAG, CANOE_SPLASH_EVERY, CANOE_STAND_Z, CANOE_STEER_ACCEL, CANOE_STEER_TURN, CANOE_STROKE_DV,
   CANOE_STROKE_TURN, CANOE_TURN_DRAG,
 } from './townConfig.js';
@@ -151,7 +151,7 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
       c.vx += fwdX * dv;
       c.vz += fwdZ * dv;
       // (off to its side: it turns — the left side forward turns it right, yaw −)
-      c.w -= stroke.side * f * CANOE_STROKE_TURN;
+      c.w -= stroke.side * f * CANOE_STROKE_TURN * (f < 0 ? CANOE_BACK_TURN : 1);
     }
     // The joystick / WASD paddle for the player
     if (Math.abs(steer.fwd) > 0.05) {
