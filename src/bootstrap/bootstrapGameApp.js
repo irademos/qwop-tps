@@ -3012,7 +3012,8 @@ async function initCore(runtimeContext) {
   function updateManaUI() {
     const bar = document.getElementById('mana-bar');
     if (!bar) return;
-    const show = hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout);
+    // (Town: always — mana pays for the bubble and the broom's boost too)
+    const show = !!_townLoadout || (hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout));
     bar.classList.toggle('hidden', !show);
     document.body.classList.toggle('has-mana', show);
     if (!show) return;
@@ -3625,7 +3626,11 @@ async function initCore(runtimeContext) {
   let bubbleActiveUntil = 0;
   let bubbleMesh = null;
   const isPlayerBubbleActive = () => Date.now() < bubbleActiveUntil && !playerDead;
-  const getBubbleCount = () => Math.max(0, Math.floor(statsState.bubbles || 0));
+  // (Town: no bubbles to buy — each one costs TOWN_BUBBLE_MANA mana; the count is how many the mana pays for)
+  const TOWN_BUBBLE_MANA = 25;
+  const getBubbleCount = () => (_townLoadout
+    ? Math.floor(getMana() / TOWN_BUBBLE_MANA)
+    : Math.max(0, Math.floor(statsState.bubbles || 0)));
   const ensureBubbleMesh = () => {
     if (bubbleMesh) return bubbleMesh;
     bubbleMesh = new THREE.Mesh(
@@ -3654,7 +3659,8 @@ async function initCore(runtimeContext) {
     if (playerDead || isPlayerBubbleActive()) return false;
     if (duelMode?.isActive() && !(_matchLoadout && matchMode?.isFighting())) return false; // battles only in Multiplayer
     if (getBubbleCount() <= 0) return false;
-    setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
+    if (_townLoadout) setStat('mana', getMana() - TOWN_BUBBLE_MANA, { skipSave: true });
+    else setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     bubbleActiveUntil = Date.now() + BUBBLE_DURATION_MS;
     ensureBubbleMesh().visible = true;
@@ -4849,8 +4855,10 @@ async function initCore(runtimeContext) {
   // Town: when the first day's guide last walked the player along (the town ctx's autoWalk)
   let _townAutoWalkAt = -Infinity;
   // A sword swing steps the player forward (into a blocked swing / a missed one) — in Town only
-  // while walked along
-  const _swingStepAllowed = () => !town?.isActive() || performance.now() - _townAutoWalkAt < 250;
+  // while walked along or fighting someone within TOWN_SWING_STEP_RANGE
+  const TOWN_SWING_STEP_RANGE = 6;    // m
+  const _swingStepAllowed = () => !town?.isActive() || performance.now() - _townAutoWalkAt < 250
+    || town.threats(TOWN_SWING_STEP_RANGE).length > 0;
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
   let _psWinShown = false;
@@ -6480,6 +6488,9 @@ async function initCore(runtimeContext) {
     } else if (action === 'broom') {
       // Town: on / off the flying broom
       _toggleBroom();
+    } else if (action === 'boost') {
+      // Town, on the broom: boost on / off (uses mana)
+      _toggleBroomBoost();
     } else if (action === 'wandShieldDown') {
       setWandShieldHold(true);
     }
@@ -6539,6 +6550,7 @@ async function initCore(runtimeContext) {
       // Town's flying broom (once bought): on it / off it
       hasBroom: !!_townLoadout?.hasBroom,
       onBroom: !!_broomRide?.isRiding(),
+      boosting: !!_broomRide?.isBoosting(),
       canUnequip: !!_townLoadout,
       // (the shield held up from the wand: Block keeps saying Shield until it's let go)
       wandShieldHeld: _wandShieldHold,
@@ -7140,6 +7152,8 @@ async function initCore(runtimeContext) {
     hasBroom: () => !!_townLoadout?.hasBroom,
     isRidingBroom: () => !!_broomRide?.isRiding(),
     toggleBroom: () => _toggleBroom(),
+    isBroomBoosting: () => !!_broomRide?.isBoosting(),
+    toggleBroomBoost: () => _toggleBroomBoost(),
     // Town: something grabbed — the Block bar is its mode (the hose's 'water'; null: none), held
     // down: useTownHeld(true), let go: false
     getTownHeldBar: () => (town?.isActive() ? town.heldBar() : null),
@@ -8570,7 +8584,6 @@ async function initCore(runtimeContext) {
     wand: hasMagicWand(),
     mana: getMana(),
     bombs: getPlayerBombCount(),
-    bubbles: getBubbleCount(),
   });
   const _refreshGearUI = () => {
     if ((inventoryState.pistol?.count ?? 0) > 0 && isInventoryItemEquipped('pistol')) {
@@ -8599,7 +8612,6 @@ async function initCore(runtimeContext) {
     else delete inventoryState[MAGIC_WAND_ITEM_ID];
     statsState.mana = Math.max(0, Math.min(MAX_MANA, Math.floor(items.mana || 0)));
     statsState.bombs = Math.max(0, Math.floor(items.bombs || 0));
-    statsState.bubbles = Math.max(0, Math.floor(items.bubbles || 0));
   };
   const startTownLoadout = (items) => {
     if (_townLoadout) return;
@@ -8639,7 +8651,7 @@ async function initCore(runtimeContext) {
     _refreshGearUI();
     return items;
   };
-  // A purchase at the town's market: 'sword' | 'rod' | 'gun' | 'ammo' | 'shield' | 'bomb' | 'bubble' |
+  // A purchase at the town's market: 'sword' | 'rod' | 'gun' | 'ammo' | 'shield' | 'bomb' |
   // 'wand' | 'mana' | 'broom' (n: how many bullets / bombs). Returns false when it can't be had.
   const grantTownItem = (kind, n = 1) => {
     if (!_townLoadout) return false;
@@ -8652,9 +8664,8 @@ async function initCore(runtimeContext) {
     else if (kind === 'ammo') { if (!items.gun) return false; items.ammo += n; }
     else if (kind === 'shield') items.shield = MATCH_SHIELD_HEALTH;
     else if (kind === 'bomb') items.bombs += n;
-    else if (kind === 'bubble') items.bubbles += n;
     else if (kind === 'wand') { items.wand = true; items.mana = MAX_MANA; }
-    else if (kind === 'mana') { if (!items.wand) return false; items.mana = Math.min(MAX_MANA, items.mana + TOWN_MANA_REFILL); }
+    else if (kind === 'mana') { if (items.mana >= MAX_MANA) return false; items.mana = Math.min(MAX_MANA, items.mana + TOWN_MANA_REFILL); }
     else return false;
     const held = _heldWeaponId();
     _setTownItems(items);
@@ -9049,7 +9060,25 @@ async function initCore(runtimeContext) {
       return { x: up.x, z: up.z };
     },
     getSteer: _getSteer,
+    spendMana: (n) => {
+      if (getMana() < n) return false;
+      setStat('mana', getMana() - n, { skipSave: true });
+      return true;
+    },
+    onBoostEnd: () => {
+      showPickupToast('mana_potion', 1, '', { text: 'Out of mana — boost off' });
+      playerControls?.refreshActionButtons?.();
+      _phoneSwordStatusNow?.();
+    },
   });
+  // Boost on the broom (higher, faster, BOOST_MANA_PER_S mana a second — src/items/broom.js)
+  const _toggleBroomBoost = () => {
+    if (!_broomRide.isRiding()) return;
+    if (_broomRide.isBoosting()) _broomRide.setBoost(false);
+    else if (!_broomRide.setBoost(true)) showPickupToast('mana_potion', 1, '', { text: 'No mana to boost — buy a mana potion from the wizard' });
+    playerControls?.refreshActionButtons?.();
+    _phoneSwordStatusNow?.();
+  };
   const _canRideBroom = () => !!_townLoadout?.hasBroom && !playerDead && !_gamePaused && !!town?.canRide();
   const _toggleBroom = () => {
     if (_broomRide.isRiding()) _broomRide.dismount();

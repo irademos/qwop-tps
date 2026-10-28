@@ -33,7 +33,6 @@ export const SHOP_GEAR = [
   { id: 'gun',    kind: 'gun',    label: 'Gun',        emoji: '🔫', price: 80,  desc: 'Comes with 12 bullets.' },
   { id: 'ammo',   kind: 'ammo',   label: '10 Bullets', emoji: '🔶', price: 15,  n: 10, needs: 'gun' },
   { id: 'bomb',   kind: 'bomb',   label: 'Bomb',       emoji: '💣', price: 12,  n: 1 },
-  { id: 'bubble', kind: 'bubble', label: 'Bubble',     emoji: '🫧', price: 20,  n: 1 },
   { id: 'seeds',  kind: 'seeds',  label: '3 Veg Seeds', emoji: '🌱', price: 6, n: 3, desc: 'Plant them anywhere: a veg by tomorrow, or in under a minute watered with the hose.' },
   { id: 'lockpick', kind: 'lockpick', label: 'Lock-pick', emoji: '🔧', price: 15, desc: 'Opens one locked door, then it breaks. A break-in is a crime if anyone sees.' },
 ];
@@ -41,7 +40,7 @@ export const SHOP_GEAR = [
 // as at the Showdown village's stall, and the flying broom (src/items/broom.js). life = health back to full (townTrade.js)
 export const WIZARD_WARES = [
   { id: 'life',   kind: 'life',   label: 'Life Potion', emoji: '❤️', price: 25,  desc: 'Drink it for full health.' },
-  { id: 'mana',   kind: 'mana',   label: 'Mana Potion', emoji: '🧪', price: 20,  needs: 'wand', desc: 'Fills the wand\'s mana.' },
+  { id: 'mana',   kind: 'mana',   label: 'Mana Potion', emoji: '🧪', price: 20,  desc: '+50 mana — for the wand, the bubble and the broom\'s boost.' },
   { id: 'wand',   kind: 'wand',   label: 'Magic Wand', emoji: '🪄', price: 150, desc: 'Swipe to cast fire / ice. Runs on mana.' },
   { id: 'broom',  kind: 'broom',  label: 'Flying Broom', emoji: '🧹', price: 200, desc: 'Sit on it and fly — tilt the phone (or the joystick) the way to go.' },
 ];

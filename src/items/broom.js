@@ -19,7 +19,10 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // sideways tilt flies a circle. The camera eases round behind it (CAM_FOLLOW), waiting a moment
 // after the player turns it by hand. The joystick / WASD lean it the same way (the only way
 // without a gyro). The player's controls stand still meanwhile (`holdStill`, `ride` —
-// controls.js): this moves them.
+// controls.js): this moves them. It rises quickly but comes down gently: after going up it holds
+// that height SINK_HOLD_S, then sinks, speeding up to at most SINK_MAX_SPEED.
+// Boost (setBoost — the Boost button / the phone's): BOOST_HEIGHT higher, BOOST_SPEED× faster,
+// BOOST_MANA_PER_S mana a second (ctx.spendMana) — off when the mana runs out.
 export const BROOM_MODEL_URL = '/assets/props/broom.glb';
 export const BROOM_LENGTH = 1.25;          // m (the characters are ~1 m tall)
 const SEAT_AHEAD = 0.12;                   // × length: the seat ahead of the model's middle (toward the handle)
@@ -38,7 +41,14 @@ const TILT_DEAD = 0.1;                     // sin of the tilt — under this, no
 const TILT_FULL = 0.5;                     // full lean (~30°)
 const LOOK_AHEAD = [0.6, 1.4];             // s of drift ahead whose ground it rises for
 const RISE_RATE = 5;                       // 1/s easing up to the hover height
-const SINK_RATE = 1.6;                     // 1/s easing down
+const SINK_HOLD_S = 0.5;                   // s at the same height before sinking back down
+const SINK_RATE = 0.8;                     // 1/s easing down
+const SINK_ACCEL = 0.8;                    // m/s² — how fast the sinking speeds up
+const SINK_MAX_SPEED = 0.9;                // m/s
+const BOOST_HEIGHT = 3;                    // m higher while boosting
+const BOOST_RISE_RATE = 1.5;               // 1/s easing up to it
+const BOOST_SPEED = 1.3;                   // × the speed
+const BOOST_MANA_PER_S = 1;
 const BANK = 0.06;                         // rad of roll per m/s sideways
 const PITCH = 0.025;                       // rad of lean forward per m/s forward
 const CAM_FOLLOW = 2;                      // 1/s — the camera swinging round behind it
@@ -125,12 +135,16 @@ const _q = new THREE.Quaternion();
  *  getGroundY(x, z), getWaterY(x, z) → the water's surface there or null
  *  getTilt() → the gyro's lean { x (left +), z (forward +) } (sin of the tilt each way) or null (no gyro)
  *  getSteer() → the joystick / WASD { fwd, turn } (turn > 0 = right)
+ *  spendMana(n) → true if the player had n mana (taken), false if not
+ *  onBoostEnd() — the boost ran out of mana
  */
 export function createBroomRide(ctx) {
   let riding = false;
   let broom = null;            // the model under the rider (loaded on the first ride)
   let loading = false;
-  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0 };
+  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0 };
+  let boosting = false;
+  let boostPaid = 0;           // s of boost paid for (BOOST_MANA_PER_S a second, ahead)
   const ride = { y: 0, yaw: 0 }; // (controls.ride)
   const hips = new THREE.Vector3(0, HIPS_FALLBACK, 0);
   let hipsMeasured = false;
@@ -147,7 +161,8 @@ export function createBroomRide(ctx) {
     const c = ctx.getControls();
     if (riding || !c) return false;
     riding = true;
-    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0 });
+    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0 });
+    boosting = false;
     ride.y = st.y;
     ride.yaw = st.yaw;
     c.ride = ride;
@@ -166,6 +181,7 @@ export function createBroomRide(ctx) {
   const dismount = () => {
     if (!riding) return;
     riding = false;
+    boosting = false;
     const c = ctx.getControls();
     if (c) {
       if (c.ride === ride) c.ride = null;
@@ -175,6 +191,17 @@ export function createBroomRide(ctx) {
     const pm = ctx.getPlayerModel();
     if (pm) { pm.rotation.x = 0; pm.rotation.z = 0; }
     if (broom) broom.visible = false;
+  };
+
+  // Boost on / off (on: pays for its first second now; false without the mana)
+  const setBoost = (on) => {
+    if (!riding) return false;
+    if (!on) { boosting = false; return true; }
+    if (boosting) return true;
+    if (!ctx.spendMana?.(BOOST_MANA_PER_S)) return false;
+    boosting = true;
+    boostPaid = 1;
+    return true;
   };
 
   // The lean asked for, broom-local { x (left +), z (forward +) }, length ≤ 1
@@ -206,28 +233,46 @@ export function createBroomRide(ctx) {
     if (Math.hypot(c.playerX - st.x, c.playerZ - st.z) > TELEPORT_DIST) {
       Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0 });
     }
+    // (boosting: paid a second at a time, ahead — off when the mana's gone)
+    if (boosting) {
+      boostPaid -= dt;
+      if (boostPaid <= 0) {
+        if (ctx.spendMana?.(BOOST_MANA_PER_S)) boostPaid += 1;
+        else { boosting = false; ctx.onBoostEnd?.(); }
+      }
+    }
+    const top = MAX_SPEED * (boosting ? BOOST_SPEED : 1);
     const { ix, iz } = input();
     const sy = Math.sin(st.yaw);
     const cy = Math.cos(st.yaw);
     const fwd = iz < 0 ? iz * BACK_SPEED : iz;
     // (broom-local +X = world (cos, −sin), +Z = world (sin, cos))
-    const wantX = (ix * cy + fwd * sy) * MAX_SPEED;
-    const wantZ = (-ix * sy + fwd * cy) * MAX_SPEED;
+    const wantX = (ix * cy + fwd * sy) * top;
+    const wantZ = (-ix * sy + fwd * cy) * top;
     const k = ease(ACCEL, dt);
     st.vx += (wantX - st.vx) * k;
     st.vz += (wantZ - st.vz) * k;
     const speed = Math.hypot(st.vx, st.vz);
     if (speed > TURN_MIN_SPEED) {
       const d = wrap(Math.atan2(st.vx, st.vz) - st.yaw);
-      if (Math.abs(d) < TURN_MAX_ANGLE) st.yaw = wrap(st.yaw + d * ease(TURN_RATE * Math.min(1, speed / MAX_SPEED), dt));
+      if (Math.abs(d) < TURN_MAX_ANGLE) st.yaw = wrap(st.yaw + d * ease(TURN_RATE * Math.min(1, speed / top), dt));
     }
     st.x += st.vx * dt;
     st.z += st.vz * dt;
     // Over the ground (or the water) here and a little ahead of the drift
     let floor = floorAt(st.x, st.z);
     for (const s of LOOK_AHEAD) floor = Math.max(floor, floorAt(st.x + st.vx * s, st.z + st.vz * s));
-    const target = floor + BROOM_HOVER;
-    st.y += (target - st.y) * ease(target > st.y ? RISE_RATE : SINK_RATE, dt);
+    const target = floor + BROOM_HOVER + (boosting ? BOOST_HEIGHT : 0);
+    if (target >= st.y - 0.02) {
+      // Up (or level): quickly — then held there a moment before sinking
+      st.y += Math.max(0, target - st.y) * ease(boosting ? BOOST_RISE_RATE : RISE_RATE, dt);
+      st.sinkAt = st.t + SINK_HOLD_S;
+      st.sinkV = 0;
+    } else if (st.t >= st.sinkAt) {
+      // Down: gently, the sinking speeding up to SINK_MAX_SPEED
+      st.sinkV = Math.min(SINK_MAX_SPEED, st.sinkV + SINK_ACCEL * dt);
+      st.y -= Math.min((st.y - target) * ease(SINK_RATE, dt), st.sinkV * dt);
+    }
     st.y = Math.max(st.y, floorAt(st.x, st.z) + 0.1);
     // Lean into it (sideways: bank; forward: nose down a little)
     const side = st.vx * cy - st.vz * sy;
@@ -278,5 +323,7 @@ export function createBroomRide(ctx) {
     update,
     afterControls,
     isRiding: () => riding,
+    setBoost,
+    isBoosting: () => boosting,
   };
 }

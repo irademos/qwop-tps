@@ -2823,7 +2823,13 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   color: #fff !important;
   border: 1px solid rgba(253, 230, 138, 0.7) !important;
 }
-.ps-broom-btn.ps-broom-active {
+.ps-boost-btn {
+  background: rgba(124, 58, 237, 0.55) !important;
+  color: #fff !important;
+  border: 1px solid rgba(216, 180, 254, 0.7) !important;
+}
+.ps-broom-btn.ps-broom-active,
+.ps-boost-btn.ps-broom-active {
   background: rgba(217, 119, 6, 0.9) !important;
   border-color: #fff !important;
 }

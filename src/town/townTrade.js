@@ -229,8 +229,7 @@ export function installTownTrade(T, ctx) {
     if (id === 'shield') return items.shield > 0 ? `Shield ${items.shield} / ${ctx.shieldMax}` : '';
     if (id === 'ammo') return items.gun ? `You have ${items.ammo}` : '';
     if (id === 'bomb') return `You have ${items.bombs}`;
-    if (id === 'bubble') return `You have ${items.bubbles}`;
-    if (id === 'mana') return items.wand ? `Mana ${items.mana} / ${ctx.maxMana}` : '';
+    if (id === 'mana') return `Mana ${items.mana} / ${ctx.maxMana}`;
     if (id === 'lockpick') return T.lockpicks ? `You have ${T.lockpicks}` : '';
     if (id === 'seeds') return T.seeds ? `You have ${T.seeds} seeds` : '';
     if (id === 'life') { const { health, max } = ctx.getHealth(); return `Health ${health} / ${max}`; }
@@ -397,7 +396,6 @@ export function installTownTrade(T, ctx) {
     const prizes = [
       { w: 24, emoji: '🪙', give: () => { const n = 10 + 5 * Math.floor(Math.random() * 7); ctx.addCoins(n); return `${n} coins`; } },
       { w: 16, emoji: '💣', give: () => (ctx.grantItem('bomb', 2) ? '2 bombs' : null) },
-      { w: 12, emoji: '🫧', give: () => (ctx.grantItem('bubble', 1) ? 'a bubble' : null) },
       { w: 14, emoji: GOODS[good].emoji, give: () => { const n = gain(good, 3); return n ? `${n} ${GOODS[good].label.toLowerCase()}` : null; } },
       { w: items.shield >= ctx.shieldMax ? 0 : 10, emoji: '🛡️', give: () => (ctx.grantItem('shield') ? 'a shield' : null) },
       { w: items.gun ? 10 : 0, emoji: '🔶', give: () => (ctx.grantItem('ammo', 6) ? '6 bullets' : null) },
