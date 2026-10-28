@@ -3,7 +3,7 @@
 // CANOE_MIN_DEPTH. Shared by Town's canoe (townCanoe.js — moored by the fishing spot, got in and
 // out of) and the guest's sea start (seaStart.js — out on the open sea).
 //
-// Paddling is a stroke of the oar (oar.js — moved along by the phone's tilt, or auto-animated
+// Paddling is a stroke of the oar (oar.js — dipped in and swept by the phone's tilt, or auto-animated
 // for the joystick; bootstrapGameApp.js): through its pull it pushes the canoe CANOE_STROKE_DV
 // (m/s, × the stroke's strength; a back stroke CANOE_PADDLE_BACK as hard and the other way) and, since
 // it's off to one side, turns it CANOE_STROKE_TURN (rad/s): a forward stroke on the left drives
