@@ -454,7 +454,7 @@ Wand</button>
 Rod</button>
       <button class="ctl-btn row-btn" id="btn-broom" data-action="broom">🧹
 Broom</button>
-      <button class="ctl-btn row-btn" id="btn-boost" data-action="boost">🚀
+      <button class="ctl-btn row-btn" id="btn-boost" data-action="boostDown" data-release="boostUp">🚀
 Boost</button>
       <button class="ctl-btn row-btn" id="btn-bomb" data-action="bomb">💣
 0</button>
@@ -643,7 +643,11 @@ Boost</button>
         sendAction(btn.dataset.action);
         if (btn.dataset.action === 'recalibrate') flashRecalibrated(btn);
       });
-      const unpress = () => btn.classList.remove('pressed');
+      // (a held button — Boost: its release sends an action too)
+      const unpress = () => {
+        if (btn.dataset.release && btn.classList.contains('pressed')) sendAction(btn.dataset.release);
+        btn.classList.remove('pressed');
+      };
       btn.addEventListener('pointerup', unpress);
       btn.addEventListener('pointercancel', unpress);
       btn.addEventListener('pointerleave', unpress);
@@ -703,7 +707,7 @@ Boost</button>
       document.body.classList.toggle('block-only', !!st.blockOnly);
       btnBomb.textContent = `💣\n${st.bombs ?? 0}`;
       btnBomb.disabled = !(st.bombs > 0);
-      btnBubble.textContent = `🫧\n${st.bubbles ?? 0}`;
+      btnBubble.textContent = st.bubbleMana ? '🫧\nBubble' : `🫧\n${st.bubbles ?? 0}`;
       btnBubble.disabled = !(st.bubbles > 0) && !st.bubbleActive;
       btnBubble.classList.toggle('active', !!st.bubbleActive);
       // Equip buttons: each toggles its weapon ↔ the sword (Town without a sword: ↔ empty hands)

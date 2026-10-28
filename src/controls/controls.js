@@ -634,9 +634,11 @@ export class PlayerControls {
     this.psBoostBtn.style.display = 'none';
     bindPress(this.psBoostBtn, (event) => {
       if (!this.enabled) return;
-      getAppState()?.toggleBroomBoost?.();
+      getAppState()?.setBroomBoost?.(true);
       if (event) this.safePreventDefault(event);
     });
+    const endBoost = () => getAppState()?.setBroomBoost?.(false);
+    ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach((type) => this.psBoostBtn.addEventListener(type, endBoost));
 
     // The Block bar does what fits the weapon in hand (getBlockBarMode), decided on press:
     // block while held (sword), fire on release (gun), back to the sword (shield), or the
@@ -870,10 +872,10 @@ export class PlayerControls {
         const appState = appContext.uiState.appState ?? window.appState;
         if (appState?.hasBroom?.()) { appState.toggleBroom?.(); this.refreshActionButtons(); }
       }
-      // Shift: boost on / off on the broom
+      // Shift held: boost on the broom
       if (key === 'shift' && !e.repeat && !e.target?.closest?.('input, textarea')) {
         const appState = appContext.uiState.appState ?? window.appState;
-        if (appState?.isRidingBroom?.()) appState.toggleBroomBoost?.();
+        if (appState?.isRidingBroom?.()) appState.setBroomBoost?.(true);
       }
       if (e.key === " ") {
         if (e.repeat) return;
@@ -884,6 +886,7 @@ export class PlayerControls {
 
     document.addEventListener("keyup", (e) => {
       this.keysPressed.delete(e.key.toLowerCase());
+      if (e.key === 'Shift') (appContext.uiState.appState ?? window.appState)?.setBroomBoost?.(false);
     });
     
     // Handle window resize

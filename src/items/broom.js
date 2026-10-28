@@ -21,8 +21,10 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // without a gyro). The player's controls stand still meanwhile (`holdStill`, `ride` —
 // controls.js): this moves them. It rises quickly but comes down gently: after going up it holds
 // that height SINK_HOLD_S, then sinks, speeding up to at most SINK_MAX_SPEED.
-// Boost (setBoost — the Boost button / the phone's): BOOST_HEIGHT higher, BOOST_SPEED× faster,
-// BOOST_MANA_PER_S mana a second (ctx.spendMana) — off when the mana runs out.
+// Boost (setBoost — while the Boost button / the phone's / Shift is held): it climbs at
+// BOOST_CLIMB_RATE (up to BOOST_MAX_LIFT over the hover height) and flies BOOST_SPEED× faster,
+// BOOST_MANA_PER_S mana a second (ctx.spendMana) — off when the mana runs out. Let go: it holds
+// its height, then sinks back down as above.
 export const BROOM_MODEL_URL = '/assets/props/broom.glb';
 export const BROOM_LENGTH = 1.25;          // m (the characters are ~1 m tall)
 const SEAT_AHEAD = 0.12;                   // × length: the seat ahead of the model's middle (toward the handle)
@@ -45,8 +47,8 @@ const SINK_HOLD_S = 0.5;                   // s at the same height before sinkin
 const SINK_RATE = 0.8;                     // 1/s easing down
 const SINK_ACCEL = 0.8;                    // m/s² — how fast the sinking speeds up
 const SINK_MAX_SPEED = 0.9;                // m/s
-const BOOST_HEIGHT = 3;                    // m higher while boosting
-const BOOST_RISE_RATE = 1.5;               // 1/s easing up to it
+const BOOST_CLIMB_RATE = 2.5;              // m/s climbing while boosting
+const BOOST_MAX_LIFT = 15;                 // m over the hover height at most
 const BOOST_SPEED = 1.3;                   // × the speed
 const BOOST_MANA_PER_S = 1;
 const BANK = 0.06;                         // rad of roll per m/s sideways
@@ -145,6 +147,7 @@ export function createBroomRide(ctx) {
   const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0 };
   let boosting = false;
   let boostPaid = 0;           // s of boost paid for (BOOST_MANA_PER_S a second, ahead)
+  let boostLift = null;        // m over the hover height it's climbing to (null: from where it is)
   const ride = { y: 0, yaw: 0 }; // (controls.ride)
   const hips = new THREE.Vector3(0, HIPS_FALLBACK, 0);
   let hipsMeasured = false;
@@ -201,6 +204,7 @@ export function createBroomRide(ctx) {
     if (!ctx.spendMana?.(BOOST_MANA_PER_S)) return false;
     boosting = true;
     boostPaid = 1;
+    boostLift = null;
     return true;
   };
 
@@ -262,10 +266,15 @@ export function createBroomRide(ctx) {
     // Over the ground (or the water) here and a little ahead of the drift
     let floor = floorAt(st.x, st.z);
     for (const s of LOOK_AHEAD) floor = Math.max(floor, floorAt(st.x + st.vx * s, st.z + st.vz * s));
-    const target = floor + BROOM_HOVER + (boosting ? BOOST_HEIGHT : 0);
+    if (boosting) {
+      // (climbing on from wherever it is while the boost is held)
+      if (boostLift == null) boostLift = Math.max(0, st.y - floor - BROOM_HOVER);
+      boostLift = Math.min(BOOST_MAX_LIFT, boostLift + BOOST_CLIMB_RATE * dt);
+    }
+    const target = floor + BROOM_HOVER + (boosting ? boostLift : 0);
     if (target >= st.y - 0.02) {
       // Up (or level): quickly — then held there a moment before sinking
-      st.y += Math.max(0, target - st.y) * ease(boosting ? BOOST_RISE_RATE : RISE_RATE, dt);
+      st.y += Math.max(0, target - st.y) * ease(RISE_RATE, dt);
       st.sinkAt = st.t + SINK_HOLD_S;
       st.sinkV = 0;
     } else if (st.t >= st.sinkAt) {

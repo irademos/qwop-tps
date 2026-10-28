@@ -3627,7 +3627,7 @@ async function initCore(runtimeContext) {
   let bubbleMesh = null;
   const isPlayerBubbleActive = () => Date.now() < bubbleActiveUntil && !playerDead;
   // (Town: no bubbles to buy — each one costs TOWN_BUBBLE_MANA mana; the count is how many the mana pays for)
-  const TOWN_BUBBLE_MANA = 25;
+  const TOWN_BUBBLE_MANA = 5;
   const getBubbleCount = () => (_townLoadout
     ? Math.floor(getMana() / TOWN_BUBBLE_MANA)
     : Math.max(0, Math.floor(statsState.bubbles || 0)));
@@ -3680,7 +3680,7 @@ async function initCore(runtimeContext) {
     const active = isPlayerBubbleActive();
     const label = active
       ? `🫧 ${Math.ceil((bubbleActiveUntil - Date.now()) / 1000)}s`
-      : `🫧 ${getBubbleCount()}`;
+      : _townLoadout ? '🫧' : `🫧 ${getBubbleCount()}`; // (Town: no count — it runs on mana)
     if (label !== lastPsBubbleButtonLabel) {
       button.textContent = label;
       lastPsBubbleButtonLabel = label;
@@ -6488,9 +6488,9 @@ async function initCore(runtimeContext) {
     } else if (action === 'broom') {
       // Town: on / off the flying broom
       _toggleBroom();
-    } else if (action === 'boost') {
-      // Town, on the broom: boost on / off (uses mana)
-      _toggleBroomBoost();
+    } else if (action === 'boostDown' || action === 'boostUp') {
+      // Town, on the broom: boost while the button's held (uses mana)
+      _setBroomBoost(action === 'boostDown');
     } else if (action === 'wandShieldDown') {
       setWandShieldHold(true);
     }
@@ -6538,6 +6538,8 @@ async function initCore(runtimeContext) {
       bombs: getPlayerBombCount(),
       bubbles: getBubbleCount(),
       bubbleActive: isPlayerBubbleActive(),
+      // (Town: bubbles run on mana — no count on the button)
+      bubbleMana: !!_townLoadout,
       hasGun: (inv.pistol?.count ?? 0) > 0,
       hasShield: (inv[SHIELD_ITEM_ID]?.count ?? 0) > 0,
       ammo: getPistolAmmoCount(),
@@ -7153,7 +7155,7 @@ async function initCore(runtimeContext) {
     isRidingBroom: () => !!_broomRide?.isRiding(),
     toggleBroom: () => _toggleBroom(),
     isBroomBoosting: () => !!_broomRide?.isBoosting(),
-    toggleBroomBoost: () => _toggleBroomBoost(),
+    setBroomBoost: (on) => _setBroomBoost(!!on),
     // Town: something grabbed — the Block bar is its mode (the hose's 'water'; null: none), held
     // down: useTownHeld(true), let go: false
     getTownHeldBar: () => (town?.isActive() ? town.heldBar() : null),
@@ -9071,10 +9073,10 @@ async function initCore(runtimeContext) {
       _phoneSwordStatusNow?.();
     },
   });
-  // Boost on the broom (higher, faster, BOOST_MANA_PER_S mana a second — src/items/broom.js)
-  const _toggleBroomBoost = () => {
-    if (!_broomRide.isRiding()) return;
-    if (_broomRide.isBoosting()) _broomRide.setBoost(false);
+  // Boost on the broom while held (climbing, faster, BOOST_MANA_PER_S mana a second — src/items/broom.js)
+  const _setBroomBoost = (on) => {
+    if (!_broomRide.isRiding() || on === _broomRide.isBoosting()) return;
+    if (!on) _broomRide.setBoost(false);
     else if (!_broomRide.setBoost(true)) showPickupToast('mana_potion', 1, '', { text: 'No mana to boost — buy a mana potion from the wizard' });
     playerControls?.refreshActionButtons?.();
     _phoneSwordStatusNow?.();
