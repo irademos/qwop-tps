@@ -230,7 +230,6 @@ export const CAMP_REMIND_S = 7;             // s between the countdown's reminde
 export const CAMP_DEFENDERS = 3;            // bandits who draw / fight at once
 export const CAMP_ROB = 12;                 // coins taken off an unarmed trespasser
 export const CAMP_CHASE_DIST = 34;          // m from the camp: the gang gives up the chase
-export const BANDIT_RETURN_S = [180, 300];  // s until a beaten bandit's place in the gang is filled
 export const BANDIT_CAMP_R = 7;             // m they loiter around the camp
 export const RAID_TAKE = 2;                 // crops a raider takes
 // Night raids (townBandits.js): every night the gang comes into town — breaking into houses (the
@@ -246,11 +245,17 @@ export const BURGLE_CHEST_SHARE = 0.35;     // of the coins in the player's ches
 export const BURGLE_CHEST_MAX = 60;         // …at most
 export const BURGLE_GOODS = 3;              // goods taken out of it
 export const RAID_NOTICE_DIST = 7;          // m — a raider who sees the player this close goes for them (armed) or robs them
-export const NIGHT_ROB = 10;                // coins a raider takes off an unarmed player…
+export const NIGHT_ROB = 10;                // coins a raider asks of an unarmed player (pay or run — a fight)…
 export const NIGHT_ROB_EVERY_S = 60;        // …at most once in this long
-// The gang grows as the days go on (newcomers at the camp)
-export const GANG_GROW_EVERY_DAYS = 1;      // one more bandit every this many days…
+export const HOLDUP_REACH_S = 12;           // s a bandit holding the player up walks after them before giving up
+// The gang (townBandits.js): the bandits at the camp are the ones who raid — the ones the player
+// beats are gone for good, and each morning one more turns up (a gang of `T.gangSize`)
+export const GANG_GROW_PER_DAY = 1;         // newcomers at the camp each morning…
+export const GANG_GROW_HOUR = 7;            // …at this hour…
 export const GANG_MAX = 10;                 // …up to this many
+// A bigger gang is better armed: from this many bandits, some carry this (the chief all of it)
+export const BANDIT_GEAR_FROM = { bombs: 5, shield: 6, gun: 7, wand: 8, bubble: 9 };
+export const BANDIT_GEAR_SHARE = 0.5;       // of the bandits who carry each piece unlocked
 // The sheriff's thanks: the morning after the player beats bandits at night, he comes over with a
 // reward (a job ready to be paid — townMissions.js 'nightThanks'); he also asks an armed player
 // to stand watch some nights (job 'nightWatch')

@@ -6,7 +6,7 @@ import { ROLES, SHOUT_HURT, TOWN_NAME, firstName, relationOf, shout } from './to
 import * as THREE from 'three';
 import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 import {
-  BANDIT_RETURN_S, DEAD_BODY_S, NET_CLAIM_GRACE_S, NET_CLAIM_TIMEOUT_S, NET_FULL_S, NET_SEND_S,
+  DEAD_BODY_S, NET_CLAIM_GRACE_S, NET_CLAIM_TIMEOUT_S, NET_FULL_S, NET_SEND_S,
   NET_WORLD_S, NEWCOMER_DELAY_S, SAVE_EVERY_S, _v, angleLerp, heightScale, rand,
 } from './townConfig.js';
 
@@ -128,7 +128,9 @@ export function installTownWire(T, ctx) {
   };
   // The host's part of a death: someone moves in later, everyone's told
   const worldDeath = (n, killer, except = null) => {
-    T.arrivals.push({ role: n.role, at: T.simT + rand(...(n.def.outlaw ? BANDIT_RETURN_S : NEWCOMER_DELAY_S)) });
+    // (a bandit beaten is one fewer at the camp — the gang only grows back a morning at a time)
+    if (n.def.outlaw) T.gangSize = Math.max(0, (T.gangSize ?? 0) - 1);
+    else T.arrivals.push({ role: n.role, at: T.simT + rand(...NEWCOMER_DELAY_S) });
     if (!n.def.outlaw) T.departed = [...T.departed, firstName(n.name)].slice(-20);
     if (!T.mp()) return;
     for (const pid of T.net.peerIds()) if (pid !== except) T.net.send(pid, { w: 1, op: 'dead', id: n.id, by: killer ?? null });
@@ -194,6 +196,8 @@ export function installTownWire(T, ctx) {
     if (Number.isFinite(s.minutes)) T.clock.minutes = s.minutes;
     if (Array.isArray(s.departed)) T.departed = s.departed;
     if (Number.isFinite(s.raidNight)) T.raidNight = s.raidNight;
+    if (Number.isFinite(s.gangSize)) T.gangSize = s.gangSize;
+    if (Number.isFinite(s.gangDay)) T.gangDay = s.gangDay;
     if (s.houses) T.applyHouses(s.houses);
     if (s.fieldOwners) { T.applyFieldOwners(s.fieldOwners); T.assignWork(); }
     if (s.market) { for (const g of GOOD_IDS) if (Number.isFinite(s.market[g])) T.market.stock[g] = s.market[g]; T.noteStock(); }

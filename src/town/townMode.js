@@ -126,6 +126,8 @@ const CLOUD_LOAD_MS = 6000;
 const CLOUD_SAVE_MS = 10000;
 const HIDDEN_LEAVE_MS = 15000;
 
+const _talkFocus = new THREE.Vector3();
+
 export function createTownMode(ctx) {
   // The town's state and functions, shared by the townMode*.js modules (each adds its own)
   const T = {};
@@ -445,6 +447,8 @@ export function createTownMode(ctx) {
     chainsDone: [...T.chainsDone],
     strongboxHeld: T.strongboxHeld,
     raidNight: T.raidNight,
+    gangSize: T.gangSize,
+    gangDay: T.gangDay,
     nightKills: { ...T.nightKills },
     pending: T.arrivals.map((a) => a.role),
     departed: T.departed,
@@ -475,6 +479,8 @@ export function createTownMode(ctx) {
     houses: T.houses,
     fieldOwners: T.fieldOwners,
     raidNight: T.raidNight,
+    gangSize: T.gangSize,
+    gangDay: T.gangDay,
     at: Date.now(),
   });
   const personalSnapshot = () => ({
@@ -1045,6 +1051,13 @@ export function createTownMode(ctx) {
         }
       }
       return out;
+    },
+    // Who's talking to the player in the talk box (their feet — the camera turns to them), or null
+    talkFocus: () => {
+      if (!T.active || !T.ready || !T.jobTalk.isOpen()) return null;
+      const n = T.talking?.npc;
+      if (!n?.alive || n.inside || (T.rooms.roomAt(n.x, n.z) && !T.inRoom)) return null;
+      return _talkFocus.set(n.x, T.groundY(n), n.z);
     },
     // Something grabbed in hand (townGrab.js): its Block bar mode ('water' — the hose; null: none),
     // the bar held down / let go, dropping it (the phone's 🗡/✋ button)

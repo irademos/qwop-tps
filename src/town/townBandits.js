@@ -1,16 +1,17 @@
 // Town: the bandits — their camp (warning, standoff, fight or robbery), the nightly raid on the
 // town (break-ins — the player's house too, now and then: its chest —, robberies, the fields; a
-// raider who runs into the player fights an armed one, robs an unarmed one), the gang growing as
-// the days go on, and the sheriff's thanks the morning after the player beats some of them (he
+// raider who runs into the player fights an armed one and holds up an unarmed one — pay or run,
+// a fight —), the gang (the camp's bandits are the raiders: the ones beaten are gone, one more
+// turns up each morning, and a bigger gang carries more gear), and the sheriff's thanks the morning after the player beats some of them (he
 // comes over with a reward; some days he asks an armed player to stand watch — townMissions.js
 // 'nightThanks' / 'nightWatch').
 
 import { BANDIT_ROLES, ROLES, SHOUT_BANDIT, SHOUT_CAMP_COUNT, SHOUT_CAMP_DRAW_ARMED, SHOUT_CAMP_DRAW_UNARMED, SHOUT_CAMP_LAST, SHOUT_CAMP_ROB, SHOUT_CAMP_SPARE, SHOUT_CAMP_WARN, SHOUT_MUG, characterForRole, fillLine, firstName, randomName } from './townPeople.js';
 import { GOODS, GOOD_IDS } from './townEconomy.js';
 import {
-  BANDIT_CAMP_R, BURGLE_CHEST_MAX, BURGLE_CHEST_SHARE, BURGLE_GOODS, BURGLE_MAX, BURGLE_S, BURGLE_SHARE,
+  BANDIT_CAMP_R, BANDIT_GEAR_FROM, BANDIT_GEAR_SHARE, BURGLE_CHEST_MAX, BURGLE_CHEST_SHARE, BURGLE_GOODS, BURGLE_MAX, BURGLE_S, BURGLE_SHARE,
   CAMP_ATTACK_DIST, CAMP_DEFENDERS, CAMP_GRACE_S, CAMP_REMIND_S, CAMP_ROB, CAMP_WARN_DIST, CROP_REGROW_S,
-  GANG_GROW_EVERY_DAYS, GANG_MAX, NIGHT_KILL_REWARD, NIGHT_RAID_ACTS, NIGHT_RAID_HOURS, NIGHT_RAID_STAY,
+  GANG_GROW_HOUR, GANG_GROW_PER_DAY, GANG_MAX, HOLDUP_REACH_S, NIGHT_KILL_REWARD, NIGHT_RAID_ACTS, NIGHT_RAID_HOURS, NIGHT_RAID_STAY,
   NIGHT_ROB, NIGHT_ROB_EVERY_S, RAID_NOTICE_DIST, RAID_PLAYER_HOUSE_CHANCE, RAID_TAKE, SHERIFF_SEEK_S,
   TALK_RANGE, dist2, inHours, pickOf, rand,
 } from './townConfig.js';
@@ -22,8 +23,21 @@ const SHERIFF_GREET = {
   nightThanks: ['There you are, {name}! A word.', '{name}! Hold up — I\'ve been looking for you.'],
   nightWatch: ['{name}, a moment. I could use someone handy with a blade.', 'Got a minute, {name}? It\'s about the bandits.'],
 };
+// A bandit holding up an unarmed player: what they ask, what they say to each answer
+const HOLDUP_ASK = {
+  night: ['Your purse or your life, friend. {c} coins.', 'Out late, no blade? That\'ll be {c} coins.', 'Hand over {c} coins and you can walk away.'],
+  camp: ['You were warned. {c} coins — or we take it the hard way.', 'Trespassing costs {c} coins. Pay up.'],
+};
+const HOLDUP_BROKE = ['Nothing on you? Then run, and pray I\'m slow.', 'Empty pockets… then you\'ll pay another way.'];
+const HOLDUP_PAID = ['Pleasure doing business.', 'Smart. Now get lost.', 'See? Nobody had to get hurt.'];
+const HOLDUP_RUN = ['Running, are we? Get them!', 'Wrong answer!', 'Oh, you\'ll pay for that.'];
+const HOLDUP_SPARE = ['Not worth my time. Go.', 'Bah. Scram, before I change my mind.'];
 // Raiders at their night's work (camp watch / auto-aim / the job's 📍 skip or look for them)
-const RAIDING = new Set(['raid', 'burgle', 'prowl', 'mug']);
+const RAIDING = new Set(['raid', 'burgle', 'prowl', 'mug', 'holdup']);
+// The gear a big gang carries, in the order it gets it (BANDIT_GEAR_FROM)
+const GEAR_ORDER = Object.keys(BANDIT_GEAR_FROM).sort((a, b) => BANDIT_GEAR_FROM[a] - BANDIT_GEAR_FROM[b]);
+// (the same bandit always draws the same pieces: a hash of their id and the piece)
+const gearRoll = (id, k) => ((Math.imul(id + 1, 2654435761) ^ Math.imul(k + 7, 40503)) >>> 0) % 1000 / 1000;
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownBandits(T, ctx) {
@@ -33,7 +47,7 @@ export function installTownBandits(T, ctx) {
   const campGang = () => {
     const P = T.layout.places;
     return T.npcs.filter((n) => n.alive && n.def.outlaw && !n.fighter && !n.inside && n.jailedUntil <= T.simT
-      && !['raid', 'raidHome', 'mug', 'brawl', 'burgle', 'prowl'].includes(n.task?.type)
+      && !['raid', 'raidHome', 'mug', 'brawl', 'burgle', 'prowl', 'holdup'].includes(n.task?.type)
       && dist2(n.x, n.z, P.camp.x, P.camp.z) < CAMP_WARN_DIST);
   };
   const nearestOf = (list) => list.slice().sort((a, b) => T.distToPlayer(a) - T.distToPlayer(b))[0] ?? null;
@@ -128,18 +142,21 @@ export function installTownBandits(T, ctx) {
     if (armed) {
       campFightAll();
     } else {
+      // (unarmed: the lookout walks up — pay, or run and they all fight)
       T.campWatch.robbed = true;
       T.campWatch.closeT = 0;
       hideChip();
-      const took = Math.min(CAMP_ROB, ctx.getCoins());
-      if (took > 0) {
-        ctx.addCoins(-took);
-        T.npcMoney(lookout ?? standing[0], took);
-        ctx.playSfx('coin');
-        warn(SHOUT_CAMP_ROB);
-        T.feedLine(`The bandits took ${took} coins off you.`);
-      } else {
-        warn(SHOUT_CAMP_SPARE);
+      if (!lookout || !startHoldup(lookout, { coins: CAMP_ROB, camp: true })) {
+        const took = Math.min(CAMP_ROB, ctx.getCoins());
+        if (took > 0) {
+          ctx.addCoins(-took);
+          if (lookout ?? standing[0]) T.npcMoney(lookout ?? standing[0], took);
+          ctx.playSfx('coin');
+          warn(SHOUT_CAMP_ROB);
+          T.feedLine(`The bandits took ${took} coins off you.`);
+        } else {
+          warn(SHOUT_CAMP_SPARE);
+        }
       }
     }
   };
@@ -200,24 +217,51 @@ export function installTownBandits(T, ctx) {
       }
     }
   };
-  // The camp's gang: fill it up (the first time, or an old save without bandits)
+  // ── The gang ──
+  // The bandits at the camp are the ones who raid the town: `T.gangSize` of them. One the player
+  // beats is gone (worldDeath in townWire.js takes them off it — beating some by day leaves
+  // fewer for the night), and each morning GANG_GROW_PER_DAY more turn up (updateArrivals)
+  const aliveGang = () => T.npcs.filter((n) => n.alive && n.def.outlaw);
+  const gangCount = () => aliveGang().length + T.arrivals.filter((a) => ROLES[a.role]?.outlaw).length;
+  // The first time (or an old save without a gang size): the founding gang, at the camp now
   const ensureGang = () => {
+    if (!Number.isFinite(T.gangSize)) T.gangSize = Math.max(BANDIT_ROLES.length, gangCount());
+    if (!Number.isFinite(T.gangDay)) T.gangDay = T.clock.day;
     const have = T.npcs.filter((n) => n.def.outlaw).length + T.arrivals.filter((a) => ROLES[a.role]?.outlaw).length;
-    for (const role of BANDIT_ROLES.slice(have)) {
+    if (have > 0) return;
+    for (const role of BANDIT_ROLES.slice(0, T.gangSize)) {
       const n = T.makeNpc({ id: T.nextId++, name: randomName(role, T.usedNames()), role, url: characterForRole(role) });
       T.npcs.push(n);
     }
   };
-  // …and it grows as the days go on: newcomers turn up at the camp (updateArrivals)
-  const gangTarget = () => Math.min(GANG_MAX, BANDIT_ROLES.length + Math.floor(Math.max(0, T.clock.day - 1) / GANG_GROW_EVERY_DAYS));
   const growGang = () => {
-    const have = T.npcs.filter((n) => n.alive && n.def.outlaw).length + T.arrivals.filter((a) => ROLES[a.role]?.outlaw).length;
-    const missing = gangTarget() - have;
-    for (let k = 0; k < missing; k++) T.arrivals.push({ role: 'bandit', at: T.simT + rand(20, 90) });
-    if (missing > 0 && T.gangNoteDay !== T.clock.day) {
-      T.gangNoteDay = T.clock.day;
-      T.feedLine('Word is more cutthroats have joined the bandits out at the camp.');
+    if (!Number.isFinite(T.gangSize)) ensureGang();
+    if (T.clock.day > T.gangDay && T.hour() >= GANG_GROW_HOUR) {
+      const days = T.clock.day - T.gangDay;
+      T.gangDay = T.clock.day;
+      const before = T.gangSize;
+      T.gangSize = Math.min(GANG_MAX, T.gangSize + days * GANG_GROW_PER_DAY);
+      if (T.gangSize > before) T.feedLine(before ? 'Word is more cutthroats have joined the bandits out at the camp.' : 'Word is a new gang has set up at the old bandit camp.');
+      T.save();
     }
+    const missing = T.gangSize - gangCount();
+    // (no chief: the first newcomer takes over)
+    let chief = T.npcs.some((n) => n.alive && n.role === 'banditBoss') || T.arrivals.some((a) => a.role === 'banditBoss');
+    for (let k = 0; k < missing; k++) {
+      T.arrivals.push({ role: chief ? 'bandit' : 'banditBoss', at: T.simT + rand(20, 90) });
+      chief = true;
+    }
+  };
+  // A bigger gang is better armed: each piece BANDIT_GEAR_FROM unlocks is carried by some of them
+  // (BANDIT_GEAR_SHARE — always the same ones), the chief all of it (+ his own)
+  const banditGear = (n) => {
+    const size = aliveGang().length;
+    const gear = { ...(n.def.gear ?? {}) };
+    GEAR_ORDER.forEach((k, i) => {
+      if (size < BANDIT_GEAR_FROM[k]) return;
+      if (n.role === 'banditBoss' || gearRoll(n.id, i) < BANDIT_GEAR_SHARE) gear[k] = true;
+    });
+    return Object.keys(gear).length ? gear : null;
   };
 
   // ── The night raid ──
@@ -344,19 +388,104 @@ export function installTownBandits(T, ctx) {
         T.promote(n);
         continue;
       }
-      if (T.simT - (T.nightRobAt ?? -1e9) < NIGHT_ROB_EVERY_S || ctx.getCoins() <= 0) continue;
+      if (T.simT - (T.nightRobAt ?? -1e9) < NIGHT_ROB_EVERY_S || holdupBy() || n.task?.type === 'holdup') continue;
       T.nightRobAt = T.simT;
-      const took = Math.min(NIGHT_ROB, ctx.getCoins());
-      ctx.addCoins(-took);
-      T.npcMoney(n, took);
-      ctx.playSfx('coin');
-      n.loot += 1;
-      T.say(n, pickOf(SHOUT_MUG), { big: true });
-      T.feedLine(`${firstName(n.name)} robbed you of ${took} coins! (With a weapon out, they'd have to fight you for it.)`);
-      const P = T.layout.places;
-      T.setTask(n, { type: 'raidHome', to: T.randomNear(P.camp.x, P.camp.z, 3), dur: 2, run: true });
+      if (startHoldup(n, { coins: NIGHT_ROB })) return;
+    }
+  };
+
+  // ── A hold-up: a bandit walks up to an unarmed player and asks for their coins (the talk box):
+  // pay, or run — and they fight (at the camp, the whole gang) ──
+  const holdupBy = () => T.npcs.find((n) => n.alive && n.task?.type === 'holdup') ?? null;
+  const startHoldup = (n, { coins, camp = false }) => {
+    if (!n.alive || n.fighter || n.inside || !T.take(n)) return false;
+    T.clearTalk(n);
+    T.setTask(n, { type: 'holdup', dur: Infinity, coins, camp, until: T.simT + HOLDUP_REACH_S, asked: false });
+    T.say(n, camp ? 'You. Stay right there.' : pickOf(SHOUT_MUG), { big: true });
+    return true;
+  };
+  // Done: back to the night's work (or the camp) — or a fight
+  const endHoldup = (n, how) => {
+    const t = n.task;
+    n.task = null;
+    if (T.talking?.npc === n) T.talking = null;
+    if (!n.alive) return;
+    const P = T.layout.places;
+    if (how === 'run') {
+      const line = pickOf(HOLDUP_RUN);
+      T.say(n, line, { big: true });
+      T.feedLine(`${firstName(n.name)}: “${line}”`);
+      if (t?.camp) {
+        n.campFight = true;
+        T.promote(n);
+        campFightAll();
+      } else {
+        T.promote(n);
+      }
       return;
     }
+    if (how === 'paid') n.loot = (n.loot ?? 0) + 1;
+    if (t?.camp) T.decide(n);
+    else T.setTask(n, { type: 'raidHome', to: T.randomNear(P.camp.x, P.camp.z, 3), dur: 2, run: true });
+  };
+  const askHoldup = (n, t) => {
+    const coins = Math.min(t.coins, ctx.getCoins());
+    const who = firstName(n.name);
+    T.talking = { npc: n };
+    const run = { label: 'Run away', onClick: () => { t.answer = 'run'; } };
+    if (coins <= 0) {
+      T.jobTalk.open({ who, sub: 'Hold-up', text: pickOf(HOLDUP_BROKE), choices: [
+        { label: 'Turn out your empty pockets', primary: true, onClick: () => { t.answer = 'broke'; } }, run,
+      ] });
+      return;
+    }
+    T.jobTalk.open({
+      who, sub: 'Hold-up', text: fillLine(pickOf(HOLDUP_ASK[t.camp ? 'camp' : 'night']), { c: coins }),
+      choices: [{ label: `Pay ${coins} coins`, primary: true, onClick: () => {
+        t.answer = 'paid';
+        const took = Math.min(coins, ctx.getCoins());
+        if (took <= 0) return;
+        ctx.addCoins(-took);
+        T.npcMoney(n, took);
+        ctx.playSfx('coin');
+        T.feedLine(`You paid ${who} ${took} coins.`);
+        T.say(n, pickOf(HOLDUP_PAID), { big: true });
+      } }, run],
+    });
+  };
+  // (townReactions updateSpecialTask) walking up to the player, the question, the answer
+  const updateHoldup = (n, t, dt) => {
+    if (T.inRoom || T.jail || T.sequence || ctx.isPlayerDead() || ctx.isPlayerArmed()) {
+      // (a blade out mid-hold-up: they fight — out of reach / indoors: they leave it)
+      if (ctx.isPlayerArmed() && !T.inRoom && !T.jail && !ctx.isPlayerDead() && T.distToPlayer(n) < RAID_NOTICE_DIST + 3) endHoldup(n, 'run');
+      else { if (t.asked && T.jobTalk.isOpen() && T.talking?.npc === n) T.jobTalk.close(); endHoldup(n, 'gone'); }
+      return true;
+    }
+    if (!t.asked) {
+      const p = T.playerPos();
+      const d = T.distToPlayer(n);
+      if (T.simT > t.until) { T.say(n, pickOf(HOLDUP_SPARE)); endHoldup(n, 'gone'); return true; }
+      if (d > TALK_RANGE - 0.6) { T.chase(n, p.x, p.z, dt, true); return true; }
+      n.moving = false;
+      n.path = null;
+      T.faceToward(n, p.x, p.z, dt);
+      if (!n.body || T.stalls.view?.()) return true;
+      // (another talk going: it gives way)
+      if (T.jobTalk.isOpen()) T.jobTalk.close();
+      t.asked = true;
+      askHoldup(n, t);
+      return true;
+    }
+    n.moving = false;
+    T.faceToward(n, T.playerPos().x, T.playerPos().z, dt);
+    if (T.jobTalk.isOpen() && T.talking?.npc === n) return true;
+    // (the talk's over: walking off / closing it is running too)
+    if (t.answer === 'paid') endHoldup(n, 'paid');
+    else if (t.answer === 'broke') {
+      T.say(n, pickOf(HOLDUP_SPARE), { big: true });
+      endHoldup(n, 'gone');
+    } else endHoldup(n, 'run');
+    return true;
   };
   // The raider nearest the player (the night watch's 📍)
   const nearestRaider = () => {
@@ -470,6 +599,9 @@ export function installTownBandits(T, ctx) {
   };
   const restoreBandits = (state, own) => {
     T.raidNight = Number.isFinite(state?.raidNight) ? state.raidNight : null;
+    // (an old save without them: ensureGang sets them from who's there)
+    T.gangSize = Number.isFinite(state?.gangSize) ? Math.max(0, Math.min(GANG_MAX, state.gangSize)) : undefined;
+    T.gangDay = Number.isFinite(state?.gangDay) ? state.gangDay : undefined;
     T.raidPlan = null;
     const k = own?.nightKills;
     T.nightKills = { n: Math.max(0, Math.floor(k?.n || 0)), coins: Math.max(0, Math.floor(k?.coins || 0)) };
@@ -477,7 +609,7 @@ export function installTownBandits(T, ctx) {
   };
 
   Object.assign(T, {
-    burgle, campFightAll, decideBandit, ensureGang, handleBanditNet, nearestRaider, noteNightKill, noteRaid,
-    onRaidHome, raidField, restoreBandits, standoffGang, startRaid, updateCampWatch, updateNightRaid, updateSeek,
+    banditGear, burgle, campFightAll, decideBandit, ensureGang, handleBanditNet, nearestRaider, noteNightKill, noteRaid,
+    onRaidHome, raidField, restoreBandits, standoffGang, startRaid, updateCampWatch, updateHoldup, updateNightRaid, updateSeek,
   });
 }
