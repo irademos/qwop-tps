@@ -3,9 +3,9 @@
 // canoe. Standing in it (the player held still on its floor — a terrain height override while
 // aboard, the controls' `holdStill` + a position constraint; carried along as it moves and
 // turns) the oar comes out: the sword weapon in oar form (bootstrapGameApp.js / foamSword.js).
-// Tilting the phone's top to one side moves the oar through a stroke there, as far as it's tilted
-// (forward and to the side: a forward stroke, back: a back stroke); straightening it brings the
-// oar back, lifted out of the water (oar.js / bootstrapGameApp.js). With a fishing rod bought, the rod comes out in the
+// The phone's tilt holds the oar: its top to one side lowers the blade in there, toward the
+// player / away swings it back / ahead — swept back through the water it paddles forward, ahead
+// backs up (bootstrapGameApp.js / canoeBoat.js). With a fishing rod bought, the rod comes out in the
 // canoe too (its weapon button / the phone's): the player turns to face over the side and can
 // fish wherever the canoe is (T.fishAnywhere / T.fishWater — townFishing.js), the canoe coming
 // to rest meanwhile; the oar back, they face the bow again.
