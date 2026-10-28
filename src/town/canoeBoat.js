@@ -3,9 +3,9 @@
 // CANOE_MIN_DEPTH. Shared by Town's canoe (townCanoe.js — moored by the fishing spot, got in and
 // out of) and the guest's sea start (seaStart.js — out on the open sea).
 //
-// Paddling is a stroke of the oar (oar.js — dipped in and swept by the phone's tilt, or auto-animated
-// for the joystick; bootstrapGameApp.js): through its pull it pushes the canoe CANOE_STROKE_DV
-// (m/s, × the stroke's strength; a back stroke CANOE_PADDLE_BACK as hard and the other way) and, since
+// Paddling is the oar's blade swept through the water (held by the phone's tilt — bootstrapGameApp.js;
+// the joystick's strokes are only for the look): a whole stroke's sweep (OAR_STROKE_SWEEP, swept
+// back, all in) pushes the canoe CANOE_STROKE_DV (m/s; swept ahead CANOE_PADDLE_BACK as hard, backing it up) and, since
 // it's off to one side, turns it CANOE_STROKE_TURN (rad/s): a forward stroke on the left drives
 // it forward and a little to the right, on the right forward and a little to the left. The
 // joystick / WASD paddle too (without a gyro the strokes they show are only for the look). The
@@ -17,7 +17,7 @@
 
 import * as THREE from 'three';
 import { createCanoe, CANOE_FLOOR_Y, CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
-import { oarStrokePull } from '../items/oar.js';
+import { OAR_STROKE_SWEEP, oarStrokePull } from '../items/oar.js';
 import { createWaterSplash } from '../items/waterSplash.js';
 import {
   CANOE_BOB, CANOE_DRAG, CANOE_MAX_SPEED, CANOE_MIN_DEPTH, CANOE_PADDLE_BACK, CANOE_SETTLE_DRAG,
@@ -25,6 +25,8 @@ import {
   CANOE_STROKE_TURN, CANOE_TURN_DRAG,
 } from './townConfig.js';
 
+const BLADE_DEPTH = 0.12;       // m under the surface: the blade's all in (full push)
+const PULL_SWING_SPEED = 0.35;  // rad/s: the blade swept faster than this in the water throws drops
 // Where the hull's water depth is checked (canoe-local m: across, along)
 const HULL_PROBES = [[0, 0], [0, CANOE_HALF_LENGTH - 0.3], [0, -(CANOE_HALF_LENGTH - 0.3)], [CANOE_HALF_WIDTH, 0], [-CANOE_HALF_WIDTH, 0]];
 
@@ -37,8 +39,8 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     blade: null,        // the oar blade's last world position + time
     bladeIn: false,     // its blade in the water (for the splash going in / coming out)
     splashAt: 0,        // s (real clock): the next drops off a stroke
-    strokeId: null,     // the stroke pushing it, and how far through its pull it was last frame
-    strokePull: 0,
+    strokeId: null,     // the tilt's oar pushing it, and where its blade swung to last frame
+    strokeSwing: 0,
   };
   // (world space: put beside the canoe in whatever holds it, the first time it moves)
   const splash = createWaterSplash();
@@ -86,26 +88,21 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     const c = boat;
     const fwdX = Math.sin(c.yaw);
     const fwdZ = Math.cos(c.yaw);
-    // The stroke's pull: how far the blade went back through it since last frame (by how far
-    // through it is, so a slow frame doesn't lose any; going the other way — the phone's tilt
-    // taking it back, lifted — pushes nothing, and it pushes again on the way back through)
+    // The phone's tilt holds the oar (stroke.pose): how far its blade swung since last frame
+    // (+ ahead) — what pushes, if it's in the water (below). A timed stroke is only for the look.
     let pulling = false;
-    if (stroke && !stroke.visual) {
-      const p = oarStrokePull(stroke.u);
-      if (stroke.id !== c.strokeId) { c.strokeId = stroke.id; c.strokePull = stroke.u > 0.02 ? p : 0; }
-      const dp = p - c.strokePull;
-      c.strokePull = p;
-      pulling = p > 0 && p < 1;
-      if (dp > 0) {
-        const dv = dp * stroke.strength * CANOE_STROKE_DV * stroke.dir * (stroke.dir < 0 ? CANOE_PADDLE_BACK : 1);
-        c.vx += fwdX * dv;
-        c.vz += fwdZ * dv;
-        // (off to its side: it turns — the left side forward turns it right, yaw −)
-        c.w -= stroke.side * stroke.dir * dp * stroke.strength * CANOE_STROKE_TURN;
+    let swung = 0;
+    let depth = 0;
+    if (stroke?.pose && !stroke.visual) {
+      if (stroke.id === c.strokeId) swung = stroke.pose.swing - c.strokeSwing;
+      c.strokeId = stroke.id;
+      c.strokeSwing = stroke.pose.swing;
+    } else {
+      c.strokeId = null;
+      if (stroke) {
+        const p = oarStrokePull(stroke.u);
+        pulling = p > 0 && p < 1;
       }
-    } else if (stroke) {
-      const p = oarStrokePull(stroke.u);
-      pulling = p > 0 && p < 1;
     }
     const blade = oar?.getObjectByName('oar-blade');
     if (blade) {
@@ -122,6 +119,9 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
         const l = toLocal(_b.x, _b.z);
         const outside = Math.abs(l.x) > CANOE_HALF_WIDTH * 0.6 || Math.abs(l.z) > CANOE_HALF_LENGTH - 0.2;
         const surface = waterY(_b.x, _b.z);
+        // How far under (0…1 over BLADE_DEPTH); swept through the water fast enough it's a pull
+        depth = outside ? Math.min(1, Math.max(0, (surface + 0.02 - _b.y) / BLADE_DEPTH)) : 0;
+        if (stroke?.pose) pulling = depth > 0.3 && Math.abs(swung) > PULL_SWING_SPEED * dt;
         // Splashes: in and out of the water, and drops off it through the pull
         const nowIn = _b.y < surface + 0.02 && outside;
         if (nowIn !== c.bladeIn) {
@@ -142,6 +142,16 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     } else {
       c.blade = null;
       c.bladeIn = false;
+    }
+    // The blade swept back through the water pushes the canoe on, swept ahead backs it up (by how
+    // much of a stroke's whole sweep it went, how deep it is)
+    const f = (-swung / OAR_STROKE_SWEEP) * depth * (stroke?.strength ?? 1);
+    if (f) {
+      const dv = f * CANOE_STROKE_DV * (f < 0 ? CANOE_PADDLE_BACK : 1);
+      c.vx += fwdX * dv;
+      c.vz += fwdZ * dv;
+      // (off to its side: it turns — the left side forward turns it right, yaw −)
+      c.w -= stroke.side * f * CANOE_STROKE_TURN;
     }
     // The joystick / WASD paddle for the player
     if (Math.abs(steer.fwd) > 0.05) {
