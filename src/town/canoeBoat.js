@@ -26,6 +26,7 @@ import {
 } from './townConfig.js';
 
 const BLADE_DEPTH = 0.12;       // m under the surface: the blade's all in (full push)
+const STROKE_COMMIT = 0.15;     // rad swept one way in the water: that's the stroke — the other way pushes nothing till it's out
 const PULL_SWING_SPEED = 0.35;  // rad/s: the blade swept faster than this in the water throws drops
 // Where the hull's water depth is checked (canoe-local m: across, along)
 const HULL_PROBES = [[0, 0], [0, CANOE_HALF_LENGTH - 0.3], [0, -(CANOE_HALF_LENGTH - 0.3)], [CANOE_HALF_WIDTH, 0], [-CANOE_HALF_WIDTH, 0]];
@@ -41,6 +42,8 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     splashAt: 0,        // s (real clock): the next drops off a stroke
     strokeId: null,     // the tilt's oar pushing it, and where its blade swung to last frame
     strokeSwing: 0,
+    strokeDir: 0,       // the stroke this dip is (1 forward, −1 back, 0 not yet), and its sweep so far
+    strokeSweep: 0,
   };
   // (world space: put beside the canoe in whatever holds it, the first time it moves)
   const splash = createWaterSplash();
@@ -144,8 +147,16 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
       c.bladeIn = false;
     }
     // The blade swept back through the water pushes the canoe on, swept ahead backs it up (by how
-    // much of a stroke's whole sweep it went, how deep it is)
-    const f = (-swung / OAR_STROKE_SWEEP) * depth * (stroke?.strength ?? 1);
+    // much of a stroke's whole sweep it went, how deep it is). Once it's swept STROKE_COMMIT one
+    // way that's the stroke: coming back the other way before it's out of the water (the end of
+    // a stroke, straightening up) drags nothing
+    if (depth < 0.05) { c.strokeDir = 0; c.strokeSweep = 0; }
+    else if (!c.strokeDir) {
+      c.strokeSweep -= swung * depth;
+      if (Math.abs(c.strokeSweep) > STROKE_COMMIT) c.strokeDir = Math.sign(c.strokeSweep);
+    }
+    let f = (-swung / OAR_STROKE_SWEEP) * depth * (stroke?.strength ?? 1);
+    if (c.strokeDir && Math.sign(f) === -c.strokeDir) f = 0;
     if (f) {
       const dv = f * CANOE_STROKE_DV * (f < 0 ? CANOE_PADDLE_BACK : 1);
       c.vx += fwdX * dv;
