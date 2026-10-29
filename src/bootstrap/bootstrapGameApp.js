@@ -291,6 +291,9 @@ const SUN_LOW_COLOR = new THREE.Color(0xff9a55);
 const SUN_LOW_LIGHT = 0.3;    // sun intensity at the horizon (× the day's)
 const SUN_LOW_AMBIENT = 0.45; // ambient at the horizon (× the day's)
 const SUN_LOW_SKY = 0.4;      // sky brightness at the horizon
+// Twilight: for this many hours after sunrise / before sunset everything fades from / to the
+// night preset (lights off, black sky), so the switch to / from night at the horizon is seamless
+const SUN_TWILIGHT_H = 1.5;
 const PERFORMANCE_PROFILE_CAPS = {
   low: 1.0,
   mid: 1.5,
@@ -1499,14 +1502,16 @@ async function initCore(runtimeContext) {
     // (high enough up — a quarter of the way to midday — it's the full day)
     const k = clampValue(up / 0.5, 0, 1);
     const ease = k * k * (3 - 2 * k);
+    const tk = clampValue(Math.min(_sunHour - SUN_RISE_H, SUN_SET_H - _sunHour) / SUN_TWILIGHT_H, 0, 1);
+    const tw = tk * tk * (3 - 2 * tk); // 0 at the horizon (= night) … 1 out of twilight
     if (dirLight) {
-      dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2) * (SUN_LOW_LIGHT + (1 - SUN_LOW_LIGHT) * ease);
+      dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2) * tw * (SUN_LOW_LIGHT + (1 - SUN_LOW_LIGHT) * ease);
       dirLight.color.copy(SUN_LOW_COLOR).lerp(_sunWhite, ease);
     }
     if (ambientLight) {
-      ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2) * (SUN_LOW_AMBIENT + (1 - SUN_LOW_AMBIENT) * ease);
+      ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2) * tw * (SUN_LOW_AMBIENT + (1 - SUN_LOW_AMBIENT) * ease);
     }
-    if (scene) scene.backgroundIntensity = SUN_LOW_SKY + (1 - SUN_LOW_SKY) * ease;
+    if (scene) scene.backgroundIntensity = tw * (SUN_LOW_SKY + (1 - SUN_LOW_SKY) * ease);
   };
   const setSunHour = (h) => {
     _sunHour = Number.isFinite(h) ? h : null;
