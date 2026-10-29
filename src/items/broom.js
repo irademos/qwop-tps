@@ -17,9 +17,10 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // same however the phone is held. The drift eases toward that (ACCEL) and the broom turns
 // toward the way it's drifting (TURN_RATE), so a held sideways tilt flies a circle. Leaning back
 // (more than TURN_MAX_ANGLE from forward) turns it round: the way behind it then is locked in
-// (`backDir`) and it turns toward that (U_TURN_RATE), slow at first (BACK_SPEED). Once round,
-// that's its new forward: after U_TURN_HOLD_S of drifting on, a lean still held back is
-// backward again and it turns round again. The camera eases round behind it (CAM_FOLLOW),
+// (`backDir`) and it slows to a stop turning toward that (U_TURN_RATE). Once round, that's its
+// new forward: it stays still U_TURN_HOLD_S, then a lean still held back is backward again and
+// it turns round again. The rider leans with the tilt (LEAN_*: a little forward / sideways, well
+// back), about the hips — the broom stays as it was. The camera eases round behind it (CAM_FOLLOW),
 // waiting a moment after the player turns it by hand, and draws back with the speed
 // (CAM_BACK + CAM_BACK_PER_SPEED — controls.js `ride.camDist`). The joystick / WASD lean it the same way (the only way
 // without a gyro). The player's controls stand still meanwhile (`holdStill`, `ride` —
@@ -47,7 +48,11 @@ const TURN_MIN_SPEED = 0.35;               // m/s — slower: it doesn't turn
 const TURN_MAX_ANGLE = 1.9;                 // rad — leaning further back than this: turning round
 const U_TURN_RATE = 1.7;                   // rad/s turning round
 const BACK_RELEASE = 0.15;                 // the lean's back part under this: done turning round
-const U_TURN_HOLD_S = 0.6;                 // s round before a lean still held back turns it again
+const U_TURN_HOLD_S = 0.6;                 // s still once round before a lean held back turns it again
+const LEAN_FWD = 0.18;                     // rad the rider leans forward at full forward tilt
+const LEAN_BACK = 0.55;                    // rad back at full backward tilt
+const LEAN_SIDE = 0.22;                    // rad sideways at full sideways tilt
+const LEAN_RATE = 6;                       // 1/s easing the lean
 const TILT_DEAD = 0.1;                     // sin of the tilt — under this, no lean
 const TILT_FULL = 0.5;                     // full lean (~30°)
 const LOOK_AHEAD = [0.6, 1.4];             // s of drift ahead whose ground it rises for
@@ -258,7 +263,7 @@ export function createBroomRide(ctx) {
   let riding = false;
   let broom = null;            // the model under the rider (loaded on the first ride)
   let loading = false;
-  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, dt: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 };
+  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, dt: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, leanP: 0, leanR: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 };
   let trail = null;            // the boost's purple streams (made on the first boost)
   let boosting = false;
   let boostPaid = 0;           // s of boost paid for (BOOST_MANA_PER_S a second, ahead)
@@ -279,7 +284,7 @@ export function createBroomRide(ctx) {
     const c = ctx.getControls();
     if (riding || !c) return false;
     riding = true;
-    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 });
+    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, leanP: 0, leanR: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 });
     ride.camDist = 0;
     boosting = false;
     ride.y = st.y;
@@ -308,7 +313,7 @@ export function createBroomRide(ctx) {
     }
     glbOf()?.endPose();
     const pm = ctx.getPlayerModel();
-    if (pm) { pm.rotation.x = 0; pm.rotation.z = 0; }
+    if (pm) { pm.rotation.x = 0; pm.rotation.z = 0; pm.rotation.order = 'XYZ'; }
     if (broom) broom.visible = false;
     trail?.clear();
   };
@@ -393,11 +398,9 @@ export function createBroomRide(ctx) {
         }
       }
       if (st.backDir != null) {
-        // (slow while it's still facing away, full speed once round)
-        const facing = Math.max(0, Math.cos(wrap(st.backDir - st.yaw)));
-        const sp = Math.min(1, lean) * top * (BACK_SPEED + (1 - BACK_SPEED) * facing);
-        wantX = Math.sin(st.backDir) * sp;
-        wantZ = Math.cos(st.backDir) * sp;
+        // (turning round on the spot, then still a moment)
+        wantX = 0;
+        wantZ = 0;
       } else {
         const fwd = iz < 0 ? iz * BACK_SPEED : iz;
         // (broom-local +X = world (cos, −sin), +Z = world (sin, cos))
@@ -445,6 +448,10 @@ export function createBroomRide(ctx) {
     const ahead = st.vx * sy + st.vz * cy;
     st.bank += (-side * BANK - st.bank) * ease(4, dt);
     st.pitch += (ahead * PITCH - st.pitch) * ease(4, dt);
+    // (the rider leaning with the tilt: a little forward / sideways, well back)
+    const lk = ease(LEAN_RATE, dt);
+    st.leanP += ((iz >= 0 ? iz * LEAN_FWD : iz * LEAN_BACK) - st.leanP) * lk;
+    st.leanR += (-ix * LEAN_SIDE - st.leanR) * lk;
 
     c.playerX = st.x;
     c.playerZ = st.z;
@@ -468,6 +475,8 @@ export function createBroomRide(ctx) {
     if (!riding) return;
     const pm = ctx.getPlayerModel();
     if (!pm) return;
+    // (pitch / roll in the player's own frame, after the yaw)
+    pm.rotation.order = 'YXZ';
     pm.rotation.x = st.pitch;
     pm.rotation.z = st.bank;
     pm.updateMatrixWorld(true);
@@ -481,18 +490,27 @@ export function createBroomRide(ctx) {
         hipsMeasured = true;
       }
     }
+    // The broom: under the hips, as the broom flies (the rider's lean left out)
     pm.getWorldQuaternion(_q);
-    // (the boost's streams, off the bristles' end)
     if (trail) {
+      // (the boost's streams, off the bristles' end)
       const axis = _v.set(0, 0, 1).applyQuaternion(_q);
       const at = _v2.set(0, hips.y - SEAT_DROP, hips.z - BROOM_SEAT_TO_END * BROOM_LENGTH);
       pm.localToWorld(at);
       trail.update(st.dt, boosting, at, axis);
     }
-    if (!broom) return;
-    broom.position.set(0, hips.y - SEAT_DROP, hips.z);
-    pm.localToWorld(broom.position);
-    broom.quaternion.copy(_q);
+    if (broom) {
+      broom.position.set(0, hips.y - SEAT_DROP, hips.z);
+      pm.localToWorld(broom.position);
+      broom.quaternion.copy(_q);
+    }
+    // The rider leaning with the tilt, about the hips (they stay on the seat)
+    const seat = pm.localToWorld(_v.copy(hips));
+    pm.rotation.x = st.pitch + st.leanP;
+    pm.rotation.z = st.bank + st.leanR;
+    pm.updateMatrixWorld(true);
+    pm.position.add(seat.sub(pm.localToWorld(_v2.copy(hips))));
+    pm.updateMatrixWorld(true);
   };
 
   return {

@@ -8994,6 +8994,8 @@ async function initCore(runtimeContext) {
     // Something in hand (the bandits at their camp rob an unarmed trespasser instead of fighting);
     // a fishing rod is no weapon
     isPlayerArmed: () => !!_heldWeaponId() && !isRodEquipped() && !isOarEquipped(),
+    // (on the flying broom: no going into houses — townTrade.js)
+    isOnBroom: () => !!_broomRide?.isRiding(),
     // A weapon of the town's own, in hand or not (the sheriff asks such a player to stand watch at night)
     hasWeapon: () => { const it = _townLoadout ? _townItems() : null; return !!(it && (it.sword || it.gun || it.wand)); },
     putWeaponsAway: () => _putWeaponsAway(),
