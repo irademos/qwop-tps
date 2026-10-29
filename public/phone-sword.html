@@ -226,6 +226,9 @@
     /* Town: the flying broom once bought (on it ↔ off it) */
     #btn-broom { background: rgba(146, 64, 14, 0.5); border-color: rgba(253, 230, 138, 0.6); display: none; }
     #btn-broom.owned { display: block; }
+    /* …and on it: Boost (higher + faster, uses mana) */
+    #btn-boost { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
+    #btn-boost.owned { display: block; }
     /* Town fishing with the line out: the reel takes the joystick's place (and the Block bar
        goes) — crank the handle round (clockwise) to wind the line in; the middle says Pull /
        Reel in only once the player's been getting it wrong */
@@ -451,6 +454,8 @@ Wand</button>
 Rod</button>
       <button class="ctl-btn row-btn" id="btn-broom" data-action="broom">🧹
 Broom</button>
+      <button class="ctl-btn row-btn" id="btn-boost" data-action="boostDown" data-release="boostUp">🚀
+Boost</button>
       <button class="ctl-btn row-btn" id="btn-bomb" data-action="bomb">💣
 0</button>
       <button class="ctl-btn row-btn" id="btn-bubble" data-action="bubble">🫧
@@ -638,7 +643,11 @@ Broom</button>
         sendAction(btn.dataset.action);
         if (btn.dataset.action === 'recalibrate') flashRecalibrated(btn);
       });
-      const unpress = () => btn.classList.remove('pressed');
+      // (a held button — Boost: its release sends an action too)
+      const unpress = () => {
+        if (btn.dataset.release && btn.classList.contains('pressed')) sendAction(btn.dataset.release);
+        btn.classList.remove('pressed');
+      };
       btn.addEventListener('pointerup', unpress);
       btn.addEventListener('pointercancel', unpress);
       btn.addEventListener('pointerleave', unpress);
@@ -678,16 +687,17 @@ Broom</button>
     const btnSword = document.getElementById('btn-sword');
     const btnRod = document.getElementById('btn-rod');
     const btnBroom = document.getElementById('btn-broom');
+    const btnBoost = document.getElementById('btn-boost');
     // The button row above Block holds up to ACTION_ROW_MAX of the buttons shown; any more go
     // in the slots beside Block (left, then right)
     const ACTION_ROW_MAX = 5;
     const actionRow = document.getElementById('action-grid');
     const blockSides = [document.getElementById('block-side-left'), document.getElementById('block-side-right')];
-    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnRod, btnBroom, btnBomb, btnBubble];
+    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnRod, btnBroom, btnBoost, btnBomb, btnBubble];
     function layoutRowButtons() {
       let n = 0;
       rowButtons.forEach((b) => {
-        const shown = b === btnWand || b === btnRod || b === btnBroom ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
+        const shown = b === btnWand || b === btnRod || b === btnBroom || b === btnBoost ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
         const parent = !shown || n < ACTION_ROW_MAX ? actionRow : blockSides[n - ACTION_ROW_MAX] ?? actionRow;
         if (shown) n += 1;
         parent.appendChild(b); // (re-appended in order, so the order holds)
@@ -697,7 +707,7 @@ Broom</button>
       document.body.classList.toggle('block-only', !!st.blockOnly);
       btnBomb.textContent = `💣\n${st.bombs ?? 0}`;
       btnBomb.disabled = !(st.bombs > 0);
-      btnBubble.textContent = `🫧\n${st.bubbles ?? 0}`;
+      btnBubble.textContent = st.bubbleMana ? '🫧\nBubble' : `🫧\n${st.bubbles ?? 0}`;
       btnBubble.disabled = !(st.bubbles > 0) && !st.bubbleActive;
       btnBubble.classList.toggle('active', !!st.bubbleActive);
       // Equip buttons: each toggles its weapon ↔ the sword (Town without a sword: ↔ empty hands)
@@ -720,6 +730,10 @@ Broom</button>
       btnBroom.classList.toggle('owned', !!st.hasBroom);
       btnBroom.classList.toggle('equipped', !!st.onBroom);
       btnBroom.textContent = st.onBroom ? '🧹\nLand' : '🧹\nBroom';
+      // On it: Boost on / off (a mana a second)
+      btnBoost.classList.toggle('owned', !!st.onBroom);
+      btnBoost.classList.toggle('equipped', !!st.boosting);
+      btnBoost.textContent = `🚀 Boost\n🔮${st.mana ?? 0}`;
       // The line out: the bar's a reel
       const reeling = !!st.reelMode;
       if (reeling && !document.body.classList.contains('reel-mode') && pressMode) releaseBar();

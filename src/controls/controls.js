@@ -629,6 +629,17 @@ export class PlayerControls {
       if (event) this.safePreventDefault(event);
     });
 
+    // …and on it: Boost (higher + faster, a mana a second)
+    this.psBoostBtn = createButton('ps-boost-btn', 'mobile-primary-action ps-boost-btn', 'Boost');
+    this.psBoostBtn.style.display = 'none';
+    bindPress(this.psBoostBtn, (event) => {
+      if (!this.enabled) return;
+      getAppState()?.setBroomBoost?.(true);
+      if (event) this.safePreventDefault(event);
+    });
+    const endBoost = () => getAppState()?.setBroomBoost?.(false);
+    ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach((type) => this.psBoostBtn.addEventListener(type, endBoost));
+
     // The Block bar does what fits the weapon in hand (getBlockBarMode), decided on press:
     // block while held (sword), fire on release (gun), back to the sword (shield), or the
     // shield up while held and the wand back on release (wand)
@@ -771,6 +782,8 @@ export class PlayerControls {
       this.psBroomBtn.style.display = appState?.hasBroom?.() ? '' : 'none';
       this.psBroomBtn.textContent = riding ? 'Land' : 'Broom';
       this.psBroomBtn.classList.toggle('ps-broom-active', riding);
+      this.psBoostBtn.style.display = riding ? '' : 'none';
+      this.psBoostBtn.classList.toggle('ps-broom-active', !!appState?.isBroomBoosting?.());
     }
     // Block bar: Block (sword / wand), Fire (gun), Sword (shield), Shield (wand + a shield)
     const showPunch = !!this.getBlockBarMode();
@@ -794,7 +807,7 @@ export class PlayerControls {
 
   // Block/fire button + two weapon switch buttons, bubble and bomb
   layoutMobileActionButtons() {
-    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBubbleBtn, this.psBombBtn, this.psBroomBtn].forEach((button) => {
+    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBubbleBtn, this.psBombBtn, this.psBroomBtn, this.psBoostBtn].forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
@@ -808,6 +821,7 @@ export class PlayerControls {
       if (shown(this.psBubbleBtn)) this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: rows[1]++ });
       if (shown(this.psBombBtn)) this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: rows[1]++ });
       if (shown(this.psBroomBtn)) this.applyMobileButtonPosition(this.psBroomBtn, { x: 1, y: rows[1]++ });
+      if (shown(this.psBoostBtn)) this.applyMobileButtonPosition(this.psBoostBtn, { x: 1, y: rows[1]++ });
       for (const b of [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5]) {
         if (!b.dataset.psWeaponId) continue;
         const col = rows[1] <= rows[0] ? 1 : 0;
@@ -841,6 +855,7 @@ export class PlayerControls {
     this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: blockInGrid ? 2 : 1 });
     // (Town's broom: on top of the weapon column)
     this.applyMobileButtonPosition(this.psBroomBtn, { x: 2, y: 4 });
+    this.applyMobileButtonPosition(this.psBoostBtn, { x: 2, y: 5 });
   }
 
   setupEventListeners() {
@@ -857,6 +872,11 @@ export class PlayerControls {
         const appState = appContext.uiState.appState ?? window.appState;
         if (appState?.hasBroom?.()) { appState.toggleBroom?.(); this.refreshActionButtons(); }
       }
+      // Shift held: boost on the broom
+      if (key === 'shift' && !e.repeat && !e.target?.closest?.('input, textarea')) {
+        const appState = appContext.uiState.appState ?? window.appState;
+        if (appState?.isRidingBroom?.()) appState.setBroomBoost?.(true);
+      }
       if (e.key === " ") {
         if (e.repeat) return;
         // The jump itself runs in the game loop (see phoneSwordJumpPressed in bootstrapGameApp.js)
@@ -866,6 +886,7 @@ export class PlayerControls {
 
     document.addEventListener("keyup", (e) => {
       this.keysPressed.delete(e.key.toLowerCase());
+      if (e.key === 'Shift') (appContext.uiState.appState ?? window.appState)?.setBroomBoost?.(false);
     });
     
     // Handle window resize

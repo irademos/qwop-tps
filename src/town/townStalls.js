@@ -45,7 +45,6 @@ const SHOP_ITEMS = [
   { id: 'sword', counter: 'right', along: 2.5, lift: 0.4, build: 'sword', hang: true },
   { id: 'gun', counter: 'right', along: 1.5, lift: 0.02, build: 'gun' },
   { id: 'shield', counter: 'right', along: 0.5, lift: -0.06, build: 'shield' },
-  { id: 'bubble', counter: 'right', along: -0.7, lift: 0.35, build: 'bubble', hang: true },
   { id: 'lockpick', counter: 'left', along: -0.8, lift: 0.01, build: 'lockpick' },
   { id: 'ammo', counter: 'left', along: 0.4, lift: 0.01, build: 'bullets' },
   { id: 'bomb', counter: 'left', along: 1.4, lift: 0.07, build: 'bomb' },
