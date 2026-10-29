@@ -2,7 +2,8 @@
 //   Map:  the town from above (the nav grid's ground / roads / water, the houses, the places) with
 //         everyone on it, live — townsfolk (the law blue, bandits orange, anyone fighting the
 //         player red), ❗ / ❓ over whoever has a job / a reward, 📍 where a job's work is, the
-//         player's arrow and the other players of a shared town. Tap someone for who they are.
+//         player's arrow and the other players of a shared town. Tap someone for who they are;
+//         drag to move the map, pinch / the wheel / + − to zoom, ⌖ back to the player.
 //   Town: what Settings → Town used to show — the player's bag (tap a food to eat), their jobs,
 //         and everyone in town sorted by coins (T.roster(), townMode.js).
 // Someone in a room (under the map — townRooms.js) is drawn at their house's door, faded.
@@ -23,6 +24,10 @@ const REFRESH_MS = 250;        // the map, while open
 const LIST_REFRESH_MS = 1000;  // the Town page, while open
 const MAP_PAD_M = 6;           // around the ground the map shows
 const TAP_RADIUS_PX = 16;
+const ZOOM_MIN = 1;            // the whole map fits
+const ZOOM_MAX = 8;
+const ZOOM_STEP = 1.5;         // the + / − buttons
+const DRAG_START_PX = 6;       // moved further than this, a press is a drag, not a tap
 // Map colours (a painted map — not the UI tokens)
 const C = {
   sea: '#2f5a74', water: '#3f7896', grass: '#6d8a47', rough: '#4f6a36', trail: '#b39a68', road: '#cdb684',
@@ -60,15 +65,18 @@ export function installTownBook(T, ctx) {
   const mapWrap = el('div', 'town-book-map');
   const canvas = el('canvas', 'town-book-canvas');
   mapWrap.append(canvas);
-  const info = el('div', 'town-book-info', 'Tap someone on the map.');
-  const legend = el('div', 'town-book-legend');
-  for (const [cls, text] of [['you', 'You'], ['folk', 'Townsfolk'], ['law', 'Law'], ['outlaw', 'Bandits'], ['enemy', 'Fighting you'], ['player', 'Players']]) {
-    const item = el('span', 'town-book-key');
-    item.append(el('span', `town-book-dot town-book-dot-${cls}`), document.createTextNode(text));
-    legend.append(item);
+  // Zoom in / out, back to the player
+  const zoomBtns = el('div', 'town-book-zoom');
+  for (const [text, title, fn] of [['+', 'Zoom in', () => zoomBy(ZOOM_STEP)], ['−', 'Zoom out', () => zoomBy(1 / ZOOM_STEP)], ['⌖', 'Centre on you', () => centreOnMe()]]) {
+    const b = el('button', 'ui-btn-secondary town-book-zoom-btn', text);
+    b.type = 'button';
+    b.title = title;
+    b.addEventListener('click', fn);
+    zoomBtns.append(b);
   }
-  legend.append(el('span', 'town-book-key', '❗ job'), el('span', 'town-book-key', '❓ reward'), el('span', 'town-book-key', '📍 job spot'));
-  mapPage.append(mapWrap, info, legend);
+  mapWrap.append(zoomBtns);
+  const info = el('div', 'town-book-info', 'Tap someone on the map. Drag to move it, pinch or scroll to zoom.');
+  mapPage.append(mapWrap, info);
 
   // Town page (was Settings → Town)
   const townPage = el('div', 'town-book-page');
@@ -196,8 +204,7 @@ export function installTownBook(T, ctx) {
     g.textBaseline = 'middle';
     // (kept inside the map)
     const half = g.measureText(text).width / 2 + 2;
-    const w = canvas.width / Math.min(2, window.devicePixelRatio || 1);
-    x = Math.min(Math.max(x, half), Math.max(half, w - half));
+    x = Math.min(Math.max(x, half), Math.max(half, view.cw - half));
     g.lineWidth = 3;
     g.strokeStyle = 'rgba(20, 14, 8, 0.85)';
     g.strokeText(text, x, y);
@@ -207,15 +214,54 @@ export function installTownBook(T, ctx) {
 
   let hits = [];   // [{ x, y, text }] the dots last drawn (for taps)
   let picked = null; // { id } of whoever was tapped
+  // The view: zoom (× the whole-map fit) and the world spot in the middle; cw / ch / scale as last drawn
+  const view = { zoom: 1, cx: 0, cz: 0, cw: 0, ch: 0, fit: 1, scale: 1 };
+  const clampView = () => {
+    view.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.zoom));
+    view.cx = Math.min(base.minX + base.w, Math.max(base.minX, view.cx));
+    view.cz = Math.min(base.minZ + base.h, Math.max(base.minZ, view.cz));
+  };
+  // Zoom by `k` keeping the world spot under (sx, sy) (canvas px; the middle by default) where it is
+  const zoomBy = (k, sx = view.cw / 2, sy = view.ch / 2) => {
+    if (!base) return;
+    const wx = view.cx + (sx - view.cw / 2) / view.scale;
+    const wz = view.cz + (sy - view.ch / 2) / view.scale;
+    view.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, view.zoom * k));
+    view.scale = view.fit * view.zoom;
+    view.cx = wx - (sx - view.cw / 2) / view.scale;
+    view.cz = wz - (sy - view.ch / 2) / view.scale;
+    clampView();
+    drawMap();
+  };
+  const panBy = (dx, dy) => {
+    if (!base) return;
+    view.cx -= dx / view.scale;
+    view.cz -= dy / view.scale;
+    clampView();
+    drawMap();
+  };
+  const centreOnMe = () => {
+    if (!base) return;
+    const me = T.playerPos();
+    const at = mapSpot(me.x, me.z) ?? me;
+    view.cx = at.x;
+    view.cz = at.z;
+    if (view.zoom < 2.5) view.zoom = 2.5;
+    clampView();
+    drawMap();
+  };
   const drawMap = () => {
     if (!T.active || !T.layout) return;
-    if (!base || base.layout !== T.layout) buildBase();
+    if (!base || base.layout !== T.layout) {
+      buildBase();
+      Object.assign(view, { zoom: 1, cx: base.minX + base.w / 2, cz: base.minZ + base.h / 2 });
+    }
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const wrapW = mapWrap.clientWidth || 320;
-    const wrapH = mapWrap.clientHeight || wrapW;
-    const scale = Math.min(wrapW / base.w, wrapH / base.h);
-    const cw = Math.round(base.w * scale);
-    const ch = Math.round(base.h * scale);
+    const cw = mapWrap.clientWidth || 320;
+    const ch = mapWrap.clientHeight || cw;
+    view.fit = Math.min(cw / base.w, ch / base.h);
+    const scale = view.fit * view.zoom;
+    Object.assign(view, { cw, ch, scale });
     if (canvas.width !== cw * dpr || canvas.height !== ch * dpr) {
       canvas.width = cw * dpr;
       canvas.height = ch * dpr;
@@ -225,10 +271,11 @@ export function installTownBook(T, ctx) {
     const g = canvas.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     // Top view: world +X right, +Z down
-    const px = (x) => (x - base.minX) * scale;
-    const pz = (z) => (z - base.minZ) * scale;
+    const px = (x) => (x - view.cx) * scale + cw / 2;
+    const pz = (z) => (z - view.cz) * scale + ch / 2;
     const b = base.bounds;
-    g.imageSmoothingEnabled = true;
+    // (zoomed in, the ground's cells stay crisp)
+    g.imageSmoothingEnabled = view.zoom < 2;
     g.fillStyle = C.sea;
     g.fillRect(0, 0, cw, ch);
     g.drawImage(base.img, 0, 0, base.img.width, base.img.height, px(b.minX), pz(b.minZ), (b.maxX - b.minX) * scale, (b.maxZ - b.minZ) * scale);
@@ -335,10 +382,14 @@ export function installTownBook(T, ctx) {
       info.textContent = h ? h.text : 'They\'re gone.';
     }
   };
-  canvas.addEventListener('pointerdown', (e) => {
+  // Taps pick someone; one finger / the mouse drags the map, two fingers pinch it; the wheel zooms
+  const pointers = new Map(); // pointer id → { x, y } (canvas px)
+  let press = null;           // { moved, multi } since the first finger went down
+  const canvasXY = (e) => {
     const r = canvas.getBoundingClientRect();
-    const x = e.clientX - r.left;
-    const y = e.clientY - r.top;
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  const pick = ({ x, y }) => {
     let best = null;
     let bd = TAP_RADIUS_PX;
     for (const h of hits) {
@@ -346,9 +397,55 @@ export function installTownBook(T, ctx) {
       if (d < bd) { bd = d; best = h; }
     }
     picked = best ? { id: best.id } : null;
-    info.textContent = best ? best.text : 'Tap someone on the map.';
+    info.textContent = best ? best.text : 'Tap someone on the map. Drag to move it, pinch or scroll to zoom.';
     drawMap();
+  };
+  const pinchOf = () => {
+    const [a, b] = [...pointers.values()];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+  canvas.addEventListener('pointerdown', (e) => {
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* (a pointer that's already gone) */ }
+    pointers.set(e.pointerId, canvasXY(e));
+    if (pointers.size === 1) press = { moved: 0, multi: false };
+    else if (press) press.multi = true;
+    e.preventDefault();
   });
+  canvas.addEventListener('pointermove', (e) => {
+    const last = pointers.get(e.pointerId);
+    if (!last) return;
+    const now = canvasXY(e);
+    if (pointers.size >= 2) {
+      const before = pinchOf();
+      pointers.set(e.pointerId, now);
+      const after = pinchOf();
+      if (before.d > 0) {
+        view.cx -= (after.x - before.x) / view.scale;
+        view.cz -= (after.y - before.y) / view.scale;
+        zoomBy(after.d / before.d, after.x, after.y);
+      }
+      return;
+    }
+    pointers.set(e.pointerId, now);
+    if (press) press.moved += Math.hypot(now.x - last.x, now.y - last.y);
+    if (press && press.moved > DRAG_START_PX) panBy(now.x - last.x, now.y - last.y);
+  });
+  const release = (e) => {
+    const at = pointers.get(e.pointerId);
+    if (!at) return;
+    pointers.delete(e.pointerId);
+    if (!pointers.size) {
+      if (press && !press.multi && press.moved <= DRAG_START_PX && e.type === 'pointerup') pick(at);
+      press = null;
+    }
+  };
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const { x, y } = canvasXY(e);
+    zoomBy(Math.exp(-e.deltaY * 0.0015), x, y);
+  }, { passive: false });
 
   // ── The Town page: summary, the bag, jobs, everyone and their coins (the richest crowned) ──
   const renderTown = () => {
@@ -417,6 +514,12 @@ export function installTownBook(T, ctx) {
     }) : [el('li', 'settings-muted', 'Nobody here.')]));
   };
 
-  const resetBook = () => { toggle(false); base = null; picked = null; info.textContent = 'Tap someone on the map.'; };
+  const resetBook = () => {
+    toggle(false);
+    base = null;
+    picked = null;
+    pointers.clear();
+    info.textContent = 'Tap someone on the map. Drag to move it, pinch or scroll to zoom.';
+  };
   Object.assign(T, { toggleBook: toggle, isBookOpen: isOpen, resetBook });
 }

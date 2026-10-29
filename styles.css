@@ -4587,25 +4587,31 @@ body.settings-open .town-book-overlay { display: none !important; }
 .town-book-page { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
 .town-book-page.hidden { display: none; }
 .town-book-map {
+  position: relative;
   height: min(62vh, 560px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
   border-radius: var(--radius-md);
   background: #2f5a74;
 }
-.town-book-canvas { display: block; border-radius: var(--radius-sm); touch-action: none; cursor: pointer; }
+.town-book-canvas { display: block; touch-action: none; cursor: grab; }
+.town-book-canvas:active { cursor: grabbing; }
+/* + / − / ⌖ over the map's top right corner */
+.town-book-zoom {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.town-book-zoom-btn {
+  width: 38px;
+  height: 38px;
+  min-height: 0;
+  padding: 0;
+  font: 800 20px/1 var(--font-ui);
+}
 .town-book-info { min-height: 18px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
-.town-book-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-muted); }
-.town-book-key { display: inline-flex; align-items: center; gap: 5px; }
-.town-book-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid #1b1410; }
-.town-book-dot-you { background: #ffd25a; }
-.town-book-dot-folk { background: #f3ead8; }
-.town-book-dot-law { background: #6fa8ff; }
-.town-book-dot-outlaw { background: #ff8a3d; }
-.town-book-dot-enemy { background: #ff3b3b; }
-.town-book-dot-player { background: #5fe0e6; }
 @media (max-width: 520px) {
   .town-book-title { display: none; }
   .town-book-map { height: min(54vh, 460px); }
