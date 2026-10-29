@@ -68,7 +68,7 @@
 //   setRoadLampsLit(on)
 //   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null),
 //   autoWalk(dirX, dirZ, step, dt) (the first day's guide walking the player), isSteering()
-//   setTimeOfDay('day' | 'night'), showBanner(title, sub, ms)
+//   setTimeOfDay('day' | 'night'), setSunHour(h | null) (the sun's place in the sky), showBanner(title, sub, ms)
 //   spawnFighter({ x, z, yaw, url, hearts, swingChance, gear, name }) → EnemyPlayer,
 //   removeFighter(enemy), releaseFighterGear(enemy), carryPlayerOff({ carrierUrl, onDone }),
 //   cancelCarry(), isPlayerArmed()
@@ -596,6 +596,7 @@ export function createTownMode(ctx) {
       ctx.setTimeOfDay(night ? 'night' : 'day');
       T.rooms.setNight(night);
     }
+    ctx.setSunHour?.(h);
     topClock.textContent = clockText();
   };
   // At night, out past the houses, the player carries a lantern (a little nearer before it's
@@ -817,6 +818,7 @@ export function createTownMode(ctx) {
     renderBadge();
     toggleLog(false);
     T.resetLights();
+    ctx.setSunHour?.(null);
     root.parent?.remove(root);
     hud.classList.add('hidden');
     document.body.classList.remove('town-mode');
