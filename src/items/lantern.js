@@ -46,8 +46,9 @@ const loadTemplate = () => {
 
 /**
  * A lantern hanging from its handle at the group's origin, with a point light in its glass.
- * The model shows once loaded; `setLit(on)` shows / hides it — the light stays in the scene
- * (intensity 0 when off) so turning it on and off doesn't recompile every material.
+ * The model shows once loaded; `setLit(on, level)` shows / hides it, its light at `level`
+ * (0 … 1, for fading) — the light stays in the scene (intensity 0 when off) so turning it on
+ * and off doesn't recompile every material.
  */
 export function createLantern() {
   const group = new THREE.Group();
@@ -66,10 +67,10 @@ export function createLantern() {
   loadTemplate().then((template) => { if (template) holder.add(template.clone(true)); });
   return {
     group,
-    setLit(on) {
+    setLit(on, level = 1) {
       lit = !!on;
       holder.visible = lit;
-      light.intensity = lit ? LANTERN_LIGHT_CONFIG.intensity : 0;
+      light.intensity = lit ? LANTERN_LIGHT_CONFIG.intensity * Math.max(0, Math.min(1, level)) : 0;
     },
     isLit: () => lit,
   };

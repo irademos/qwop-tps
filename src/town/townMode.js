@@ -65,10 +65,11 @@
 //   getPlayerName(), isPlayerDead()
 //   getGroundY(x, z), isOverWater(x, z), pathAt(x, z) → 'road' | 'trail' | null
 //   getMapObjects(bounds) → [{ file, x, z, radius }], getRoadLamps() → [{ x, y, z }] (lamp heads),
-//   setRoadLampsLit(on)
+//   setRoadLampsLit(level 0 … 1)
 //   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null),
 //   autoWalk(dirX, dirZ, step, dt) (the first day's guide walking the player), isSteering()
-//   setTimeOfDay('day' | 'night'), setSunHour(h | null) (the sun's place in the sky), showBanner(title, sub, ms)
+//   setTimeOfDay('day' | 'night'), setSunHour(h | null, nightLevel) (the sun's place in the sky,
+//   how far into twilight it is), showBanner(title, sub, ms)
 //   spawnFighter({ x, z, yaw, url, hearts, swingChance, gear, name }) → EnemyPlayer,
 //   removeFighter(enemy), releaseFighterGear(enemy), carryPlayerOff({ carrierUrl, onDone }),
 //   cancelCarry(), isPlayerArmed()
@@ -92,7 +93,7 @@ import { isMiiCharacterUrl } from '../models/glbCharacterModel.js';
 import { updateCampfire } from '../village/villageMode.js';
 import {
   BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
-  BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, PVP_CREDIT_S, RAID_NOTICE_DIST, SAVE_EVERY_S, SAVE_PREFIX,
+  BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_FROM_DARK, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, TWILIGHT_H, PVP_CREDIT_S, RAID_NOTICE_DIST, SAVE_EVERY_S, SAVE_PREFIX,
   START_MINUTES, SUBTITLE_S, SUBTITLES_SHOWN, TALK_RANGE, WALLET_MAX, ARRIVAL_SNAP_DIST, _v2, angleLerp, dist2, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
@@ -142,6 +143,7 @@ export function createTownMode(ctx) {
   T.simT = 0;                 // s of town time while active (pauses with the game)
   const clock = { day: 1, minutes: START_MINUTES };
   T.isNight = null;
+  T.nightLevel = 0;   // 0 day … 1 night, easing through TWILIGHT_H either side of it
   T.lantern = false;          // the player carries a lantern (night, out of town)
   const law = { stars: 0, peak: 0, lastSeenAt: 0, lastKnown: new THREE.Vector3(), seen: false, tickAt: 0 };
   T.jail = null;              // { left } while the player is in the cell
@@ -588,6 +590,11 @@ export function createTownMode(ctx) {
     while (clock.minutes >= 1440) { clock.minutes -= 1440; clock.day += 1; }
     applyTime();
   };
+  const nightLevelAt = (h) => {
+    if (h >= NIGHT_FROM_H || h < NIGHT_TO_H) return 1;
+    const k = Math.min(1, Math.min(h - NIGHT_TO_H, NIGHT_FROM_H - h) / TWILIGHT_H);
+    return 1 - k * k * (3 - 2 * k);
+  };
   const applyTime = () => {
     const h = hour();
     const night = h >= NIGHT_FROM_H || h < NIGHT_TO_H;
@@ -596,13 +603,14 @@ export function createTownMode(ctx) {
       ctx.setTimeOfDay(night ? 'night' : 'day');
       T.rooms.setNight(night);
     }
-    ctx.setSunHour?.(h);
+    T.nightLevel = nightLevelAt(h);
+    ctx.setSunHour?.(h, T.nightLevel);
     topClock.textContent = clockText();
   };
-  // At night, out past the houses, the player carries a lantern (a little nearer before it's
+  // From late dusk to early dawn, out past the houses, the player carries a lantern (a little nearer before it's
   // put away again, so it doesn't flicker on the edge)
   const updateLantern = () => {
-    if (!T.isNight || T.inRoom || T.jail || !T.layout.buildings.length) { T.lantern = false; return; }
+    if (T.nightLevel < LANTERN_FROM_DARK || T.inRoom || T.jail || !T.layout.buildings.length) { T.lantern = false; return; }
     const p = T.playerPos();
     let d = Infinity;
     for (const b of T.layout.buildings) d = Math.min(d, Math.hypot(p.x - b.x, p.z - b.z) - b.radius);
@@ -1069,6 +1077,8 @@ export function createTownMode(ctx) {
     dropHeld: () => { if (T.active) T.dropHeld(); },
     // Night, out of town: the player carries a lantern in their left hand
     wantsLantern: () => !!(T.active && T.ready && T.lantern),
+    // 0 day … 1 night (twilight in between)
+    nightLevel: () => (T.active ? T.nightLevel : 0),
     // The phone's Block bar label while there's something to do (undefined: it stays Block; null:
     // interact, nothing to do — in the canoe, where Block means nothing)
     interactLabel: () => (T.active && T.acts.length ? T.acts[0].label : T.active && T.inCanoe() ? null : undefined),
