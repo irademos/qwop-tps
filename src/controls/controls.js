@@ -1550,8 +1550,10 @@ export class PlayerControls {
       // Normal view: orbit the look point using yaw + pitch
       const lookPoint = this.playerModel.position.clone().add(new THREE.Vector3(0, DEFAULT_CAMERA_LOOK_HEIGHT * heightScale, 0));
       const pitchClamped = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
-      const horizontalDist = DEFAULT_CAMERA_DISTANCE * Math.cos(pitchClamped);
-      const verticalOffset = DEFAULT_CAMERA_RAISE + DEFAULT_CAMERA_DISTANCE * Math.sin(pitchClamped);
+      // (further back on the broom, the faster it flies — broom.js `ride.camDist`)
+      const camDistance = DEFAULT_CAMERA_DISTANCE + (Number.isFinite(this.ride?.camDist) ? this.ride.camDist : 0);
+      const horizontalDist = camDistance * Math.cos(pitchClamped);
+      const verticalOffset = DEFAULT_CAMERA_RAISE + camDistance * Math.sin(pitchClamped);
       this.camera.position.set(
         lookPoint.x - Math.sin(this.yaw) * horizontalDist,
         lookPoint.y + verticalOffset,

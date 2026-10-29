@@ -108,6 +108,8 @@ export function installTownTrade(T, ctx) {
   // it or 🚪 Leave
   // (forced: the lock picked — townHomes.js; otherwise a locked door says why)
   const enterRoom = (key, { forced = false } = {}) => {
+    // (not on the flying broom — land it first)
+    if (ctx.isOnBroom?.()) { T.feedLine('Land the broom first.'); return; }
     if (!canEnterRoom()) {
       if (T.law.stars > 0) T.feedLine('Not with the guards after you!');
       return;
@@ -167,6 +169,7 @@ export function installTownTrade(T, ctx) {
     const p = T.playerPos();
     const last = T.doorLast;
     T.doorLast = { x: p.x, z: p.z };
+    if (ctx.isOnBroom?.()) return; // (flying past a door doesn't go in)
     if (T.doorRearm) {
       const r = T.layout.places.rooms[T.doorRearm];
       // (out of where walking in starts, so coming out doesn't go straight back in)
