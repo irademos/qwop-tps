@@ -103,7 +103,7 @@ export const saveTownRoomState = (roomId, state) => set(ref(db, `townRoomState/$
 //   getLocalWeapon() → 'sword' | 'gun' | 'shield' | 'wand' | null, getWeaponGear() (matchCtx's),
 //   getLocalPosition(), launchRemoteBomb(origin, target, fromId), spawnRemoteMagic({ …, caster }),
 //   getLocalSwordState(), getLocalCharacterUrl(), getStars(), getStatus() → { coins, hp, maxHp } (for
-//   Settings → Town), applyPvpHit(dmg, dir, fromId),
+//   the town book), applyPvpHit(dmg, dir, fromId),
 //   onSwingBlocked(), onAttackPlayer(info), onBounty(fromName, coins), onWorldMessage(from, data)
 export function createTownNet(ctx) {
   let on = false;
@@ -199,7 +199,7 @@ export function createTownNet(ctx) {
         p.lastAt = Date.now();
         if (typeof data.n === 'string') p.name = data.n.slice(0, 24);
         p.stars = Math.max(0, Math.min(3, Math.floor(Number(data.st) || 0)));
-        // (coins / health: Settings → Town)
+        // (coins / health: the town book)
         const num = (v) => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : null);
         p.coins = num(data.co);
         p.hp = num(data.hp);
@@ -427,8 +427,12 @@ export function createTownNet(ctx) {
     // ★★ after a wanted player's name
     nameSuffix: (pid) => { const s = players.get(pid)?.stars ?? 0; return s > 0 ? ` ${'★'.repeat(s)}` : ''; },
     playerName: (pid) => players.get(pid)?.name ?? null,
-    // The other players here, as they last told us (Settings → Town)
-    players: () => [...players.values()].map(({ id, name, stars, coins, hp, maxHp }) => ({ id, name, stars, coins, hp, maxHp })),
+    // The other players here, as they last told us (the town book)
+    // (x / z: where their model is — the town book's map; undefined while it isn't in)
+    players: () => [...players.values()].map(({ id, name, stars, coins, hp, maxHp }) => {
+      const pos = ctx.getRemoteModel(id)?.position;
+      return { id, name, stars, coins, hp, maxHp, x: pos?.x, z: pos?.z };
+    }),
     playerCount: () => (on ? peerIds().length + 1 : 1),
     sendBounty: (to, coins) => send(to, { op: 'bounty', coins }),
     // Our bomb / spell — everyone draws it and checks it against themselves

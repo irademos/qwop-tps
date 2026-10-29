@@ -458,6 +458,8 @@ export function installTownMissions(T, ctx) {
     if (!giver || giver.inside || giver.fighter || giver.jailedUntil > T.simT) return null;
     return { icon: j.status === 'done' ? '❓' : '❗', x: giver.x, z: giver.z, h: 1.7 * heightScale(giver.url) + 0.5 };
   };
+  // (the town book's map: the same marks — { icon, x, z })
+  const jobMarks = () => [...T.jobs.map(markerFor), T.introTarget()].filter(Boolean);
   const updateMarkers = () => {
     const live = new Set();
     const marks = T.jobs.map((j) => [j.id, markerFor(j)]);
@@ -589,6 +591,6 @@ export function installTownMissions(T, ctx) {
 
   Object.assign(T, {
     activeJobs, dropJob, jobActsFor, jobOf, npcById, onJobDeath, openJobTalk, restoreJobs, takeStrongbox,
-    updateJobs, updateMarkers,
+    jobMarks, updateJobs, updateMarkers,
   });
 }

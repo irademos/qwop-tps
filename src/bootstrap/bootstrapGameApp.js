@@ -7109,9 +7109,6 @@ async function initCore(runtimeContext) {
     getMultiplayerLeaderboards: (limit = 10) => loadMultiplayerLeaderboards(limit),
     getPhoneSwordStats: () => ({ ..._psStats }),
     // Everything Settings → Profile shows (Showdown / Classic stage stats, upgrades, characters)
-    // Settings → Town: the town's people + players with their coins (townMode.js roster), null outside Town
-    getTownRoster: () => town?.roster?.() ?? null,
-    townEat: (good) => town?.eat?.(good),
     getProfileStats: () => ({
       // (in Town: Showdown's, set aside — _saveAside)
       level: _saveAside?.stats.level ?? statsState.level,
