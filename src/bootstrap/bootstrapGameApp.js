@@ -279,6 +279,20 @@ const PERFORMANCE_MODES = new Set(['auto', 'quality', 'balanced', 'performance']
 // metres) follows them, so characters' shadows show on the map wherever the stage goes
 const SHADOW_LIGHT_OFFSET = new THREE.Vector3(15, 30, 15);
 const SHADOW_HALF_SIZE = 18;
+// Town's sun (setSunHour): it rises in the east (+X) at SUN_RISE_H, stands highest at midday
+// a little to the south (+Z) and sets in the west at SUN_SET_H (Town's night hours); low, it is
+// warm and dim (SUN_LOW_*), the ambient light and the sky dimmer too. Never below SUN_MIN_ELEV
+// (radians) so shadows stay a sane length
+const SUN_RISE_H = 5.5;
+const SUN_SET_H = 21;
+const SUN_SOUTH = 0.35;
+const SUN_MIN_ELEV = 0.17;
+const SUN_LOW_COLOR = new THREE.Color(0xff9a55);
+const SUN_LOW_LIGHT = 0.3;    // sun intensity at the horizon (× the day's)
+const SUN_LOW_AMBIENT = 0.45; // ambient at the horizon (× the day's)
+const SUN_LOW_SKY = 0.4;      // sky brightness at the horizon
+// The sea / lakes' brightness at night (× the day's): mostly dark, not black
+const WATER_NIGHT_BRIGHTNESS = 0.22;
 const PERFORMANCE_PROFILE_CAPS = {
   low: 1.0,
   mid: 1.5,
@@ -1453,12 +1467,70 @@ async function initCore(runtimeContext) {
       dirLight.intensity = clampValue(directionalIntensity, 0, 2);
     }
     applyHighContrastToScene(highContrastEnabled);
+    _applySun();
     for (const material of pickupEmissiveMaterials) {
       if (!material || typeof material.emissiveIntensity !== 'number') continue;
       const base = material.userData?.baseEmissiveIntensity ?? material.emissiveIntensity;
       material.emissiveIntensity = base * pickupBrightness;
       material.needsUpdate = true;
     }
+  };
+
+  // Town's sun: where it is in the sky (the light's offset from the player — the shadow-follow
+  // block before the render uses it) and how bright / warm it is, from the town clock's hour.
+  // null = no sun cycle (every other mode): the fixed offset, white light, full sky
+  let _sunHour = null;
+  let _sunNightLevel = 0; // Town's twilight: 0 day … 1 night (TWILIGHT_H in townConfig.js)
+  // The active map's water materials (sea / lakes — MapLoader's createWaterMaterial, uBrightness)
+  let _waterMatsOf = null;
+  let _waterMats = [];
+  const _mapWaterMaterials = () => {
+    if (_waterMatsOf === _activeMap) return _waterMats;
+    _waterMatsOf = _activeMap;
+    _waterMats = [];
+    _activeMap?.group.traverse((o) => {
+      if ((o.name === 'sea' || o.name === 'water') && o.material?.uniforms?.uBrightness) _waterMats.push(o.material);
+    });
+    return _waterMats;
+  };
+  const _sunOffset = SHADOW_LIGHT_OFFSET.clone();
+  const _sunWhite = new THREE.Color(0xffffff);
+  const _applySun = () => {
+    // (the water: dimmed with the night, whatever else applies)
+    const waterK = _sunHour == null ? 1 : 1 - (1 - WATER_NIGHT_BRIGHTNESS) * _sunNightLevel;
+    for (const m of _mapWaterMaterials()) m.uniforms.uBrightness.value = waterK;
+    const off = displaySettings.highContrastMode || _sunHour == null
+      || (lastAutoMode || getAutoMode()) === 'night';
+    if (off) {
+      if (_sunHour == null) _sunOffset.copy(SHADOW_LIGHT_OFFSET);
+      dirLight?.color.copy(_sunWhite);
+      if (scene) scene.backgroundIntensity = 1;
+      return;
+    }
+    const u = clampValue((_sunHour - SUN_RISE_H) / (SUN_SET_H - SUN_RISE_H), 0, 1);
+    const a = Math.PI * u;
+    const up = Math.sin(a); // 0 at the horizon, 1 at midday
+    const elev = Math.max(SUN_MIN_ELEV, up * (Math.PI / 2 - 0.25));
+    const flat = Math.cos(elev);
+    _sunOffset.set(Math.cos(a) * flat, Math.sin(elev), SUN_SOUTH * flat)
+      .normalize().multiplyScalar(SHADOW_LIGHT_OFFSET.length());
+    // (high enough up — a quarter of the way to midday — it's the full day)
+    const k = clampValue(up / 0.5, 0, 1);
+    const ease = k * k * (3 - 2 * k);
+    const tw = 1 - _sunNightLevel; // 0 at the horizon (= night: lights off, black sky) … 1 out of twilight
+    if (dirLight) {
+      dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2) * tw * (SUN_LOW_LIGHT + (1 - SUN_LOW_LIGHT) * ease);
+      dirLight.color.copy(SUN_LOW_COLOR).lerp(_sunWhite, ease);
+    }
+    if (ambientLight) {
+      ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2) * tw * (SUN_LOW_AMBIENT + (1 - SUN_LOW_AMBIENT) * ease);
+    }
+    if (scene) scene.backgroundIntensity = tw * (SUN_LOW_SKY + (1 - SUN_LOW_SKY) * ease);
+  };
+  const setSunHour = (h, nightLevel = 0) => {
+    _sunHour = Number.isFinite(h) ? h : null;
+    _sunNightLevel = _sunHour == null ? 0 : clampValue(Number(nightLevel) || 0, 0, 1);
+    _applySun();
   };
 
   const applyRendererPerformanceSettings = () => {
@@ -8859,13 +8931,15 @@ async function initCore(runtimeContext) {
       c.y = b.min.y + (b.max.y - b.min.y) * ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset;
       return c;
     }),
-    // The lamps' glass glows (the emissive map is made the first time; off = intensity 0)
-    setRoadLampsLit: (on) => {
+    // The lamps' glass glows, `level` 0 (off) … 1 (night) — fading through twilight (the
+    // emissive map is made the first time; off = intensity 0)
+    setRoadLampsLit: (level) => {
+      const k = Math.max(0, Math.min(1, Number(level) || 0));
       const lamps = _mapRoadLamps();
-      if (on && !_roadLampsGlowing) { lamps.forEach(_addRoadLightGlow); _roadLampsGlowing = true; }
+      if (k > 0 && !_roadLampsGlowing) { lamps.forEach(_addRoadLightGlow); _roadLampsGlowing = true; }
       for (const o of lamps) {
         o.traverse((m) => {
-          if (m.isMesh && m.material?.userData.roadLightGlow) m.material.emissiveIntensity = on ? ROAD_LIGHT_GLOW.intensity : 0;
+          if (m.isMesh && m.material?.userData.roadLightGlow) m.material.emissiveIntensity = ROAD_LIGHT_GLOW.intensity * k;
         });
       }
     },
@@ -8898,6 +8972,7 @@ async function initCore(runtimeContext) {
       _teleportPlayer(x, z, yaw);
     },
     setPositionConstraint: (fn) => { if (playerControls) playerControls.positionConstraint = fn; },
+    setSunHour,
     setTimeOfDay: (mode) => {
       lastAutoMode = mode;
       applyPresetForMode(mode);
@@ -9110,17 +9185,24 @@ async function initCore(runtimeContext) {
   // Town at night, out past the houses (town.wantsLantern): a lantern on the player's left
   // hand — the game 'right' floating hand (labels are mirrored); with `lanternHeld` set,
   // updateProceduralPlayerRig poses that arm for it and grips weapons with the other hand only
+  // Its light fades in / out over LANTERN_FADE_S (still held while it fades out)
+  const LANTERN_FADE_S = 1.2;
   let _townLantern = null;
-  const _updateTownLantern = () => {
+  let _townLanternLevel = 0;
+  const _updateTownLantern = (dt) => {
     const want = !!(playerModel && town?.wantsLantern() && !playerDead);
-    if (playerModel) playerModel.userData.lanternHeld = want;
-    if (!want && !_townLantern) return;
+    const step = (Number.isFinite(dt) ? dt : 0) / LANTERN_FADE_S;
+    _townLanternLevel = want ? Math.min(1, _townLanternLevel + step) : Math.max(0, _townLanternLevel - step);
+    if (!town?.isActive() || playerDead) _townLanternLevel = 0;
+    const held = want || _townLanternLevel > 0;
+    if (playerModel) playerModel.userData.lanternHeld = held;
+    if (!held && !_townLantern) return;
     if (!_townLantern) _townLantern = createLantern();
-    const hand = want ? playerModel.children.find((c) => c.userData?.proceduralHand === 'right') : null;
+    const hand = held ? playerModel.children.find((c) => c.userData?.proceduralHand === 'right') : null;
     if (hand && _townLantern.group.parent !== hand) hand.add(_townLantern.group);
     // (the light stays put while Town is on, dark, so it doesn't recompile the scene's shaders)
     if (!town?.isActive() && _townLantern.group.parent) _townLantern.group.parent.remove(_townLantern.group);
-    if (_townLantern.isLit() !== want) _townLantern.setLit(want);
+    _townLantern.setLit(held, _townLanternLevel * _townLanternLevel * (3 - 2 * _townLanternLevel));
   };
   // Where the sea start's guest stepped ashore ({ x, z, yaw }): Town starts there, not at its spawn
   let _townArrival = null;
@@ -10613,7 +10695,7 @@ async function initCore(runtimeContext) {
     village?.update(frameDelta);
     // Town mode: the townsfolk, the clock, the law
     town?.update(frameDelta);
-    _updateTownLantern();
+    _updateTownLantern(frameDelta);
     // The guest's sea start: the canoe on the sea, the player in it
     seaStart?.update(frameDelta);
     // Ships on the sea bob on the swell
@@ -10622,12 +10704,14 @@ async function initCore(runtimeContext) {
     deathCarry?.update(frameDelta);
     // Shadows: the sun's shadow box follows the player (snapped to whole shadow-map texels so
     // the shadow edges don't shimmer as they move)
-    if (dirLight?.castShadow && playerModel) {
-      const texel = (SHADOW_HALF_SIZE * 2) / dirLight.shadow.mapSize.x;
-      const fx = Math.round(playerModel.position.x / texel) * texel;
-      const fz = Math.round(playerModel.position.z / texel) * texel;
+    // (the light's offset is the sun's — it moves through Town's day — so it follows the player
+    // with or without shadows)
+    if (dirLight && playerModel) {
+      const texel = dirLight.castShadow ? (SHADOW_HALF_SIZE * 2) / dirLight.shadow.mapSize.x : 0;
+      const fx = texel ? Math.round(playerModel.position.x / texel) * texel : playerModel.position.x;
+      const fz = texel ? Math.round(playerModel.position.z / texel) * texel : playerModel.position.z;
       dirLight.target.position.set(fx, playerModel.position.y, fz);
-      dirLight.position.set(fx, playerModel.position.y, fz).add(SHADOW_LIGHT_OFFSET);
+      dirLight.position.set(fx, playerModel.position.y, fz).add(_sunOffset);
       dirLight.target.updateMatrixWorld();
     }
     renderer.render(scene, camera);

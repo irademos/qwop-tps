@@ -1,5 +1,6 @@
 // Town: its lights. At night the map's road lamps glow (the game lights their glass —
-// ctx.setRoadLampsLit) and the campfires' ground glow spreads (TOWN_FIRE_GLOW_NIGHT). Real
+// ctx.setRoadLampsLit(level)) and the campfires' ground glow spreads (TOWN_FIRE_GLOW_NIGHT),
+// all fading in / out with the twilight (T.nightLevel). Real
 // light comes from a few point lights (TOWN_LIGHT_SLOTS) given to the lamps / fires nearest the
 // player, fading over as the player walks; the fires keep theirs, dimmer, by day. The lights
 // stay in the scene (intensity 0 when off) while Town is on, so nothing recompiles the
@@ -15,7 +16,7 @@ import {
 export function installTownLights(T, ctx) {
   let slots = null;   // [{ light, spot, level }]
   let spots = null;   // [{ kind: 'lamp' | 'fire', x, y, z, fire? }]
-  let lampsLit = false;
+  let lampsLevel = 0;
 
   const buildSpots = () => {
     spots = [];
@@ -44,16 +45,20 @@ export function installTownLights(T, ctx) {
   T.resetLights = () => {
     for (const s of slots ?? []) { s.light.intensity = 0; s.spot = null; s.level = 0; }
     for (const sp of spots ?? []) if (sp.fire) sp.fire.glow.scale.setScalar(1);
-    if (lampsLit) { lampsLit = false; ctx.setRoadLampsLit?.(false); }
+    if (lampsLevel) { lampsLevel = 0; ctx.setRoadLampsLit?.(0); }
   };
 
   const _want = new Set();
   T.updateLights = (dt) => {
     if (!slots || !T.layout) return;
     if (!spots) buildSpots();
-    const night = !!T.isNight;
-    if (night !== lampsLit) { lampsLit = night; ctx.setRoadLampsLit?.(night); }
-    for (const sp of spots) if (sp.fire) sp.fire.glow.scale.setScalar(night ? TOWN_FIRE_GLOW_NIGHT : 1);
+    // (0 day … 1 night; the lamps' glass is only re-set as it changes — through twilight)
+    const level = T.nightLevel ?? (T.isNight ? 1 : 0);
+    if (Math.abs(level - lampsLevel) > 0.01 || (level !== lampsLevel && (level === 0 || level === 1))) {
+      lampsLevel = level;
+      ctx.setRoadLampsLit?.(level);
+    }
+    for (const sp of spots) if (sp.fire) sp.fire.glow.scale.setScalar(1 + (TOWN_FIRE_GLOW_NIGHT - 1) * level);
     // Which spots get a light: the nearest lit ones (none while the player's in a house's room)
     _want.clear();
     if (!T.inRoom) {
@@ -61,7 +66,7 @@ export function installTownLights(T, ctx) {
       const max2 = TOWN_LIGHT_MAX_DIST * TOWN_LIGHT_MAX_DIST;
       const near = [];
       for (const sp of spots) {
-        if (!night && sp.kind === 'lamp') continue;
+        if (!level && sp.kind === 'lamp') continue;
         const d2 = (sp.x - p.x) ** 2 + (sp.z - p.z) ** 2;
         if (d2 <= max2) near.push([d2, sp]);
       }
@@ -97,9 +102,9 @@ export function installTownLights(T, ctx) {
       if (s.spot.kind === 'fire') {
         const t = T.simT;
         const flicker = 0.85 + Math.sin(t * 11) * 0.08 + Math.sin(t * 7.3 + 1) * 0.07;
-        s.light.intensity = TOWN_FIRE_LIGHT.intensity * flicker * (night ? 1 : TOWN_FIRE_LIGHT.day) * s.level;
+        s.light.intensity = TOWN_FIRE_LIGHT.intensity * flicker * (TOWN_FIRE_LIGHT.day + (1 - TOWN_FIRE_LIGHT.day) * level) * s.level;
       } else {
-        s.light.intensity = TOWN_LAMP_LIGHT.intensity * s.level;
+        s.light.intensity = TOWN_LAMP_LIGHT.intensity * level * s.level;
       }
     }
   };

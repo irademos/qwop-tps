@@ -991,6 +991,7 @@ uniform vec3  uShallowColor;
 uniform vec3  uDeepColor;
 uniform float uOpacity;
 uniform float uTime;
+uniform float uBrightness;
 varying vec3  vWorld;
 #include <fog_pars_fragment>
 
@@ -1009,6 +1010,7 @@ void main() {
 
   float shimmer = max(0.0, sin(wuv.x * 6.0 + uTime * 3.5) * sin(wuv.y * 5.0 - uTime * 2.5));
   color += shimmer * 0.07;
+  color *= uBrightness;
 
   gl_FragColor = vec4(color, uOpacity);
   #include <fog_fragment>
@@ -1030,6 +1032,7 @@ export function createWaterMaterial(): THREE.ShaderMaterial {
       uShallowColor: { value: new THREE.Color('#7ec8e3') },
       uDeepColor:    { value: new THREE.Color('#1a5b8e') },
       uOpacity:      { value: 0.78 },
+      uBrightness:   { value: 1 },   // × the colour (the game dims it at night)
     },
     transparent: true,
     depthWrite:  false,

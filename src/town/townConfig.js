@@ -43,10 +43,15 @@ export const MINUTES_PER_SEC = 3;
 export const START_MINUTES = 8 * 60;
 export const NIGHT_FROM_H = 21;
 export const NIGHT_TO_H = 5.5;
+// Twilight: for this many hours before night / after it the town darkens / brightens
+// (T.nightLevel 0 → 1): the sun and sky (bootstrapGameApp.js), the sea, the road lamps and
+// the campfires' glow fade with it, so nothing jumps at NIGHT_FROM_H / NIGHT_TO_H
+export const TWILIGHT_H = 1.5;
 // At night the player takes a lantern out (bootstrapGameApp.js) once this far from the nearest
 // house (m, past its edge), and puts it away again back within LANTERN_PUT_AWAY_DIST
 export const LANTERN_DIST = 12;
 export const LANTERN_PUT_AWAY_DIST = 9;
+export const LANTERN_FROM_DARK = 0.35;      // T.nightLevel from which it comes out (dusk / dawn)
 // Town's lights (townLights.js): the map's road lamps glow at night, and the nearest of them
 // and the campfires get one of TOWN_LIGHT_SLOTS real point lights (each costs every lit
 // material per pixel, so not one a lamp); the fires' are lit by day too, dimmer
