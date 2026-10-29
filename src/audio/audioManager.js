@@ -73,7 +73,7 @@ export class AudioManager {
     this.masterVolume = options.masterVolume ?? 1;
     this.sfxVolume = options.sfxVolume ?? 1.0;
     this.musicVolume = options.musicVolume ?? 0.05;
-    this.voiceVolume = options.voiceVolume ?? 1;
+    this.voiceVolume = options.voiceVolume ?? 0.5;
 
     // The listener (setListener, every frame): where sounds are heard from (the player) and
     // the camera's right, for left / right panning

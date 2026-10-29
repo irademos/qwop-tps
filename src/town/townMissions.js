@@ -527,7 +527,7 @@ export function installTownMissions(T, ctx) {
       };
       T.jobTalk.open({
         who, sub: j.title, text: lines[j.kind] ?? 'You did it! Here, this is yours.', reward: `Reward: ${reward}`,
-        choices: [{ label: 'Take the reward', primary: true, onClick: () => {
+        choices: [{ label: 'Take the reward', primary: true, act: true, onClick: () => {
           if (j.kind === 'debt') T.npcMoney(n, Math.max(0, (j.data.collected ?? 0) - j.reward.coins));
           const next = completeJob(j);
           if (next && next.giverId === n.id) {
@@ -542,7 +542,7 @@ export function installTownMissions(T, ctx) {
       T.jobTalk.open({
         who, sub: j.title, text: j.desc, reward: `Reward: ${rewardText(j.reward)}`,
         choices: full
-          ? [{ label: `You have ${MAX_ACTIVE_JOBS} jobs on — later`, primary: false }]
+          ? [{ label: `You have ${MAX_ACTIVE_JOBS} jobs on — later`, primary: false, act: true }]
           : [{ label: 'I\'ll do it', primary: true, onClick: () => acceptJob(j) }, { label: 'Not right now', primary: false }],
       });
       return;
@@ -551,17 +551,17 @@ export function installTownMissions(T, ctx) {
     const d = j.data;
     const choices = [];
     if (j.kind === 'deliver' && d.toId === n.id && T.goods[d.good] >= d.n) {
-      choices.push({ label: `Give ${d.n} ${GOODS[d.good].emoji}`, primary: true, onClick: () => {
+      choices.push({ label: `Give ${d.n} ${GOODS[d.good].emoji}`, primary: true, act: true, onClick: () => {
         if (T.goods[d.good] < d.n) return;
         T.goods[d.good] -= d.n;
         T.renderGoods();
         completeJob(j);
       } });
     } else if (j.kind === 'returnTo' && d.toId === n.id && T.strongboxHeld) {
-      choices.push({ label: 'Hand over the strongbox', primary: true, onClick: () => { T.strongboxHeld = false; completeJob(j); } });
+      choices.push({ label: 'Hand over the strongbox', primary: true, act: true, onClick: () => { T.strongboxHeld = false; completeJob(j); } });
     }
     choices.push({ label: 'I\'m on it', primary: !choices.length });
-    if (!j.chain || j.chain.step === 0) choices.push({ label: 'Drop the job', primary: false, onClick: () => abandonJob(j) });
+    if (!j.chain || j.chain.step === 0) choices.push({ label: 'Drop the job', primary: false, act: true, onClick: () => abandonJob(j) });
     T.jobTalk.open({ who, sub: j.title, text: `How's it going? (${jobProgress(j)})`, choices });
   };
   // Saved jobs back (raids are re-planned for the next night)

@@ -432,16 +432,16 @@ export function installTownBandits(T, ctx) {
     const coins = Math.min(t.coins, ctx.getCoins());
     const who = firstName(n.name);
     T.talking = { npc: n };
-    const run = { label: 'Run away', onClick: () => { t.answer = 'run'; } };
+    const run = { label: 'Run away', act: true, onClick: () => { t.answer = 'run'; } };
     if (coins <= 0) {
       T.jobTalk.open({ who, sub: 'Hold-up', text: pickOf(HOLDUP_BROKE), choices: [
-        { label: 'Turn out your empty pockets', primary: true, onClick: () => { t.answer = 'broke'; } }, run,
+        { label: 'Turn out your empty pockets', primary: true, act: true, onClick: () => { t.answer = 'broke'; } }, run,
       ] });
       return;
     }
     T.jobTalk.open({
       who, sub: 'Hold-up', text: fillLine(pickOf(HOLDUP_ASK[t.camp ? 'camp' : 'night']), { c: coins }),
-      choices: [{ label: `Pay ${coins} coins`, primary: true, onClick: () => {
+      choices: [{ label: `Pay ${coins} coins`, primary: true, act: true, onClick: () => {
         t.answer = 'paid';
         const took = Math.min(coins, ctx.getCoins());
         if (took <= 0) return;

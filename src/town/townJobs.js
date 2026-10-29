@@ -68,11 +68,12 @@ export const CHAINS = [
 // ── The talk: every conversation with a townsperson — small talk, a job offered / taken
 // back done, the first day's goals — shown as a subtitle at the bottom of the screen (their
 // name, coloured by their mood toward the player, and the line) with the player's replies under it ──
-// open({ who, sub, text, reward, choices: [{ label, primary, onClick }] }) / close() /
+// open({ who, sub, text, reward, choices: [{ label, primary, act, onClick }] }) / close() /
 // isOpen() / pressFirst() (E / Enter / the phone's interact). mood(): 'bad' | 'low' | 'mid' |
 // 'good' for the name's colour. speak(text, { who, reply, interrupt }): read a line out (their
 // line as it opens — cutting off what was being said, unless it answers the player's reply —
-// and the player's reply as it's picked). onEnd: the talk's over — closed, or a choice picked that didn't
+// and the player's reply as it's picked; a choice with `act` — Give 5, Take the reward, Pay… — is
+// something done, not said: not read out, it only cuts off their line). onEnd: the talk's over — closed, or a choice picked that didn't
 // open another line. (`sub` — what it's about — is left off: the line says it.)
 export function createJobTalk(parent, { onEnd, mood, speak } = {}) {
   let model = null;
@@ -92,7 +93,8 @@ export function createJobTalk(parent, { onEnd, mood, speak } = {}) {
   };
   // (a choice may open the next line; the talk only ends if it didn't)
   const choose = (c) => {
-    if (c?.label) speak?.(c.label, { reply: true, interrupt: true });
+    if (c?.label && !c.act) speak?.(c.label, { reply: true, interrupt: true });
+    else speak?.('', { stop: true });
     hide();
     replying = true;
     try { c?.onClick?.(); } finally { replying = false; }

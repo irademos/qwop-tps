@@ -343,12 +343,13 @@ export function createTownMode(ctx) {
     if (jobTalk.isOpen() && T.talking?.npc !== n) return;
     speech.say(text, {
       key: n.name, kind: voiceKind(n), at: voiceAt(n), priority: 'ambient',
-      volume: big ? 1 : 0.85, falloff: big ? { ref: 6, max: SPEECH_SHOUT_DIST } : { ref: 3, max: SPEECH_DIST },
+      volume: big ? 1 : 0.85, falloff: big ? { ref: 4, rolloff: 1, max: SPEECH_SHOUT_DIST } : { ref: 2, rolloff: 1.3, max: SPEECH_DIST },
     });
   };
   // A line of the talk box (townJobs.js): theirs (`who`), or the player's reply
   const playerVoiceKind = () => (ctx.getPlayerCharacterUrl?.() === glbCharacterConfig.villageGirlUrl ? 'female' : 'male');
-  const speakTalk = (text, { who, reply = false, interrupt = false } = {}) => {
+  const speakTalk = (text, { who, reply = false, interrupt = false, stop = false } = {}) => {
+    if (stop) { speech.stop(); return; }
     if (reply) {
       speech.say(text, { key: `player:${ctx.getPlayerName()}`, kind: playerVoiceKind(), priority: 'talk', interrupt });
       return;
@@ -358,7 +359,7 @@ export function createTownMode(ctx) {
       : T.npcs.find((x) => x.alive && firstName(x.name) === first);
     speech.say(text, {
       key: n?.name ?? first, kind: n ? voiceKind(n) : 'male', at: n ? voiceAt(n) : null,
-      priority: 'talk', interrupt, falloff: { ref: 5, max: 40 },
+      priority: 'talk', interrupt, falloff: { ref: 3, rolloff: 1, max: 30 },
     });
   };
 

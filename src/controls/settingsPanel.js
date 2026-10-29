@@ -410,9 +410,9 @@ function buildDisplayPanel() {
   musicVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedMusicVol) ? savedMusicVol : 0.05) * 100)}%`;
   sfxVolumeField.input.value = `${Number.isFinite(savedSfxVol) ? savedSfxVol : 1}`;
   sfxVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedSfxVol) ? savedSfxVol : 1) * 100)}%`;
-  const savedVoiceVol = parseFloat(localStorage.getItem('sq:voiceVolume') ?? '1');
-  voiceVolumeField.input.value = `${Number.isFinite(savedVoiceVol) ? savedVoiceVol : 1}`;
-  voiceVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedVoiceVol) ? savedVoiceVol : 1) * 100)}%`;
+  const savedVoiceVol = parseFloat(localStorage.getItem('sq:voiceVolume') ?? '0.5');
+  voiceVolumeField.input.value = `${Number.isFinite(savedVoiceVol) ? savedVoiceVol : 0.5}`;
+  voiceVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedVoiceVol) ? savedVoiceVol : 0.5) * 100)}%`;
 
   const cameraSectionTitle = createElement('h3', 'settings-section-title', 'Camera');
   // key → { field, input, valueLabel? } (toggles: checkbox input, sliders: range input)

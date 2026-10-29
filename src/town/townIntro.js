@@ -251,7 +251,7 @@ export function installTownIntro(T, ctx) {
       const tipLine = (k) => `${fill(tips[k % tips.length], s, n)}`;
       const show = (k) => {
         const choices = [{ label: n.guiding ? 'Lead on' : 'Thanks', primary: true }];
-        if (tips.length > 1) choices.push({ label: 'Another tip', onClick: () => { if (n.alive) show(k + 1); } });
+        if (tips.length > 1) choices.push({ label: 'Another tip', act: true, onClick: () => { if (n.alive) show(k + 1); } });
         T.jobTalk.open({
           who: firstName(n.name), sub: `First day: ${s.title}`,
           text: tips.length ? tipLine(k) : fill(s.progress ?? s.title, s, n),

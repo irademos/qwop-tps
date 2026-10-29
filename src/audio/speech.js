@@ -10,7 +10,7 @@
 //               the answer to it);
 //   'ambient' — someone near the player talking: only when nothing else is being said (dropped
 //               otherwise — the town doesn't queue up chatter).
-// Volume is set once a line starts (the API can't change it mid-line).
+// Volume is set when a line is asked for (the API can't change it mid-line).
 
 import { distanceGain } from './audioManager.js';
 
@@ -41,7 +41,8 @@ const speakable = (text) => String(text ?? '')
   .replace(/\s+/g, ' ')
   .trim();
 
-const STUCK_MS = 20000; // a line that never reported its end is forgotten after this
+const STUCK_MS = 20000;    // the longest a line that never reported its end is waited on
+const CANCEL_GAP_MS = 120; // after a cancel, before the next line starts
 
 export function createSpeech({ audio = () => window.audioManager } = {}) {
   const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
@@ -65,16 +66,38 @@ export function createSpeech({ audio = () => window.audioManager } = {}) {
     synth.addEventListener?.('voiceschanged', loadVoices);
   }
 
-  // The lines said / waiting (kept referenced so their end events fire — a Chrome quirk)
-  const live = new Set();
-  const prune = () => {
-    const now = performance.now();
-    for (const e of live) if (now - e.at > STUCK_MS) live.delete(e);
+  // Our own queue (the browser's is left with one line at a time): `current` is being said,
+  // `queue` waits. A line started right after synth.cancel() is often dropped silently (Chrome),
+  // so after a cancel the next line waits CANCEL_GAP_MS.
+  const queue = [];
+  let current = null;
+  let gapTimer = 0;
+  const pump = () => {
+    if (current || gapTimer || !queue.length) return;
+    const entry = queue.shift();
+    current = entry;
+    const finish = () => {
+      clearTimeout(entry.stuck);
+      if (current !== entry) return;
+      current = null;
+      pump();
+    };
+    entry.u.onend = finish;
+    entry.u.onerror = finish;
+    // (a line that never reports its end — it happens — is given up on)
+    entry.stuck = setTimeout(finish, Math.min(STUCK_MS, 3000 + entry.u.text.length * 110 / entry.u.rate));
+    if (synth.paused) synth.resume(); // (Chrome can be left paused)
+    synth.speak(entry.u);
   };
-  const cancelAll = () => {
-    live.clear();
+  const cancelAll = ({ keepQueue = false } = {}) => {
+    if (!keepQueue) queue.length = 0;
+    if (current) clearTimeout(current.stuck);
+    current = null;
     synth.cancel();
+    clearTimeout(gapTimer);
+    gapTimer = setTimeout(() => { gapTimer = 0; pump(); }, CANCEL_GAP_MS);
   };
+  const busy = () => !!current || queue.length > 0 || !!gapTimer;
 
   /**
    * A speaker's voice: `key` (a stable id — their name), `kind` ('female' | 'male' | 'kid' |
@@ -107,27 +130,23 @@ export function createSpeech({ audio = () => window.audioManager } = {}) {
     const dist = at && am?.distanceTo ? am.distanceTo(at) : 0;
     const level = (am ? (am.masterVolume ?? 1) * (am.voiceVolume ?? 1) : 1) * volume * distanceGain(dist, falloff);
     if (level < 0.02) return false;
-    prune();
-    if (priority === 'ambient') {
-      if (live.size || synth.speaking || synth.pending) return false;
-    } else if (interrupt || [...live].some((e) => e.priority === 'ambient')) {
-      cancelAll();
-    } else if (!live.size && (synth.speaking || synth.pending)) {
-      synth.cancel(); // (something we lost track of)
-    }
     const v = voiceFor(key, kind);
     const u = new Utterance(words);
     if (v.voice) { u.voice = v.voice; u.lang = v.voice.lang; }
     u.pitch = v.pitch;
     u.rate = v.rate;
     u.volume = Math.max(0, Math.min(1, level));
-    const entry = { u, priority, at: performance.now() };
-    const done = () => live.delete(entry);
-    u.onend = done;
-    u.onerror = done;
-    live.add(entry);
-    if (synth.paused) synth.resume(); // (Chrome can be left paused)
-    synth.speak(u);
+    const entry = { u, priority, stuck: 0 };
+    if (priority === 'ambient') {
+      if (busy() || synth.speaking) return false;
+    } else if (interrupt) {
+      if (current || synth.speaking || synth.pending) cancelAll();
+      else queue.length = 0;
+    } else if (current?.priority === 'ambient') {
+      cancelAll({ keepQueue: true });
+    }
+    queue.push(entry);
+    pump();
     return true;
   };
 
@@ -136,9 +155,10 @@ export function createSpeech({ audio = () => window.audioManager } = {}) {
     say,
     voiceFor,
     /** Stop everything being said (leaving a mode, a talk closed). */
-    stop: () => { if (supported && (live.size || synth.speaking || synth.pending)) cancelAll(); },
+    // (a line asked for straight after still waits out the cancel gap)
+    stop: () => { if (supported && (busy() || synth.speaking || synth.pending)) cancelAll(); },
     /** Stop only if what's being said is ambient chatter. */
-    stopAmbient: () => { if (supported && [...live].some((e) => e.priority === 'ambient')) cancelAll(); },
-    isSpeaking: () => supported && (live.size > 0 || synth.speaking),
+    stopAmbient: () => { if (supported && current?.priority === 'ambient') cancelAll({ keepQueue: true }); },
+    isSpeaking: () => supported && (busy() || synth.speaking),
   };
 }

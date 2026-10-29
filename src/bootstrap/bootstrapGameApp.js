@@ -739,11 +739,11 @@ async function initCore(runtimeContext) {
 
   const _savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0.05');
   const _savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
-  const _savedVoiceVol = parseFloat(localStorage.getItem('sq:voiceVolume') ?? '1');
+  const _savedVoiceVol = parseFloat(localStorage.getItem('sq:voiceVolume') ?? '0.5');
   const audioManager = createAudioManager({
     musicVolume: Number.isFinite(_savedMusicVol) ? _savedMusicVol : 0.05,
     sfxVolume: Number.isFinite(_savedSfxVol) ? _savedSfxVol : 1,
-    voiceVolume: Number.isFinite(_savedVoiceVol) ? _savedVoiceVol : 1
+    voiceVolume: Number.isFinite(_savedVoiceVol) ? _savedVoiceVol : 0.5
   });
   runtimeContext.systems.audioManager = audioManager;
   window.audioManager = audioManager;
