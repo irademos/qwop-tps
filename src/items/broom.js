@@ -17,8 +17,9 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // same however the phone is held. The drift eases toward that (ACCEL) and the broom turns
 // toward the way it's drifting (TURN_RATE), so a held sideways tilt flies a circle. Leaning back
 // (more than TURN_MAX_ANGLE from forward) turns it round: the way behind it then is locked in
-// (`backDir`) and it turns toward that (U_TURN_RATE), slow at first (BACK_SPEED), then flying on
-// that way for as long as the lean is held back. The camera eases round behind it (CAM_FOLLOW),
+// (`backDir`) and it turns toward that (U_TURN_RATE), slow at first (BACK_SPEED). Once round,
+// that's its new forward: after U_TURN_HOLD_S of drifting on, a lean still held back is
+// backward again and it turns round again. The camera eases round behind it (CAM_FOLLOW),
 // waiting a moment after the player turns it by hand, and draws back with the speed
 // (CAM_BACK + CAM_BACK_PER_SPEED — controls.js `ride.camDist`). The joystick / WASD lean it the same way (the only way
 // without a gyro). The player's controls stand still meanwhile (`holdStill`, `ride` —
@@ -46,6 +47,7 @@ const TURN_MIN_SPEED = 0.35;               // m/s — slower: it doesn't turn
 const TURN_MAX_ANGLE = 1.9;                 // rad — leaning further back than this: turning round
 const U_TURN_RATE = 1.7;                   // rad/s turning round
 const BACK_RELEASE = 0.15;                 // the lean's back part under this: done turning round
+const U_TURN_HOLD_S = 0.6;                 // s round before a lean still held back turns it again
 const TILT_DEAD = 0.1;                     // sin of the tilt — under this, no lean
 const TILT_FULL = 0.5;                     // full lean (~30°)
 const LOOK_AHEAD = [0.6, 1.4];             // s of drift ahead whose ground it rises for
@@ -256,7 +258,7 @@ export function createBroomRide(ctx) {
   let riding = false;
   let broom = null;            // the model under the rider (loaded on the first ride)
   let loading = false;
-  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, dt: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0, backDir: null, camDist: 0 };
+  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, dt: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 };
   let trail = null;            // the boost's purple streams (made on the first boost)
   let boosting = false;
   let boostPaid = 0;           // s of boost paid for (BOOST_MANA_PER_S a second, ahead)
@@ -277,7 +279,7 @@ export function createBroomRide(ctx) {
     const c = ctx.getControls();
     if (riding || !c) return false;
     riding = true;
-    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0, backDir: null, camDist: 0 });
+    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 });
     ride.camDist = 0;
     boosting = false;
     ride.y = st.y;
@@ -377,11 +379,20 @@ export function createBroomRide(ctx) {
       // Leaning back: turning round to fly the way that was behind it
       const lean = Math.hypot(ix, iz);
       const back = lean > 1e-3 && Math.abs(Math.atan2(ix, iz)) > TURN_MAX_ANGLE;
-      if (st.backDir == null && back) st.backDir = wrap(st.yaw + Math.atan2(ix, iz));
-      else if (st.backDir != null && !(iz < -BACK_RELEASE)) st.backDir = null;
+      if (st.backDir == null && back) {
+        st.backDir = wrap(st.yaw + Math.atan2(ix, iz));
+        st.backRoundAt = null;
+      } else if (st.backDir != null && !(iz < -BACK_RELEASE)) st.backDir = null;
       if (st.backDir != null) {
         const d = wrap(st.backDir - st.yaw);
         st.yaw = wrap(st.yaw + Math.sign(d) * Math.min(Math.abs(d), U_TURN_RATE * dt));
+        // (round: that's forward now — a little later, still leaning back turns it again)
+        if (Math.abs(wrap(st.backDir - st.yaw)) < 0.02) {
+          if (st.backRoundAt == null) st.backRoundAt = st.t;
+          else if (st.t - st.backRoundAt > U_TURN_HOLD_S) st.backDir = null;
+        }
+      }
+      if (st.backDir != null) {
         // (slow while it's still facing away, full speed once round)
         const facing = Math.max(0, Math.cos(wrap(st.backDir - st.yaw)));
         const sp = Math.min(1, lean) * top * (BACK_SPEED + (1 - BACK_SPEED) * facing);
