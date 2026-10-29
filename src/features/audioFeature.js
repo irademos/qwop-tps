@@ -1,5 +1,5 @@
 import { AudioManager } from '../audio/audioManager.js';
 
-export function createAudioManager() {
-  return new AudioManager();
+export function createAudioManager(options = {}) {
+  return new AudioManager(options);
 }

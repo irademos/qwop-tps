@@ -385,7 +385,7 @@ export function installTownTrees(T, ctx) {
           t.angle = t.endAngle;
           if (!t.landed) {
             t.landed = true;
-            ctx.playSfx('fell');
+            ctx.playSfx('fell', { x: t.bx + t.dirX * t.height * 0.5, y: t.gy, z: t.bz + t.dirZ * t.height * 0.5 });
             const d = t.height * 0.5;
             burst(t.bx + t.dirX * d, t.gy + 0.2, t.bz + t.dirZ * d, t.dirX, t.dirZ, 10, 1.2);
           }

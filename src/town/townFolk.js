@@ -6,7 +6,7 @@ import { FOOD_IDS, GOOD_IDS } from './townEconomy.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
-  BODY_DIST, BODY_RELEASE_DIST, MERCHANT_START_CASH, SUBTITLE_DIST, SUBTITLE_SHOUT_DIST,
+  BODY_DIST, BODY_RELEASE_DIST, MERCHANT_START_CASH, SPEECH_DIST, SPEECH_SHOUT_DIST,
   HOME_VISIT_CHANCE, MUG_CHANCE, SHOP_BROWSE_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, inHours, pickOf, rand,
 } from './townConfig.js';
 
@@ -309,7 +309,7 @@ export function installTownFolk(T, ctx) {
     }
   };
 
-  // ── Speech bubbles ──
+  // ── Speech (heard — text to speech) ──
   const say = (n, text, { big = false } = {}) => {
     if (text) n.lastSaid = text;
     if (text && mp() && !T.netSaying && mine(n)) {
@@ -317,13 +317,13 @@ export function installTownFolk(T, ctx) {
       if (T.netMode === 'host') T.net.broadcast(msg);
       else T.net.send(T.net.hostId(), msg);
     }
-    // (heard, not drawn over their heads: a subtitle at the bottom of the screen — only from
-    // someone drawn near the player, further for a shout)
+    // (heard, not shown: spoken in their own voice, quieter further off — townMode.js speakNear —
+    // only from someone drawn near the player, further for a shout)
     if (!n.body || !text || n.dying) return;
-    if (distToPlayer(n) > (big ? SUBTITLE_SHOUT_DIST : SUBTITLE_DIST)) return;
-    T.subtitle?.(n.name, text, { big });
+    if (distToPlayer(n) > (big ? SPEECH_SHOUT_DIST : SPEECH_DIST)) return;
+    T.speakNear?.(n, text, { big });
   };
-  // (speech is a subtitle now — townMode.js — nothing hangs over anyone's head)
+  // (speech is heard now — townMode.js — nothing hangs over anyone's head)
   const clearBubble = () => {};
 
   // ── Bodies (level of detail) ──

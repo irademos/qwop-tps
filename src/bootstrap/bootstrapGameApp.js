@@ -739,9 +739,11 @@ async function initCore(runtimeContext) {
 
   const _savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0.05');
   const _savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
+  const _savedVoiceVol = parseFloat(localStorage.getItem('sq:voiceVolume') ?? '1');
   const audioManager = createAudioManager({
     musicVolume: Number.isFinite(_savedMusicVol) ? _savedMusicVol : 0.05,
-    sfxVolume: Number.isFinite(_savedSfxVol) ? _savedSfxVol : 1
+    sfxVolume: Number.isFinite(_savedSfxVol) ? _savedSfxVol : 1,
+    voiceVolume: Number.isFinite(_savedVoiceVol) ? _savedVoiceVol : 1
   });
   runtimeContext.systems.audioManager = audioManager;
   window.audioManager = audioManager;
@@ -8877,6 +8879,7 @@ async function initCore(runtimeContext) {
     // (the market's shop camera frames a counter from where the player stands)
     setPlayerHidden: (hidden) => { playerModel.visible = !hidden; },
     getPlayerName: () => playerName || 'friend',
+    getPlayerCharacterUrl: () => playerModel?.userData?.qwopRig?.characterUrl ?? null, // (the player's voice — townMode.js)
     isPlayerDead: () => playerDead,
     getGroundY: (x, z) => getTerrainHeight(x, z),
     isOverWater: (x, z) => _isOverWater(x, z),
@@ -9037,12 +9040,13 @@ async function initCore(runtimeContext) {
       duelCtx.setControlsLocked(false);
     },
     spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
-    playSfx: (kind) => { // (no coin sound: the coin pop-up shows)
-      if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
-      else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 300 });
+    // (`at`: where it happened — quieter further off, audioManager's distance falloff; none = the player's own)
+    playSfx: (kind, at = null) => { // (no coin sound: the coin pop-up shows)
+      if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: at ? 'town-hit' : 'psw-hit', cooldownMs: 200, at });
+      else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 300, at });
       else if (kind === 'fell') { // (a tree hitting the ground: a low boom under a thump)
-        audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.12, { cooldownKey: 'town-fell', cooldownMs: 600 });
-        audioManager?.playSFX('SFX/Footsteps/Dirt/Dirt Walk 1.ogg', 0.9, { cooldownKey: 'town-fell-thud', cooldownMs: 600 });
+        audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.12, { cooldownKey: 'town-fell', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
+        audioManager?.playSFX('SFX/Footsteps/Dirt/Dirt Walk 1.ogg', 0.9, { cooldownKey: 'town-fell-thud', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
       }
     },
     dropCoins: (pos, n) => {
@@ -10710,6 +10714,12 @@ async function initCore(runtimeContext) {
       dirLight.target.position.set(fx, playerModel.position.y, fz);
       dirLight.position.set(fx, playerModel.position.y, fz).add(_sunOffset);
       dirLight.target.updateMatrixWorld();
+    }
+    // Sounds in the world are heard from the player, panned by the camera's right
+    // (audioManager's distance falloff — playSFX `at`, townsfolk's voices)
+    if (playerModel && audioManager) {
+      const m = camera.matrixWorld.elements;
+      audioManager.setListener(playerModel.position, m[0], m[2]);
     }
     renderer.render(scene, camera);
     const frameTotalMs = performance.now() - frameStartMs;

@@ -168,7 +168,10 @@ export function installTownLife(T, ctx) {
     if ((t.anim === 'chop' || t.anim === 'farm') && n.body && T.simT > n.actionAt) {
       n.actionAt = T.simT + (t.anim === 'chop' ? 2.2 : 3.4) + Math.random();
       n.body.character.playAction(glbCharacterConfig.throwClip);
-      if (t.anim === 'chop' && T.distToPlayer(n) < 14) setTimeout(() => { if (T.active) ctx.playSfx('chop'); }, 450);
+      if (t.anim === 'chop' && T.distToPlayer(n) < 30) {
+        const at = { x: n.x, y: T.groundY(n) + 1, z: n.z };
+        setTimeout(() => { if (T.active) ctx.playSfx('chop', at); }, 450);
+      }
     }
     if (t.type === 'social' && !n.bubble && Math.random() < dt / 9) {
       const others = T.npcs.filter((o) => o !== n && o.alive && o.task?.type === 'social' && o.task.phase === 'do' && dist2(o.x, o.z, n.x, n.z) < 4);

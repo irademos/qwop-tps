@@ -118,7 +118,7 @@ export function installTownWire(T, ctx) {
     if (n.body && T.distToPlayer(n) < 25) {
       const gy = T.groundY(n);
       ctx.spawnBlood(_v.set(n.x, gy + 0.55 * heightScale(n.url), n.z), gy);
-      if (T.distToPlayer(n) < 12) ctx.playSfx('hit');
+      ctx.playSfx('hit', { x: n.x, y: gy + 1, z: n.z });
     }
     n.knock = { vx: dir.x * 3, vz: dir.z * 3, left: 0.25 };
     if (n.hp <= 0) { T.die(n, { by, noCoins: true }); return; }
