@@ -26,7 +26,7 @@ export function installTownTrade(T, ctx) {
     T.renderGoods();
     return got;
   };
-  // Food for health (the goods pill / Settings → Town)
+  // Food for health (the goods pill / the town book)
   const eat = (g) => {
     if (!GOODS[g]?.food || T.goods[g] <= 0 || T.sequence || ctx.isPlayerDead()) return;
     const { health, max } = ctx.getHealth();

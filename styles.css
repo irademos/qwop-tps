@@ -1380,25 +1380,25 @@ body.settings-open #inventory-button {
   color: var(--text);
 }
 
-/* Settings → Town: the player's bag (tap a food to eat) and jobs */
-.town-settings-bag {
+/* The town book's Town page (src/town/townBook.js): the player's bag (tap a food to eat) and jobs */
+.town-book-bag {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
 
-.town-settings-good:disabled { opacity: 1; cursor: default; }
+.town-book-good:disabled { opacity: 1; cursor: default; }
 
-.town-settings-hint { flex-basis: 100%; font-size: 12px; }
+.town-book-hint { flex-basis: 100%; font-size: 12px; }
 
-.town-settings-jobs {
+.town-book-jobs {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-/* Settings → Town: who lives in town and their coins (the richest wears the crown) */
+/* The town book's Town page: who lives in town and their coins (the richest wears the crown) */
 .town-roster-filters {
   display: flex;
   flex-wrap: wrap;
@@ -4535,8 +4535,88 @@ body.town-mode .town-feed { top: calc(80px + env(safe-area-inset-top, 0px)); }
 .town-log-when { font-size: 11px; font-weight: 700; color: var(--text-dim); }
 .town-log-empty { font-size: 13px; color: var(--text-dim); }
 body.settings-open .town-log-btn,
-body.settings-open .town-log { display: none !important; }
-/* Phones: just the day and time up top; the bag and the jobs are in Settings → Town */
+body.settings-open .town-log,
+body.settings-open .town-book-btn,
+body.settings-open .town-book-overlay { display: none !important; }
+/* The town book: 📖 left of 🔔 — the map (live) and the Town page (src/town/townBook.js) */
+.town-book-btn {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  right: calc(114px + env(safe-area-inset-right, 0px));
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text);
+  background: var(--surface-hud);
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+}
+.town-book-btn:hover,
+.town-book-btn.is-active { background: var(--surface-strong); }
+.town-book-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(64px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: var(--scrim);
+  pointer-events: auto;
+}
+.town-book {
+  width: min(720px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  overflow: hidden;
+  animation: village-act-in 0.2s var(--ease);
+}
+.town-book-head { display: flex; align-items: center; gap: 10px; }
+.town-book-title { font: 800 18px var(--font-display); white-space: nowrap; }
+.town-book-tabs { display: flex; gap: 6px; flex: 1; }
+.town-book-close { min-height: 36px; min-width: 36px; padding: 0 10px; }
+.town-book-page { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
+.town-book-page.hidden { display: none; }
+.town-book-map {
+  position: relative;
+  height: min(62vh, 560px);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #2f5a74;
+}
+.town-book-canvas { display: block; touch-action: none; cursor: grab; }
+.town-book-canvas:active { cursor: grabbing; }
+/* + / − / ⌖ over the map's top right corner */
+.town-book-zoom {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.town-book-zoom-btn {
+  width: 38px;
+  height: 38px;
+  min-height: 0;
+  padding: 0;
+  font: 800 20px/1 var(--font-ui);
+}
+.town-book-info { min-height: 18px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+@media (max-width: 520px) {
+  .town-book-title { display: none; }
+  .town-book-map { height: min(54vh, 460px); }
+}
+/* Phones: just the time up top; the bag and the jobs are in the town book's Town page */
 @media (pointer: coarse) {
   .town-top > :not(.town-top-clock) { display: none; }
   .town-hud .town-goods,

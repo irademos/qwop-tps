@@ -116,6 +116,7 @@ import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
 import { installTownCanoe } from './townCanoe.js';
 import { installTownTrees } from './townTrees.js';
+import { installTownBook } from './townBook.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -336,11 +337,12 @@ export function createTownMode(ctx) {
     stars.textContent = '★'.repeat(law.stars) + '☆'.repeat(Math.max(0, 3 - law.stars));
     stars.classList.toggle('town-stars-hunted', law.stars > 0 && law.seen);
   };
-  const clockText = () => {
+  // (the top bar shows just the time — the day is in the town book; the notifications log keeps it)
+  const clockText = ({ day = true } = {}) => {
     const m = Math.floor(clock.minutes) % 1440;
     const hh = String(Math.floor(m / 60)).padStart(2, '0');
     const mm = String(Math.floor(m % 60 / 10) * 10).padStart(2, '0');
-    return `Day ${clock.day} · ${hh}:${mm} ${T.isNight ? '🌙' : '☀️'}`;
+    return `${day ? `Day ${clock.day} · ` : ''}${hh}:${mm} ${T.isNight ? '🌙' : '☀️'}`;
   };
   const hour = () => (clock.minutes % 1440) / 60;
 
@@ -605,7 +607,7 @@ export function createTownMode(ctx) {
     }
     T.nightLevel = nightLevelAt(h);
     ctx.setSunHour?.(h, T.nightLevel);
-    topClock.textContent = clockText();
+    topClock.textContent = clockText({ day: false });
   };
   // From late dusk to early dawn, out past the houses, the player carries a lantern (a little nearer before it's
   // put away again, so it doesn't flicker on the edge)
@@ -825,6 +827,7 @@ export function createTownMode(ctx) {
     unread = 0;
     renderBadge();
     toggleLog(false);
+    T.resetBook();
     T.resetLights();
     ctx.setSunHour?.(null);
     root.parent?.remove(root);
@@ -931,7 +934,7 @@ export function createTownMode(ctx) {
     subtitle,
     actsEl, advanceClock, campChip, campWatch, clock, fade, feedLine, goods, hour, hud, jailChip,
     jobTalk, law, loadPersonal, lockpick, markers, marketPanel, net, netT, pool, renderGoods,
-    renderStars, root, save, soldOut, spawnTown, top, topPlace, tracker, usedNames, worldSnapshot,
+    renderStars, root, save, soldOut, spawnTown, toggleLog, top, topPlace, tracker, usedNames, worldSnapshot,
   });
   installTownLayout(T, ctx);
   installTownFolk(T, ctx);
@@ -953,8 +956,9 @@ export function createTownMode(ctx) {
   installTownFarming(T, ctx);
   installTownTrees(T, ctx);
   installTownCanoe(T, ctx);
+  installTownBook(T, ctx);
 
-  // ── Settings → Town (settingsPanel.js): everyone in town, their coins and a few stats ──
+  // ── The town book's Town page (townBook.js): everyone in town, their coins and a few stats ──
   const TASK_STATUS = {
     work: 'Working', eat: 'Eating', deliver: 'Selling goods', browse: 'Shopping', social: 'By the fire',
     sleep: 'Sleeping', wander: 'Out and about', chat: 'Chatting', talk: 'Talking', follow: 'Following you',
@@ -1002,7 +1006,7 @@ export function createTownMode(ctx) {
         stars: p.stars, status: p.stars > 0 ? 'Wanted' : 'Out and about',
       });
     }
-    // The player's bag (tap a food to eat) and jobs — on phones these live here, not on the HUD
+    // The player's bag (tap a food to eat) and jobs — on phones these live in the book, not on the HUD
     const bag = {
       max: BAG_MAX,
       goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || goods[g] > 0).map((g) => ({
@@ -1014,12 +1018,11 @@ export function createTownMode(ctx) {
       bag, jobs: tracker.entries(),
     };
   };
+  Object.assign(T, { roster, npcStatus });
 
   return {
     enter,
     exit,
-    roster,
-    eat: (g) => { if (T.active && T.ready) T.eat(g); },
     update,
     trySwordHit,
     // Fishing, the line out: the phone's Block bar is a reel ({ reel, cue, text, tension }) — or null

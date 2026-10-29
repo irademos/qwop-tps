@@ -136,7 +136,7 @@ export function createQuestTracker(parent) {
   let key = '';
   let shown = [];
   return {
-    // (what it shows now — also listed in Settings → Town)
+    // (what it shows now — also listed in the town book)
     entries: () => shown,
     // entries: [{ title, progress, icon? }] (📍 being done, ❓ back for the reward)
     render: (entries) => {
