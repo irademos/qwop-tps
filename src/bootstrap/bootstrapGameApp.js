@@ -62,9 +62,10 @@ import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
 import { createSeaStart } from '../town/seaStart.js';
-import { OAR_REST_SWING, OAR_REST_TILT, oarStrokeDuration, oarStrokePose } from '../items/oar.js';
+import { OAR_REST_SWING, OAR_REST_TILT, OAR_TIP_AT, oarGripPoint, oarStrokeDuration, oarStrokePose } from '../items/oar.js';
+import { CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
 import { createBroomRide } from '../items/broom.js';
-import { WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
+import { CANOE_STAND_Z, WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
@@ -168,6 +169,17 @@ const OAR_REST_ZONE = 6 * Math.PI / 180;
 const OAR_REST_FOLLOW_S = 3;
 const OAR_POSE_RATE = 16;  // per s: the oar easing into the stroke's pose
 const OAR_LEAN_RATE = 6;   // per s: the hands moving over to the other side
+// Changing sides takes a moment: the phone tilted over the other way past OAR_SIDE_SWITCH_ROLL
+// for OAR_SIDE_SWITCH_S (till then the oar comes up to straight ahead, lifted), then it swings
+// across at most OAR_SIDE_RATE (pose.s per s — −1 … 1, so a whole crossing takes 2 / that)
+const OAR_SIDE_SWITCH_ROLL = 10 * Math.PI / 180;
+const OAR_SIDE_SWITCH_S = 0.35;
+const OAR_SIDE_RATE = 2.5;
+// The hull the oar is kept out of (player-local, the player standing at CANOE_STAND_Z facing
+// the bow): CANOE_HALF_WIDTH amidships, narrowing to the ends, up to OAR_HULL_GUNWALE over the
+// floor, OAR_HULL_MARGIN to spare — _oarClearHull
+const OAR_HULL_GUNWALE = 0.58;  // m over the floor (canoe.glb's gunwale)
+const OAR_HULL_MARGIN = 0.06;   // m
 // Assisted strokes (OAR_ASSIST; false = the literal oar above, every sweep pushing as it goes).
 // In the air the phone still holds the oar; once the blade's in (tilted over past
 // OAR_ROLL_WATER) and the phone sweeps OAR_ASSIST_COMMIT one way, the game takes the stroke
@@ -3105,29 +3117,71 @@ async function initCore(runtimeContext) {
     if (ot.rest.angleTo(_oarTop) < OAR_REST_ZONE) ot.rest.lerp(_oarTop, 1 - Math.exp(-span / OAR_REST_FOLLOW_S)).normalize();
     const r = Math.abs(roll);
     ot.active = r > OAR_ROLL_DEAD || Math.abs(pitch) > OAR_ROLL_DEAD;
-    // Down into the water with the sideways tilt; back / ahead with the fore / aft one
-    const tilt = r < OAR_ROLL_WATER
-      ? THREE.MathUtils.lerp(OAR_REST_TILT, OAR_WATER_TILT, r / OAR_ROLL_WATER)
-      : THREE.MathUtils.lerp(OAR_WATER_TILT, OAR_DEEP_TILT, Math.min(1, (r - OAR_ROLL_WATER) / (OAR_ROLL_DEEP - OAR_ROLL_WATER)));
+    // Down into the water with the sideways tilt — on the oar's side (tilted the other way it's
+    // waiting to change sides: lifted); back / ahead with the fore / aft one
+    const rs = Math.sign(roll) === live.side ? r : 0;
+    const tilt = rs < OAR_ROLL_WATER
+      ? THREE.MathUtils.lerp(OAR_REST_TILT, OAR_WATER_TILT, rs / OAR_ROLL_WATER)
+      : THREE.MathUtils.lerp(OAR_WATER_TILT, OAR_DEEP_TILT, Math.min(1, (rs - OAR_ROLL_WATER) / (OAR_ROLL_DEEP - OAR_ROLL_WATER)));
     const swing = THREE.MathUtils.clamp(OAR_MID_SWING + pitch * OAR_PITCH_GAIN, -OAR_SWING_BACK, OAR_SWING_AHEAD);
     const k = 1 - Math.exp(-OAR_TILT_FOLLOW * span);
-    if (OAR_ASSIST) _oarAssist(live, roll, r, tilt, swing, k, span, now);
+    if (OAR_ASSIST) _oarAssist(live, roll, rs, tilt, swing, k, span, now);
     else {
       live.pose.tilt += (tilt - live.pose.tilt) * k;
       live.pose.swing += (swing - live.pose.swing) * k;
     }
-    // (which side, smoothly: straight ahead in the middle, all the way out by OAR_ROLL_SIDE —
-    // kept on its side through an assisted stroke)
-    const a = Math.min(1, r / OAR_ROLL_SIDE);
+    // Which side: changed only once the phone's been tilted the other way a moment (kept
+    // through an assisted stroke); straight ahead in the middle, all the way out by
+    // OAR_ROLL_SIDE, and swung across no faster than OAR_SIDE_RATE
     const busy = live.assist && live.assist.mode !== 'armed';
-    live.pose.s += ((busy ? live.side : Math.sign(roll) * a * a * (3 - 2 * a)) - live.pose.s) * k;
-    if (!busy && Math.abs(live.pose.s) > 0.05) live.side = Math.sign(live.pose.s);
+    if (!busy && r > OAR_SIDE_SWITCH_ROLL && Math.sign(roll) !== live.side) {
+      ot.switchAt ??= now;
+      if (now - ot.switchAt >= OAR_SIDE_SWITCH_S) { live.side = Math.sign(roll); ot.switchAt = null; }
+    } else ot.switchAt = null;
+    const a = Math.min(1, rs / OAR_ROLL_SIDE);
+    const sGo = ((busy ? 1 : a * a * (3 - 2 * a)) * live.side - live.pose.s) * k;
+    live.pose.s += THREE.MathUtils.clamp(sGo, -OAR_SIDE_RATE * span, OAR_SIDE_RATE * span);
     if (ot.active) _oarStroke = null;
   };
   // (in place) The oar's hold for the stroke going on (or at rest, lifted beside the hull on
   // its side): the blade's way from the top hand eased toward the stroke's pose, crossing over
   // the canoe lifted when it changes sides; the hands go out over that side (FoamSword.oarLean)
   const _oarPoseV = new THREE.Vector3(1, -0.5, 0).normalize();
+  // (in place) Keeps the blade out of the hull: the blade's way (unit, player-local) lifted out
+  // over the side (side: 1 left, −1 right) just as far as it takes for every point from the
+  // shaft's middle to the tip to be outside the hull or over its gunwale — the top hand where
+  // FoamSword puts it for that way (oarGripPoint), the oar sized with the character's grip
+  const _hullHand = { x: 0, y: 0, z: 0 };
+  const _hullUp = new THREE.Vector3();
+  const _hullTry = new THREE.Vector3();
+  const _hullSafe = new THREE.Vector3();
+  const _oarInHull = (dir, lean, len) => {
+    oarGripPoint(_hullUp.copy(dir).negate(), lean, _hullHand);
+    for (let i = 0; i <= 5; i++) {
+      const d = len * (0.45 + 0.11 * i);
+      const y = _hullHand.y + dir.y * d;
+      if (y > OAR_HULL_GUNWALE) continue;
+      const zc = CANOE_STAND_Z + _hullHand.z + dir.z * d; // along the canoe (bow +)
+      const along = 1 - (zc / CANOE_HALF_LENGTH) ** 2;
+      if (along <= 0) continue;
+      if (Math.abs(_hullHand.x + dir.x * d) < CANOE_HALF_WIDTH * Math.sqrt(along) + OAR_HULL_MARGIN) return true;
+    }
+    return false;
+  };
+  const _oarClearHull = (dir, lean, side) => {
+    const mesh = foamSword?.heldMesh || foamSword?.mesh;
+    const len = OAR_TIP_AT * (mesh?.scale.x || 1);
+    if (!_oarInHull(dir, lean, len)) return;
+    // (out level over the gunwale, a little up — always clear)
+    _hullSafe.set(side, 0.35, Math.max(0, dir.z) * 0.5).normalize();
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 7; i++) {
+      const t = (lo + hi) / 2;
+      if (_oarInHull(_hullTry.copy(dir).lerp(_hullSafe, t).normalize(), lean, len)) lo = t; else hi = t;
+    }
+    dir.lerp(_hullSafe, hi).normalize();
+  };
   const _oarTarget = new THREE.Vector3();
   const _oarX = new THREE.Vector3();
   const _oarY = new THREE.Vector3();
@@ -3167,6 +3221,7 @@ async function initCore(runtimeContext) {
     }
     _oarPoseV.lerp(_oarTarget, 1 - Math.exp(-OAR_POSE_RATE * dt)).normalize();
     if (foamSword) foamSword.oarLean += (lean - foamSword.oarLean) * (1 - Math.exp(-OAR_LEAN_RATE * dt));
+    _oarClearHull(_oarPoseV, foamSword?.oarLean ?? lean, Math.sign(lean) || _oarSide);
     // (the oar's +Z points to the handle — back up the blade's way; its blade's face fore / aft)
     _oarZ.copy(_oarPoseV).negate();
     _oarY.set(0, 0, 1).addScaledVector(_oarZ, -_oarZ.z);

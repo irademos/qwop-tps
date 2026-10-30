@@ -18,6 +18,22 @@ const BLADE_THICK = 0.014;
 export const OAR_SUPPORT_AT = 0.55; // m down the shaft from the grip: the lower hand
 export const OAR_HAND_OUT = 0.3;    // m out to the side the blade's on: the top hand (FoamSword.oarLean)
 export const OAR_BLADE_AT = SHAFT_LENGTH + BLADE_LENGTH / 2; // m down from the grip: the blade's middle
+export const OAR_TIP_AT = SHAFT_LENGTH + BLADE_LENGTH + BLADE_WIDTH / 2; // m down from the grip: its end
+// Where the top hand holds it (player-local m; FoamSword's oar hold — foamSword.js — and the
+// hull check in bootstrapGameApp.js): out over the side the blade's on (lean −1 … 1, + = the
+// player's left) by OAR_HAND_OUT, raised as the oar tilts away from upright (so the blade comes
+// out of the water when tilted well over), following it forward a little. up: the oar's handle
+// way (unit, player-local — the blade's way negated).
+const OAR_HAND_Y = 0.95;
+const OAR_HAND_LIFT = 0.35;
+const OAR_HAND_Z = 0.32;
+const OAR_HAND_FWD = 0.25;
+export function oarGripPoint(up, lean, out) {
+  out.x = Math.min(1, Math.max(-1, lean)) * OAR_HAND_OUT;
+  out.y = OAR_HAND_Y + OAR_HAND_LIFT * (1 - Math.abs(up.y));
+  out.z = Math.min(0.65, Math.max(0.1, OAR_HAND_Z + up.z * OAR_HAND_FWD));
+  return out;
+}
 
 // ── A paddle stroke: auto-animated (the joystick) — bootstrapGameApp.js ──
 // u: 0…1 through the stroke. The blade's way from the top hand is a tilt from straight down
