@@ -3,15 +3,15 @@
 // canoe. Standing in it (the player held still on its floor — a terrain height override while
 // aboard, the controls' `holdStill` + a position constraint; carried along as it moves and
 // turns) the oar comes out: the sword weapon in oar form (bootstrapGameApp.js / foamSword.js).
-// The phone's tilt holds the oar: its top to one side lowers the blade in there, toward the
-// player / away swings it back / ahead — swept back through the water it paddles forward, ahead
-// backs up (bootstrapGameApp.js / canoeBoat.js). With a fishing rod bought, the rod comes out in the
+// The phone's tilt steers it like a joystick: tipped forward it paddles on, back it backs up,
+// leaned left / right it turns that way, the oar's strokes playing by themselves to fit
+// (bootstrapGameApp.js / canoeBoat.js). With a fishing rod bought, the rod comes out in the
 // canoe too (its weapon button / the phone's): the player turns to face over the side and can
 // fish wherever the canoe is (T.fishAnywhere / T.fishWater — townFishing.js), the canoe coming
 // to rest meanwhile; the oar back, they face the bow again.
 //
 // Paddling and how it moves on the water: canoeBoat.js (shared with the guest's sea start). The
-// joystick / WASD paddle too (forward / back, turn) — without a gyro that's the only way.
+// joystick / WASD steer it the same way — without a gyro that's the only way.
 // It won't go where the water is shallower than CANOE_MIN_DEPTH (runs aground). 🛶 Get out
 // with dry ground within CANOE_SHORE_DIST: the player steps onto it, the canoe stays there
 // (back at its mooring the next time Town opens). Dying / an arrest / leaving Town gets them
@@ -89,7 +89,7 @@ export function installTownCanoe(T, ctx) {
     ctx.setPositionConstraint(pin);
     canoe.facing = 'oar';
     T.feedLine((ctx.hasGyro()
-      ? 'Swing the top of the phone down to the left to paddle on the left, down to the right to paddle on the right — down and back to back-paddle. The harder the swing, the stronger the stroke.'
+      ? 'Tip the phone forward to paddle, back to back up, and lean it left or right to turn. The further you tip it, the harder you paddle.'
       : 'Paddle with W / S or the joystick, turn with A / D.')
       + (ctx.isRodAllowed() ? ' Take the rod out to fish from the canoe.' : ''));
     T.actsAt = 0;

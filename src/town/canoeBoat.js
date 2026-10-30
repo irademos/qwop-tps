@@ -1,40 +1,29 @@
-// The canoe on the water: its model, where it is, and how it moves — paddled by the oar's blade
-// through the water (or the joystick / WASD), slowed by drag, kept off water shallower than
-// CANOE_MIN_DEPTH. Shared by Town's canoe (townCanoe.js — moored by the fishing spot, got in and
-// out of) and the guest's sea start (seaStart.js — out on the open sea).
+// The canoe on the water: its model, where it is, and how it moves — paddled by the steer (the
+// phone's tilt, the joystick or WASD — bootstrapGameApp.js `_getSteer`), slowed by drag, kept off
+// water shallower than CANOE_MIN_DEPTH. Shared by Town's canoe (townCanoe.js — moored by the
+// fishing spot, got in and out of) and the guest's sea start (seaStart.js — out on the open sea).
 //
-// Paddling is the oar's blade swept through the water (held by the phone's tilt — bootstrapGameApp.js;
-// the joystick's strokes are only for the look): a whole stroke's sweep (OAR_STROKE_SWEEP, swept
-// back, all in) pushes the canoe CANOE_STROKE_DV (m/s; swept ahead CANOE_PADDLE_BACK as hard, backing it up) and, since
-// it's off to one side, turns it CANOE_STROKE_TURN (rad/s): a forward stroke on the left drives
-// it forward and a little to the right, on the right forward and a little to the left.
-// With OAR_ASSIST on (bootstrapGameApp.js) the stroke is helped along: it says when its blade's
-// pushing (stroke.water) and is a whole clean sweep, pushing CANOE_ASSIST_PUSH as hard; a forward
-// power stroke hardly turns it (CANOE_ASSIST_TURN), a wide sweep does (CANOE_ASSIST_SWEEP_TURN —
-// stroke.assist.wide); a back one
-// still turns it sharply; and the blade held still in the water (stroke.rudder) slows it and
-// turns it toward that side (CANOE_RUDDER_*). The
-// joystick / WASD paddle too (without a gyro the strokes they show are only for the look). The
-// hull slides along easily and hardly sideways (CANOE_DRAG / CANOE_SIDE_DRAG). Up against the
-// shore or a dock it slides / turns along it, pushed off a little (bump), instead of stopping dead.
+// The steer's forward / back pushes it along (CANOE_STEER_ACCEL; back CANOE_PADDLE_BACK as hard),
+// its left / right turns it (CANOE_STEER_TURN). The oar's strokes play by themselves to fit
+// (bootstrapGameApp.js `_oarPose`); each one surges the push through its pull and eases it
+// between (CANOE_STROKE_SURGE), so the canoe moves with them. The hull slides along easily and
+// hardly sideways (CANOE_DRAG / CANOE_SIDE_DRAG). Up against the shore or a dock it slides / turns
+// along it, pushed off a little (bump), instead of stopping dead.
 //
 // The blade splashes (waterSplash.js): going in and coming out, and drops thrown back off it
 // through the pull (CANOE_SPLASH_EVERY, more for a stronger stroke).
+// (The gyro-held oar that came before, its blade's sweep through the water pushing: docs/archive/canoe-gyro-paddling.md)
 
 import * as THREE from 'three';
 import { createCanoe, CANOE_FLOOR_Y, CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
-import { OAR_STROKE_SWEEP, oarStrokePull } from '../items/oar.js';
+import { oarStrokePull } from '../items/oar.js';
 import { createWaterSplash } from '../items/waterSplash.js';
 import {
-  CANOE_ASSIST_PUSH, CANOE_ASSIST_SWEEP_TURN, CANOE_ASSIST_TURN, CANOE_BACK_TURN, CANOE_BOB, CANOE_DRAG, CANOE_RUDDER_DRAG, CANOE_RUDDER_TURN,
-  CANOE_RUDDER_TURN_PER_SPEED, CANOE_MAX_SPEED, CANOE_MIN_DEPTH, CANOE_PADDLE_BACK, CANOE_SETTLE_DRAG,
-  CANOE_SIDE_DRAG, CANOE_SPLASH_EVERY, CANOE_STAND_Z, CANOE_STEER_ACCEL, CANOE_STEER_TURN, CANOE_STROKE_DV,
-  CANOE_STROKE_TURN, CANOE_TURN_DRAG,
+  CANOE_BOB, CANOE_DRAG, CANOE_MAX_SPEED, CANOE_MIN_DEPTH, CANOE_PADDLE_BACK, CANOE_SETTLE_DRAG,
+  CANOE_SIDE_DRAG, CANOE_SPLASH_EVERY, CANOE_STAND_Z, CANOE_STEER_ACCEL, CANOE_STEER_TURN, CANOE_STROKE_SURGE,
+  CANOE_TURN_DRAG,
 } from './townConfig.js';
 
-const BLADE_DEPTH = 0.12;       // m under the surface: the blade's all in (full push)
-const STROKE_COMMIT = 0.15;     // rad swept one way in the water: that's the stroke — the other way pushes nothing till it's out
-const PULL_SWING_SPEED = 0.35;  // rad/s: the blade swept faster than this in the water throws drops
 // Where the hull's water depth is checked (canoe-local m: across, along)
 const HULL_PROBES = [[0, 0], [0, CANOE_HALF_LENGTH - 0.3], [0, -(CANOE_HALF_LENGTH - 0.3)], [CANOE_HALF_WIDTH, 0], [-CANOE_HALF_WIDTH, 0]];
 
@@ -47,10 +36,6 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     blade: null,        // the oar blade's last world position + time
     bladeIn: false,     // its blade in the water (for the splash going in / coming out)
     splashAt: 0,        // s (real clock): the next drops off a stroke
-    strokeId: null,     // the tilt's oar pushing it, and where its blade swung to last frame
-    strokeSwing: 0,
-    strokeDir: 0,       // the stroke this dip is (1 forward, −1 back, 0 not yet), and its sweep so far
-    strokeSweep: 0,
   };
   // (world space: put beside the canoe in whatever holds it, the first time it moves)
   const splash = createWaterSplash();
@@ -90,33 +75,15 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     boat.bladeIn = false;
   };
 
-  // The paddler's push this frame: the oar's stroke (stroke: { id, side (1 left, −1 right),
-  // dir (1 forward, −1 back), strength 0…1, u 0…1, visual (the look only) } or null), its blade
-  // for the splashes (oar: the oar's model, or null) and the joystick / WASD (steer: { fwd, turn }, −1…1)
+  // The paddler's push this frame: the steer (steer: { fwd, turn }, −1…1 — the phone's tilt, the
+  // joystick or WASD), the oar's stroke playing to fit it (stroke: { side (1 left, −1 right),
+  // dir (1 forward, −1 back), strength 0…1, u 0…1 } or null — its pull surges the push) and its
+  // blade for the splashes (oar: the oar's model, or null)
   const _b = new THREE.Vector3();
   const paddle = (dt, oar, steer, stroke = null) => {
     const c = boat;
-    const fwdX = Math.sin(c.yaw);
-    const fwdZ = Math.cos(c.yaw);
-    // The phone's tilt holds the oar (stroke.pose): how far its blade swung since last frame
-    // (+ ahead) — what pushes, if it's in the water (below). A timed stroke is only for the look.
-    let pulling = false;
-    let swung = 0;
-    let depth = 0;
-    // (an assisted stroke — bootstrapGameApp.js OAR_ASSIST: it says itself when the blade's
-    // pushing (stroke.water) and when it's held as a rudder (stroke.rudder))
-    const assist = stroke?.pose && !stroke.visual ? stroke.assist : null;
-    if (stroke?.pose && !stroke.visual) {
-      if (stroke.id === c.strokeId) swung = stroke.pose.swing - c.strokeSwing;
-      c.strokeId = stroke.id;
-      c.strokeSwing = stroke.pose.swing;
-    } else {
-      c.strokeId = null;
-      if (stroke) {
-        const p = oarStrokePull(stroke.u);
-        pulling = p > 0 && p < 1;
-      }
-    }
+    const p = stroke ? oarStrokePull(stroke.u) : 0;
+    const pulling = p > 0 && p < 1;
     const blade = oar?.getObjectByName('oar-blade');
     if (blade) {
       blade.updateWorldMatrix(true, false);
@@ -132,10 +99,6 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
         const l = toLocal(_b.x, _b.z);
         const outside = Math.abs(l.x) > CANOE_HALF_WIDTH * 0.6 || Math.abs(l.z) > CANOE_HALF_LENGTH - 0.2;
         const surface = waterY(_b.x, _b.z);
-        // How far under (0…1 over BLADE_DEPTH); swept through the water fast enough it's a pull
-        depth = outside ? Math.min(1, Math.max(0, (surface + 0.02 - _b.y) / BLADE_DEPTH)) : 0;
-        if (assist) depth = stroke.water || 0;
-        if (stroke?.pose) pulling = depth > 0.3 && Math.abs(swung) > PULL_SWING_SPEED * dt;
         // Splashes: in and out of the water, and drops off it through the pull
         const nowIn = _b.y < surface + 0.02 && outside;
         if (nowIn !== c.bladeIn) {
@@ -157,44 +120,15 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
       c.blade = null;
       c.bladeIn = false;
     }
-    // The blade swept back through the water pushes the canoe on, swept ahead backs it up (by how
-    // much of a stroke's whole sweep it went, how deep it is). Once it's swept STROKE_COMMIT one
-    // way that's the stroke: coming back the other way before it's out of the water (the end of
-    // a stroke, straightening up) drags nothing
-    // (an assisted stroke is a whole clean sweep already)
-    if (assist) depth = stroke.water || 0;
-    if (depth < 0.05 || assist) { c.strokeDir = 0; c.strokeSweep = 0; }
-    else if (!c.strokeDir) {
-      c.strokeSweep -= swung * depth;
-      if (Math.abs(c.strokeSweep) > STROKE_COMMIT) c.strokeDir = Math.sign(c.strokeSweep);
-    }
-    let f = (-swung / OAR_STROKE_SWEEP) * depth * (stroke?.strength ?? 1);
-    if (c.strokeDir && Math.sign(f) === -c.strokeDir) f = 0;
-    if (f) {
-      const back = f < 0;
-      const dv = f * CANOE_STROKE_DV * (back ? CANOE_PADDLE_BACK : 1) * (assist ? CANOE_ASSIST_PUSH : 1);
-      c.vx += fwdX * dv;
-      c.vz += fwdZ * dv;
-      // (off to its side: it turns — the left side forward turns it right, yaw −; assisted
-      // forward strokes hardly, unless it's a wide sweep — assist.wide 0 … 1)
-      const keep = assist && !back ? CANOE_ASSIST_TURN + (CANOE_ASSIST_SWEEP_TURN - CANOE_ASSIST_TURN) * (assist.wide || 0) : 1;
-      c.w -= stroke.side * f * CANOE_STROKE_TURN * (back ? CANOE_BACK_TURN : 1) * keep;
-    }
-    // The blade held still in the water (assisted): a rudder — it drags, turning toward its side
-    if (assist && stroke.rudder > 0) {
-      const along = c.vx * fwdX + c.vz * fwdZ;
-      const k = 1 - Math.exp(-CANOE_RUDDER_DRAG * stroke.rudder * dt);
-      c.vx -= fwdX * along * k;
-      c.vz -= fwdZ * along * k;
-      c.w += stroke.side * stroke.rudder * (CANOE_RUDDER_TURN + CANOE_RUDDER_TURN_PER_SPEED * along) * dt;
-    }
-    // The joystick / WASD paddle for the player
+    // The steer pushes / turns it — harder through a stroke's pull, less between (about the same
+    // on the whole: the pull is ~40 % of a stroke)
+    const surge = stroke ? (pulling ? 1 + CANOE_STROKE_SURGE : 1 - CANOE_STROKE_SURGE * 0.7) : 1;
     if (Math.abs(steer.fwd) > 0.05) {
-      const a = steer.fwd * CANOE_STEER_ACCEL * (steer.fwd < 0 ? CANOE_PADDLE_BACK : 1) * dt;
+      const a = steer.fwd * CANOE_STEER_ACCEL * (steer.fwd < 0 ? CANOE_PADDLE_BACK : 1) * surge * dt;
       c.vx += Math.sin(c.yaw) * a;
       c.vz += Math.cos(c.yaw) * a;
     }
-    if (Math.abs(steer.turn) > 0.05) c.w -= steer.turn * CANOE_STEER_TURN * dt;
+    if (Math.abs(steer.turn) > 0.05) c.w -= steer.turn * CANOE_STEER_TURN * surge * dt;
   };
 
   // Up against the shore / a dock: the way off it (world, unit) — toward deeper water from the

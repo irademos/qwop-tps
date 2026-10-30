@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 // Town canoe paddle: a procedural oar built like the wand / fishing rod — origin at the grip —
-// but pointing the other way, along −Z: held as the sword weapon in oar form (FoamSword.oar),
-// the phone held straight up holds the oar straight down, by its handle, the blade in the water.
+// but pointing the other way, along −Z: held as the sword weapon in oar form (FoamSword.oar), by
+// its handle, posed by the strokes below (the phone's tilt steers the canoe — bootstrapGameApp.js).
 // The top hand is on the grip (the origin, the T-handle just above it), the other hand lower
 // down the shaft (OAR_SUPPORT_AT); the blade's middle is the `oar-blade` object (canoeBoat.js
 // splashes where it goes in and out of the water), its end `oar-tip`.
@@ -35,14 +35,13 @@ export function oarGripPoint(up, lean, out) {
   return out;
 }
 
-// ── A paddle stroke: auto-animated (the joystick) — bootstrapGameApp.js ──
+// ── A paddle stroke: auto-animated to fit the steer (the phone's tilt / the joystick) — bootstrapGameApp.js ──
 // u: 0…1 through the stroke. The blade's way from the top hand is a tilt from straight down
 // and a swing fore / aft (+ ahead) of straight out to the side: it reaches ahead and dips in
-// (catch), sweeps back through the water (pull — canoeBoat.js pushes the canoe meanwhile),
+// (catch), sweeps back through the water (pull — canoeBoat.js surges the canoe meanwhile),
 // lifts out (exit) and comes back to rest beside the hull, lifted. A back stroke runs the
 // swing the other way. A timed stroke at a higher strength is quicker. lift (0…1) raises the
-// blade out of the water. (The phone's tilt doesn't play strokes: it holds the oar directly, in
-// these same terms — tilt / swing — bootstrapGameApp.js.)
+// blade out of the water.
 export const OAR_STROKE_CATCH = 0.2;   // u: in the water from here…
 export const OAR_STROKE_PULL = 0.62;   // …pulling till here…
 export const OAR_STROKE_EXIT = 0.78;   // …out of it by here (the next stroke may start)
@@ -54,7 +53,6 @@ const OUT_TILT = 74 * DEG;             // lifted out at the end of the pull
 const AHEAD = 42 * DEG;                // swing at the catch…
 const BEHIND = 40 * DEG;               // …and at the end of the pull
 export const OAR_REST_SWING = 8 * DEG;
-export const OAR_STROKE_SWEEP = AHEAD + BEHIND; // rad: a stroke's whole swing through the water (its full push — canoeBoat.js)
 
 /** How long a stroke of this strength (0…1) takes, s. */
 export const oarStrokeDuration = (strength) => OAR_STROKE_S[0] + (OAR_STROKE_S[1] - OAR_STROKE_S[0]) * Math.min(1, Math.max(0, strength));
