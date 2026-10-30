@@ -113,9 +113,9 @@ export function createMagicBlasts({ scene }) {
     if (element === 'fire') {
       const groundY = getGroundBelow(pos.x, pos.z, pos.y);
       spawnExplosion(scene, pos, { scale: 0.4, groundY: Number.isFinite(groundY) ? Math.min(groundY, pos.y) : pos.y - 0.5 });
-      window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.35, { cooldownKey: 'magic-fire-hit', cooldownMs: 80 });
+      window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.35, { cooldownKey: 'magic-fire-hit', cooldownMs: 80, at: pos });
     } else {
-      window.audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'magic-ice-hit', cooldownMs: 80 });
+      window.audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'magic-ice-hit', cooldownMs: 80, at: pos });
     }
   };
 
@@ -177,7 +177,7 @@ export function createMagicBlasts({ scene }) {
       travelled: 0, age: 0, shards, done: false,
     };
     blasts.push(blast);
-    window.audioManager?.playSFX?.('SFX/Spells/Spell Impact 1.ogg', side === 'player' ? 0.55 : 0.4, { cooldownKey: `magic-cast-${side}`, cooldownMs: 120 });
+    window.audioManager?.playSFX?.('SFX/Spells/Spell Impact 1.ogg', side === 'player' ? 0.55 : 0.4, { cooldownKey: `magic-cast-${side}`, cooldownMs: 120, at: side === 'player' ? null : group.position });
     return blast;
   };
 

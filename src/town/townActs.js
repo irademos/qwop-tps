@@ -28,9 +28,9 @@ export function installTownActs(T, ctx) {
     T.talking = { npc: n };
     const choices = [];
     if (n.fear > 0) {
-      choices.push({ label: 'Leave them be', primary: true });
+      choices.push({ label: 'Leave them be', primary: true, act: true });
     } else {
-      choices.push({ label: 'Chat', primary: true, onClick: () => { if (n.alive) chat(n, smallTalk(n)); } });
+      choices.push({ label: 'Chat', primary: true, act: true, onClick: () => { if (n.alive) chat(n, smallTalk(n)); } });
       if (n.following) {
         choices.push({ label: 'Go home', onClick: () => {
           const said = T.dismiss(n, undefined, { quiet: true });
@@ -42,7 +42,7 @@ export function installTownActs(T, ctx) {
           if (said) farewell(n, said, 'Let\'s go');
         } });
       }
-      choices.push({ label: `Give ${GIFT_COINS}`, onClick: () => gift(n) });
+      choices.push({ label: `Give ${GIFT_COINS}`, act: true, onClick: () => gift(n) });
       choices.push({ label: 'Goodbye' });
     }
     T.jobTalk.open({ who: whoOf(n), sub: n.def.label, text, choices });

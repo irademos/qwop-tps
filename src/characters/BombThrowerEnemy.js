@@ -150,7 +150,7 @@ export function spawnBombExplosion(scene, pos) {
   const groundY = getGroundBelow(pos.x, pos.z, pos.y + 0.3);
   spawnExplosion(scene, pos, { groundY: Number.isFinite(groundY) ? groundY : pos.y });
   window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.75, {
-    cooldownKey: 'bomb-explode', cooldownMs: 50
+    cooldownKey: 'bomb-explode', cooldownMs: 50, at: pos, falloff: { ref: 6, max: 70 }
   });
 }
 
@@ -687,7 +687,7 @@ export class BombThrowerEnemy {
     this.hearts = Math.max(0, this.hearts - Math.max(1, amount));
     this._showHealthBar();
     spawnBloodBurst(this.scene, this.getCenterWorldPos().add(_bloodOffset), { groundY: this.group.position.y });
-    window.audioManager?.playEnemyOuch(`ouch-enemy-${this.group.uuid}`);
+    window.audioManager?.playEnemyOuch(`ouch-enemy-${this.group.uuid}`, this.group.position);
     if (this.hearts <= 0) {
       this._die();
       return true;

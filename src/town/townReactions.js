@@ -112,7 +112,7 @@ export function installTownReactions(T, ctx) {
     if (victim.body && T.distToPlayer(victim) < 25) {
       const gy = T.groundY(victim);
       ctx.spawnBlood(_v.set(victim.x, gy + 0.55 * heightScale(victim.url), victim.z), gy);
-      if (T.distToPlayer(victim) < 12) ctx.playSfx('hit');
+      ctx.playSfx('hit', { x: victim.x, y: gy + 1, z: victim.z });
     }
     const dx = victim.x - attacker.x;
     const dz = victim.z - attacker.z;

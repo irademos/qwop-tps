@@ -4695,11 +4695,10 @@ body.town-shop-open #action-buttons { visibility: hidden; }
 /* At a market stall's counter (townStalls.js): the village's buy card over the picked thing */
 .town-hud .town-card { z-index: 1; }
 
-/* Talking with a townsperson (src/town/townJobs.js createJobTalk) and what townsfolk nearby say
-   (townMode.js subtitle): subtitles at the bottom of the screen — light text on a faint dark
-   band, their name coloured by their mood toward the player; the player's replies under it */
-.town-talk,
-.town-subs {
+/* Talking with a townsperson (src/town/townJobs.js createJobTalk): a subtitle at the bottom of
+   the screen — light text on a faint dark band, their name coloured by their mood toward the
+   player; the player's replies under it (what townsfolk nearby say is only heard — speech.js) */
+.town-talk {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
@@ -4718,15 +4717,7 @@ body.town-shop-open #action-buttons { visibility: hidden; }
   animation: town-sub-in 0.2s var(--ease);
 }
 .town-hud .town-talk.hidden { display: none; }
-.town-subs {
-  bottom: calc(150px + env(safe-area-inset-bottom, 0px));
-  pointer-events: none;
-}
-/* (no ambient lines over a conversation, a panel or a counter) */
-body.town-market-open .town-subs,
-body.town-shop-open .town-subs { display: none; }
-.town-talk-line,
-.town-sub {
+.town-talk-line {
   max-width: 100%;
   padding: 5px 12px;
   border-radius: 8px;
@@ -4737,21 +4728,12 @@ body.town-shop-open .town-subs { display: none; }
   line-height: 1.4;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
-.town-sub {
-  font-size: 15px;
-  animation: town-sub-in 0.2s var(--ease);
-  transition: opacity 0.6s var(--ease);
-}
-.town-sub-big { font-weight: 800; }
-.town-sub-out { opacity: 0; }
-.town-talk-who,
-.town-sub-who {
+.town-talk-who {
   margin-right: 0.45em;
   font-weight: 800;
   color: var(--accent-hi);
 }
-.town-talk-who::after,
-.town-sub-who::after { content: ':'; }
+.town-talk-who::after { content: ':'; }
 .town-talk-who[data-mood='bad'] { color: #ff8a7a; }
 .town-talk-who[data-mood='low'] { color: #f0b37a; }
 .town-talk-who[data-mood='good'] { color: #9be39b; }
@@ -4789,7 +4771,6 @@ body.town-shop-open .town-subs { display: none; }
 }
 @media (max-width: 520px) {
   .town-talk-line { font-size: 15px; }
-  .town-sub { font-size: 13px; }
 }
 /* The quest tracker: the jobs on, top right under the goods */
 .town-quests {

@@ -12,6 +12,18 @@ const LOW_END_PERF_PROFILE = {
   preloadCommonSFX: true
 };
 
+// Distance falloff for sounds with a place in the world (playSFX's `at`, townsfolk's speech):
+// full volume within `ref` m of the listener, then ref / (ref + rolloff·(d − ref)), faded to
+// nothing by `max` m
+export const DISTANCE_FALLOFF = { ref: 3, rolloff: 0.6, max: 40 };
+export function distanceGain(d, { ref = DISTANCE_FALLOFF.ref, rolloff = DISTANCE_FALLOFF.rolloff, max = DISTANCE_FALLOFF.max } = {}) {
+  if (!Number.isFinite(d) || d <= ref) return 1;
+  if (d >= max) return 0;
+  const g = ref / (ref + rolloff * (d - ref));
+  const edge = 1 - Math.max(0, (d - max * 0.7) / (max * 0.3)); // (eased out over the last 30 %)
+  return g * edge;
+}
+
 const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'keydown', 'click'];
 // Events that count as a user gesture for starting <audio> (Safari doesn't take touchstart / pointerdown)
 const MEDIA_GESTURE_EVENTS = ['click', 'touchend', 'keydown'];
@@ -61,6 +73,11 @@ export class AudioManager {
     this.masterVolume = options.masterVolume ?? 1;
     this.sfxVolume = options.sfxVolume ?? 1.0;
     this.musicVolume = options.musicVolume ?? 0.05;
+    this.voiceVolume = options.voiceVolume ?? 0.5;
+
+    // The listener (setListener, every frame): where sounds are heard from (the player) and
+    // the camera's right, for left / right panning
+    this.listener = { x: 0, y: 0, z: 0, rx: 1, rz: 0, set: false };
 
     // Browsers block an AudioContext created before a user gesture, so the
     // context (and the SFX preload, which needs it to decode) waits for the
@@ -183,6 +200,42 @@ export class AudioManager {
     this.background.volume = Math.max(0, Math.min(1, volume));
   }
 
+  setVoiceVolume(value) {
+    this.voiceVolume = Math.max(0, Math.min(1, value));
+  }
+
+  /** Where sounds are heard from: `pos` (the player), panned by `rightX` / `rightZ` (the camera's right). */
+  setListener(pos, rightX = 1, rightZ = 0) {
+    const l = this.listener;
+    l.x = pos.x; l.y = pos.y; l.z = pos.z;
+    const len = Math.hypot(rightX, rightZ) || 1;
+    l.rx = rightX / len; l.rz = rightZ / len;
+    l.set = true;
+  }
+
+  /** Metres from the listener to `pos` (0 before the first setListener). */
+  distanceTo(pos) {
+    const l = this.listener;
+    if (!l.set || !pos) return 0;
+    return Math.hypot(pos.x - l.x, (pos.y ?? l.y) - l.y, pos.z - l.z);
+  }
+
+  /** Volume multiplier for a sound at `pos` (distanceGain; `falloff` overrides its ref / rolloff / max). */
+  gainAt(pos, falloff) {
+    return pos ? distanceGain(this.distanceTo(pos), falloff) : 1;
+  }
+
+  // Left / right pan (−1 … 1) for a sound at `pos`: the side of the camera it's on, softened
+  _panAt(pos) {
+    const l = this.listener;
+    if (!l.set || !pos) return 0;
+    const dx = pos.x - l.x;
+    const dz = pos.z - l.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.5) return 0;
+    return Math.max(-1, Math.min(1, ((dx * l.rx + dz * l.rz) / d) * Math.min(1, d / 4))) * 0.7;
+  }
+
   setMusicVolume(value) {
     this.musicVolume = Math.max(0, Math.min(1, value));
     if (this.phoneSwordAudio) {
@@ -286,8 +339,17 @@ export class AudioManager {
     const {
       cooldownKey,
       cooldownMs = 0,
-      bypassConcurrencyLimit = false
+      bypassConcurrencyLimit = false,
+      // where the sound comes from (a world position): quieter with distance from the listener,
+      // panned to its side; `falloff` = distanceGain options
+      at = null,
+      falloff
     } = options;
+
+    if (at) {
+      volume *= this.gainAt(at, falloff);
+      if (volume < 0.01) return null;
+    }
 
     if (cooldownKey && !this.canPlaySound(cooldownKey, cooldownMs)) {
       return null;
@@ -313,7 +375,15 @@ export class AudioManager {
     gainNode.gain.value = Math.max(0, Math.min(1, volume));
 
     source.connect(gainNode);
-    gainNode.connect(this.sfxGain);
+    const pan = at ? this._panAt(at) : 0;
+    if (pan && this.context.createStereoPanner) {
+      const panner = this.context.createStereoPanner();
+      panner.pan.value = pan;
+      gainNode.connect(panner);
+      panner.connect(this.sfxGain);
+    } else {
+      gainNode.connect(this.sfxGain);
+    }
 
     const entry = { source, gainNode };
     this.activeSFXNodes.add(entry);
@@ -330,20 +400,20 @@ export class AudioManager {
   //   'playerDeath' → ouch3 (local player dies)
   // cooldownKey is per character so several enemies hit together can each
   // cry out, but one can't stack.
-  playOuch(kind = 'enemy', cooldownKey = `ouch-${kind}`, volume = 0.5) {
+  playOuch(kind = 'enemy', cooldownKey = `ouch-${kind}`, volume = 0.5, at = null) {
     const index = kind === 'player' ? 1 : kind === 'playerDeath' ? 2 : 0;
-    return this.playSFX(this.ouchSounds[index], volume, { cooldownKey, cooldownMs: 150 });
+    return this.playSFX(this.ouchSounds[index], volume, { cooldownKey, cooldownMs: 150, at });
   }
 
   // Called on every enemy hit (any enemy). Only every 3rd or 4th hit
   // (randomly chosen each cycle) actually cries out with ouch1.
-  playEnemyOuch(cooldownKey) {
+  playEnemyOuch(cooldownKey, at = null) {
     this.enemyHurtCount = (this.enemyHurtCount ?? 0) + 1;
     this.enemyOuchAt ??= 3 + Math.floor(Math.random() * 2);
     if (this.enemyHurtCount < this.enemyOuchAt) return null;
     this.enemyHurtCount = 0;
     this.enemyOuchAt = 3 + Math.floor(Math.random() * 2);
-    return this.playOuch('enemy', cooldownKey);
+    return this.playOuch('enemy', cooldownKey, 0.5, at);
   }
 
   playFootstepAt(entityId, volume = 0.3) {

@@ -68,12 +68,16 @@ export const CHAINS = [
 // ── The talk: every conversation with a townsperson — small talk, a job offered / taken
 // back done, the first day's goals — shown as a subtitle at the bottom of the screen (their
 // name, coloured by their mood toward the player, and the line) with the player's replies under it ──
-// open({ who, sub, text, reward, choices: [{ label, primary, onClick }] }) / close() /
+// open({ who, sub, text, reward, choices: [{ label, primary, act, onClick }] }) / close() /
 // isOpen() / pressFirst() (E / Enter / the phone's interact). mood(): 'bad' | 'low' | 'mid' |
-// 'good' for the name's colour. onEnd: the talk's over — closed, or a choice picked that didn't
+// 'good' for the name's colour. speak(text, { who, reply, interrupt }): read a line out (their
+// line as it opens — cutting off what was being said, unless it answers the player's reply —
+// and the player's reply as it's picked; a choice with `act` — Give 5, Take the reward, Pay… — is
+// something done, not said: not read out, it only cuts off their line). onEnd: the talk's over — closed, or a choice picked that didn't
 // open another line. (`sub` — what it's about — is left off: the line says it.)
-export function createJobTalk(parent, { onEnd, mood } = {}) {
+export function createJobTalk(parent, { onEnd, mood, speak } = {}) {
   let model = null;
+  let replying = false;
   const box = el('div', 'town-talk hidden');
   box.addEventListener('pointerdown', (e) => e.stopPropagation());
   parent.append(box);
@@ -89,8 +93,11 @@ export function createJobTalk(parent, { onEnd, mood } = {}) {
   };
   // (a choice may open the next line; the talk only ends if it didn't)
   const choose = (c) => {
+    if (c?.label && !c.act) speak?.(c.label, { reply: true, interrupt: true });
+    else speak?.('', { stop: true });
     hide();
-    c?.onClick?.();
+    replying = true;
+    try { c?.onClick?.(); } finally { replying = false; }
     if (!model) onEnd?.();
   };
   const open = (m) => {
@@ -110,6 +117,7 @@ export function createJobTalk(parent, { onEnd, mood } = {}) {
       });
       choices.append(b);
     }
+    speak?.(m.text, { who: m.who, interrupt: !replying });
     const parts = [line];
     if (m.reward) parts.push(el('div', 'town-talk-reward', m.reward));
     parts.push(choices);

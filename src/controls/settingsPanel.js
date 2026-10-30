@@ -402,6 +402,7 @@ function buildDisplayPanel() {
   const audioSectionTitle = createElement('h3', 'settings-section-title', 'Audio');
   const musicVolumeField = createRangeField({ id: 'settings-audio-music', label: 'Music Volume', min: 0, max: 1, step: 0.05 });
   const sfxVolumeField = createRangeField({ id: 'settings-audio-sfx', label: 'SFX Volume', min: 0, max: 1, step: 0.05 });
+  const voiceVolumeField = createRangeField({ id: 'settings-audio-voice', label: 'Voice Volume', min: 0, max: 1, step: 0.05 });
 
   const savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0.05');
   const savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
@@ -409,6 +410,9 @@ function buildDisplayPanel() {
   musicVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedMusicVol) ? savedMusicVol : 0.05) * 100)}%`;
   sfxVolumeField.input.value = `${Number.isFinite(savedSfxVol) ? savedSfxVol : 1}`;
   sfxVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedSfxVol) ? savedSfxVol : 1) * 100)}%`;
+  const savedVoiceVol = parseFloat(localStorage.getItem('sq:voiceVolume') ?? '0.5');
+  voiceVolumeField.input.value = `${Number.isFinite(savedVoiceVol) ? savedVoiceVol : 0.5}`;
+  voiceVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedVoiceVol) ? savedVoiceVol : 0.5) * 100)}%`;
 
   const cameraSectionTitle = createElement('h3', 'settings-section-title', 'Camera');
   // key → { field, input, valueLabel? } (toggles: checkbox input, sliders: range input)
@@ -442,6 +446,7 @@ function buildDisplayPanel() {
     audioSectionTitle,
     musicVolumeField.field,
     sfxVolumeField.field,
+    voiceVolumeField.field,
     performanceGroup,
     gyroGroup,
     gyroRecalGroup,
@@ -457,6 +462,8 @@ function buildDisplayPanel() {
     musicVolumeValue: musicVolumeField.valueLabel,
     sfxVolumeSlider: sfxVolumeField.input,
     sfxVolumeValue: sfxVolumeField.valueLabel,
+    voiceVolumeSlider: voiceVolumeField.input,
+    voiceVolumeValue: voiceVolumeField.valueLabel,
     performanceSelect,
     gyroToggle,
     gyroRecalBtn,
@@ -1264,6 +1271,18 @@ function bindEvents() {
       }
       window.audioManager?.setSFXVolume?.(value);
       localStorage.setItem('sq:sfxVolume', `${value}`);
+    });
+  }
+
+  // (Town's townsfolk voices — text to speech, src/audio/speech.js)
+  if (elements.displayFields?.voiceVolumeSlider) {
+    elements.displayFields.voiceVolumeSlider.addEventListener('input', (event) => {
+      const value = parseFloat(event.target.value);
+      if (elements.displayFields.voiceVolumeValue) {
+        elements.displayFields.voiceVolumeValue.textContent = `${Math.round(value * 100)}%`;
+      }
+      window.audioManager?.setVoiceVolume?.(value);
+      localStorage.setItem('sq:voiceVolume', `${value}`);
     });
   }
 

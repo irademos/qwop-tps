@@ -62,7 +62,7 @@
 //
 // Game access goes through `ctx` (built in bootstrapGameApp.js):
 //   scene, camera, domElement, getPlayerPosition() → Vector3, setPlayerHidden(hidden),
-//   getPlayerName(), isPlayerDead()
+//   getPlayerName(), getPlayerCharacterUrl() (the player's voice), isPlayerDead()
 //   getGroundY(x, z), isOverWater(x, z), pathAt(x, z) → 'road' | 'trail' | null
 //   getMapObjects(bounds) → [{ file, x, z, radius }], getRoadLamps() → [{ x, y, z }] (lamp heads),
 //   setRoadLampsLit(level 0 … 1)
@@ -73,7 +73,7 @@
 //   spawnFighter({ x, z, yaw, url, hearts, swingChance, gear, name }) → EnemyPlayer,
 //   removeFighter(enemy), releaseFighterGear(enemy), carryPlayerOff({ carrierUrl, onDone }),
 //   cancelCarry(), isPlayerArmed()
-//   spawnBlood(position, groundY), playSfx('hit' | 'chop' | 'fell'), dropCoins(position, n)
+//   spawnBlood(position, groundY), playSfx('hit' | 'chop' | 'fell', at?) (at: where — quieter further off), dropCoins(position, n)
 //   getCoins(), addCoins(delta) (coins past the wallet's cap drop at the player's feet), profileKey() → string | null,
 //   memberKey() (the player's key in a shared town — their house)
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
@@ -89,12 +89,13 @@ import * as THREE from 'three';
 import { createJobTalk, createQuestTracker } from './townJobs.js';
 import { createLockpick } from './townLockpick.js';
 import { createMarketPanel } from './townMarketPanel.js';
-import { isMiiCharacterUrl } from '../models/glbCharacterModel.js';
+import { glbCharacterConfig, isMiiCharacterUrl } from '../models/glbCharacterModel.js';
+import { createSpeech } from '../audio/speech.js';
 import { updateCampfire } from '../village/villageMode.js';
 import {
   BOUNTY_PER_STAR, MINUTES_PER_SEC, MP_SAVE_PREFIX, NET_JOIN_TIMEOUT_S,
   BAG_MAX, FEED_LOG_MAX, FEED_MAX_SHOWN, FEED_SHOW_MS, LANTERN_DIST, LANTERN_FROM_DARK, LANTERN_PUT_AWAY_DIST, NEWCOMER_DELAY_S, NIGHT_FROM_H, NIGHT_TO_H, TWILIGHT_H, PVP_CREDIT_S, RAID_NOTICE_DIST, SAVE_EVERY_S, SAVE_PREFIX,
-  START_MINUTES, SUBTITLE_S, SUBTITLES_SHOWN, TALK_RANGE, WALLET_MAX, ARRIVAL_SNAP_DIST, _v2, angleLerp, dist2, el, heightScale, rand,
+  START_MINUTES, SPEECH_DIST, SPEECH_SHOUT_DIST, TALK_RANGE, WALLET_MAX, ARRIVAL_SNAP_DIST, _v2, angleLerp, dist2, el, heightScale, rand,
 } from './townConfig.js';
 import { installTownLayout } from './townLayout.js';
 import { installTownFolk } from './townFolk.js';
@@ -205,7 +206,6 @@ export function createTownMode(ctx) {
   const jailChip = el('div', 'town-jail ui-panel hidden');
   const campChip = el('div', 'town-jail town-camp ui-panel hidden');
   const feed = el('div', 'town-feed');
-  const subs = el('div', 'town-subs');
   const actsEl = el('div', 'town-acts hidden');
   const fade = el('div', 'town-fade');
   // What the player carries; the food can be eaten (tap) for health
@@ -267,7 +267,7 @@ export function createTownMode(ctx) {
     walletEl.textContent = text;
     walletEl.classList.toggle('town-wallet-full', coins >= WALLET_MAX || carried >= BAG_MAX);
   };
-  hud.append(top, stars, jailChip, campChip, feed, subs, goodsEl, actsEl, logBtn, logPanel);
+  hud.append(top, stars, jailChip, campChip, feed, goodsEl, actsEl, logBtn, logPanel);
   document.body.append(hud, fade);
   (document.getElementById('health-display') ?? hud).append(walletEl);
   const renderGoods = () => {
@@ -288,6 +288,7 @@ export function createTownMode(ctx) {
   const jobTalk = createJobTalk(hud, {
     onEnd: () => T.endTalk(),
     mood: () => (T.talking?.npc ? T.moodKey(T.talking.npc) : null),
+    speak: (text, o) => speakTalk(text, o),
   });
   const tracker = createQuestTracker(hud);
   const lockpick = createLockpick(hud);
@@ -320,16 +321,46 @@ export function createTownMode(ctx) {
     if (logPanel.classList.contains('hidden')) { unread += 1; renderBadge(); } else renderLog();
   };
 
-  // What the townsfolk near the player say: subtitles at the bottom of the screen ("Name: line"),
-  // the newest under the older, SUBTITLES_SHOWN at a time (townFolk.js say)
-  const subtitle = (who, text, { big = false } = {}) => {
-    const line = el('div', `town-sub${big ? ' town-sub-big' : ''}`);
-    line.append(el('span', 'town-sub-who', firstName(who)), document.createTextNode(text));
-    subs.append(line);
-    while (subs.childElementCount > SUBTITLES_SHOWN) subs.firstElementChild.remove();
-    const ms = (SUBTITLE_S + (big ? 1.4 : 0) + text.length * 0.03) * 1000;
-    setTimeout(() => line.classList.add('town-sub-out'), ms);
-    setTimeout(() => line.remove(), ms + 600);
+  // ── Voices (text to speech — src/audio/speech.js): each townsperson has their own, quieter
+  // further off. What townsfolk near the player say is only heard (no subtitles); a talk with
+  // the player is read out too — their lines and the player's replies (the text still shows) ──
+  const speech = createSpeech();
+  const FEMININE = new Set(['Mabel', 'Wren', 'Agnes', 'Clover', 'Edda', 'Gilda', 'Ivy', 'Linnea', 'Nell',
+    'Rosalind', 'Tilda', 'Vera', 'Yara', 'Cora', 'Elsie', 'Greta', 'Iona', 'Lark', 'Marigold', 'Kit']);
+  // How someone sounds: kids high, bandits / frog men gruff, the wizard / tree folk old
+  const voiceKind = (n) => {
+    const role = n.role;
+    if (role === 'kid' || n.def?.unhurt) return 'kid';
+    if (role === 'wizard' || n.url === glbCharacterConfig.treeCreatureUrl) return 'old';
+    if (role === 'bandit' || role === 'banditBoss' || n.url === glbCharacterConfig.frogManUrl) return 'gruff';
+    if (n.url === glbCharacterConfig.villageGirlUrl) return 'female';
+    return FEMININE.has(firstName(n.name)) ? 'female' : 'male';
+  };
+  const voiceAt = (n) => ({ x: n.x, y: T.groundY(n) + 1.5, z: n.z });
+  // Someone near the player says something (townFolk.js say) — heard, if nothing else is
+  // being said; a shout carries further
+  const speakNear = (n, text, { big = false } = {}) => {
+    if (jobTalk.isOpen() && T.talking?.npc !== n) return;
+    speech.say(text, {
+      key: n.name, kind: voiceKind(n), at: voiceAt(n), priority: 'ambient',
+      volume: big ? 1 : 0.85, falloff: big ? { ref: 4, rolloff: 1, max: SPEECH_SHOUT_DIST } : { ref: 2, rolloff: 1.3, max: SPEECH_DIST },
+    });
+  };
+  // A line of the talk box (townJobs.js): theirs (`who`), or the player's reply
+  const playerVoiceKind = () => (ctx.getPlayerCharacterUrl?.() === glbCharacterConfig.villageGirlUrl ? 'female' : 'male');
+  const speakTalk = (text, { who, reply = false, interrupt = false, stop = false } = {}) => {
+    if (stop) { speech.stop(); return; }
+    if (reply) {
+      speech.say(text, { key: `player:${ctx.getPlayerName()}`, kind: playerVoiceKind(), priority: 'talk', interrupt });
+      return;
+    }
+    const first = firstName(String(who ?? ''));
+    const n = T.talking?.npc && firstName(T.talking.npc.name) === first ? T.talking.npc
+      : T.npcs.find((x) => x.alive && firstName(x.name) === first);
+    speech.say(text, {
+      key: n?.name ?? first, kind: n ? voiceKind(n) : 'male', at: n ? voiceAt(n) : null,
+      priority: 'talk', interrupt, falloff: { ref: 3, rolloff: 1, max: 30 },
+    });
   };
 
   const renderStars = () => {
@@ -819,7 +850,7 @@ export function createTownMode(ctx) {
     actsEl.replaceChildren();
     actsEl.classList.add('hidden');
     feed.replaceChildren();
-    subs.replaceChildren();
+    speech.stop();
     feedQueue.length = 0;
     feedShown = 0;
     feedGen += 1;
@@ -931,7 +962,7 @@ export function createTownMode(ctx) {
   };
 
   Object.assign(T, {
-    subtitle,
+    speakNear, speech, voiceKind,
     actsEl, advanceClock, campChip, campWatch, clock, fade, feedLine, goods, hour, hud, jailChip,
     jobTalk, law, loadPersonal, lockpick, markers, marketPanel, net, netT, pool, renderGoods,
     renderStars, root, save, soldOut, spawnTown, toggleLog, top, topPlace, tracker, usedNames, worldSnapshot,
