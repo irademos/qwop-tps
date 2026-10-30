@@ -168,6 +168,35 @@ const OAR_REST_ZONE = 6 * Math.PI / 180;
 const OAR_REST_FOLLOW_S = 3;
 const OAR_POSE_RATE = 16;  // per s: the oar easing into the stroke's pose
 const OAR_LEAN_RATE = 6;   // per s: the hands moving over to the other side
+// Assisted strokes (OAR_ASSIST; false = the literal oar above, every sweep pushing as it goes).
+// In the air the phone still holds the oar; once the blade's in (tilted over past
+// OAR_ROLL_WATER) and the phone sweeps OAR_ASSIST_COMMIT one way, the game takes the stroke
+// over: a whole clean sweep (OAR_ASSIST_SWEEP_FWD back / _BACK ahead) over OAR_ASSIST_DUR_* —
+// quicker and stronger the faster the phone moves (OAR_ASSIST_SPEED_*); tilted well over
+// (OAR_ASSIST_POWER_ROLL) it goes straight, only just past the waterline it's a wide sweep that
+// turns the canoe away from that side — then the blade lifts
+// out and stays out (recovery) while the phone comes back the other way, dropping in again once
+// it's come OAR_ASSIST_RECOVER back and slows / turns. So: keep it tilted to one side and rock
+// it — top toward you strokes, away brings it back. The blade held in the water, still
+// (OAR_ASSIST_STILL_SPEED, OAR_ASSIST_RUDDER_*), is a rudder: it slows the canoe and turns it
+// toward that side (canoeBoat.js — stroke.rudder); only from there (planted) does sweeping it
+// ahead make a back stroke — otherwise that's just reaching forward for the next catch.
+const OAR_ASSIST = true;
+const OAR_ASSIST_COMMIT = 12 * Math.PI / 180;     // the oar's swing (phone fore / aft × OAR_PITCH_GAIN)
+const OAR_ASSIST_SWEEP_FWD = 70 * Math.PI / 180;
+const OAR_ASSIST_SWEEP_BACK = 55 * Math.PI / 180;
+const OAR_ASSIST_DUR_SLOW = 0.65;                 // s
+const OAR_ASSIST_DUR_FAST = 0.35;
+const OAR_ASSIST_SPEED_SLOW = 0.8;                // rad/s of swing: the weakest stroke (half strength)…
+const OAR_ASSIST_SPEED_FAST = 4;                  // …the strongest
+const OAR_ASSIST_DRIVE_TILT = 34 * Math.PI / 180; // the blade's tilt from straight down through the stroke
+const OAR_ASSIST_LIFT_S = 0.12;                   // s: lifting out at the end
+const OAR_ASSIST_POWER_ROLL = 40 * Math.PI / 180;  // tilted over this far a stroke goes straight; just past OAR_ROLL_WATER it's a sweep that turns
+const OAR_ASSIST_RECOVER = 15 * Math.PI / 180;    // swung back the other way this far: ready again
+const OAR_ASSIST_STILL_SPEED = 0.6;               // rad/s of swing: slower than this is holding still
+const OAR_ASSIST_RUDDER_DELAY = 0.25;             // s held still in the water before it's a rudder…
+const OAR_ASSIST_RUDDER_RAMP = 0.3;               // …coming on over this (and planted: sweeping ahead from there is a back stroke)
+const OAR_ASSIST_REARM_STILL_S = 0.5;             // s: held still after a stroke, the blade goes back in
 const MAX_MANA = 100;
 const WAND_MANA_COST = 10;               // per blast; mana potions refill it
 const WAND_SWIPE_START_SPEED = 405;      // deg/s: a swipe starts…
@@ -2989,6 +3018,73 @@ async function initCore(runtimeContext) {
   const _oarTop = new THREE.Vector3();
   // (the angle of a unit vector's lean along one axis)
   const _oarLean = (v) => Math.asin(THREE.MathUtils.clamp(v, -1, 1));
+  // (OAR_ASSIST) The tilt's oar, helped along: live.assist.mode 'armed' (the phone holds it;
+  // in the water, a sweep of OAR_ASSIST_COMMIT starts a stroke, held still it's a rudder) →
+  // 'drive' (the stroke plays out: live.water 1) → 'lift' → 'recover' (lifted, following the
+  // phone back) → 'armed'. tilt / swing: where the phone puts the oar; r / roll: its sideways tilt.
+  const _oarAssist = (live, roll, r, tilt, swing, k, span, now) => {
+    let as = live.assist;
+    if (!as) as = live.assist = { mode: 'armed', entry: swing, last: swing, v: 0, still: now, armedAt: now, planted: false, t0: now, u: 0, dir: 1, from: 0, to: 0, peak: 0, ext: swing };
+    // (the phone's swing speed, smoothed)
+    as.v += ((swing - as.last) / span - as.v) * (1 - Math.exp(-span / 0.06));
+    as.last = swing;
+    if (Math.abs(as.v) > OAR_ASSIST_STILL_SPEED) as.still = now;
+    const pose = live.pose;
+    const inWater = r >= OAR_ROLL_WATER;
+    live.water = 0;
+    live.rudder = 0;
+    // (lifted out by hand, or over to the other side: the phone has it again)
+    const arm = () => { as.mode = 'armed'; as.entry = swing; as.armedAt = now; as.planted = false; };
+    if ((as.mode === 'lift' || as.mode === 'recover') && (!inWater || Math.sign(roll) !== live.side)) arm();
+    if (as.mode === 'armed') {
+      pose.tilt += (tilt - pose.tilt) * k;
+      pose.swing += (swing - pose.swing) * k;
+      if (!inWater) { arm(); return; }
+      const held = now - Math.max(as.still, as.armedAt) - OAR_ASSIST_RUDDER_DELAY;
+      live.rudder = THREE.MathUtils.clamp(held / OAR_ASSIST_RUDDER_RAMP, 0, 1);
+      if (held >= 0) as.planted = true;
+      // (sweeping ahead without the blade planted is reaching for the catch, not a back stroke:
+      // the stroke is the pull back from the furthest it reached)
+      if (!as.planted) as.entry = Math.max(as.entry, swing);
+      const moved = swing - as.entry;
+      if (Math.abs(moved) < OAR_ASSIST_COMMIT) return;
+      // A stroke: swept back (the top toward you) = forward, ahead = back
+      as.dir = moved < 0 ? 1 : -1;
+      as.from = pose.swing;
+      as.to = THREE.MathUtils.clamp(pose.swing - as.dir * (as.dir > 0 ? OAR_ASSIST_SWEEP_FWD : OAR_ASSIST_SWEEP_BACK), -OAR_SWING_BACK, OAR_SWING_AHEAD);
+      as.mode = 'drive'; as.u = 0; as.peak = 0; as.ext = swing;
+      // (tilted only just past the waterline, the blade's far out: a sweep that turns it — a
+      // power stroke tilted well over, close by the hull, goes straight — canoeBoat.js)
+      live.assist.wide = 1 - THREE.MathUtils.clamp((r - OAR_ROLL_WATER) / (OAR_ASSIST_POWER_ROLL - OAR_ROLL_WATER), 0, 1);
+      live.rudder = 0;
+    }
+    // (the way back starts as soon as the stroke does: the furthest the phone's gone that way)
+    if (as.mode !== 'armed') as.ext = as.dir > 0 ? Math.min(as.ext, swing) : Math.max(as.ext, swing);
+    if (as.mode === 'drive') {
+      // As strong / quick as the phone's fastest through it so far
+      as.peak = Math.max(as.peak, Math.abs(as.v));
+      const t = THREE.MathUtils.clamp((as.peak - OAR_ASSIST_SPEED_SLOW) / (OAR_ASSIST_SPEED_FAST - OAR_ASSIST_SPEED_SLOW), 0, 1);
+      live.strength = 0.5 + 0.5 * t;
+      as.u = Math.min(1, as.u + span / THREE.MathUtils.lerp(OAR_ASSIST_DUR_SLOW, OAR_ASSIST_DUR_FAST, t));
+      pose.swing = as.from + (as.to - as.from) * (as.u * as.u * (3 - 2 * as.u));
+      pose.tilt += (OAR_ASSIST_DRIVE_TILT - pose.tilt) * (1 - Math.exp(-OAR_TILT_FOLLOW * 1.5 * span));
+      live.water = 1;
+      if (as.u >= 1) { as.mode = 'lift'; as.t0 = now; }
+      return;
+    }
+    if (as.mode === 'lift') {
+      pose.tilt += (OAR_REST_TILT - pose.tilt) * (1 - Math.exp(-14 * span));
+      if (now - as.t0 >= OAR_ASSIST_LIFT_S) as.mode = 'recover';
+      return;
+    }
+    // Recovery: lifted clear, brought round with the phone; ready again once it's come
+    // OAR_ASSIST_RECOVER back the other way and isn't still swinging that way fast
+    pose.tilt += (OAR_REST_TILT - pose.tilt) * k;
+    pose.swing += (swing - pose.swing) * k;
+    // (or held still a while: the blade goes back in where it is — a rudder)
+    if (((swing - as.ext) * as.dir >= OAR_ASSIST_RECOVER && as.v * as.dir < OAR_ASSIST_STILL_SPEED)
+      || now - as.still > OAR_ASSIST_REARM_STILL_S) arm();
+  };
   const _detectOarTilt = (q, now) => {
     const ot = _oarTilt;
     _oarTop.set(0, 0, 1).applyQuaternion(q);
@@ -3015,12 +3111,17 @@ async function initCore(runtimeContext) {
       : THREE.MathUtils.lerp(OAR_WATER_TILT, OAR_DEEP_TILT, Math.min(1, (r - OAR_ROLL_WATER) / (OAR_ROLL_DEEP - OAR_ROLL_WATER)));
     const swing = THREE.MathUtils.clamp(OAR_MID_SWING + pitch * OAR_PITCH_GAIN, -OAR_SWING_BACK, OAR_SWING_AHEAD);
     const k = 1 - Math.exp(-OAR_TILT_FOLLOW * span);
-    live.pose.tilt += (tilt - live.pose.tilt) * k;
-    live.pose.swing += (swing - live.pose.swing) * k;
-    // (which side, smoothly: straight ahead in the middle, all the way out by OAR_ROLL_SIDE)
+    if (OAR_ASSIST) _oarAssist(live, roll, r, tilt, swing, k, span, now);
+    else {
+      live.pose.tilt += (tilt - live.pose.tilt) * k;
+      live.pose.swing += (swing - live.pose.swing) * k;
+    }
+    // (which side, smoothly: straight ahead in the middle, all the way out by OAR_ROLL_SIDE —
+    // kept on its side through an assisted stroke)
     const a = Math.min(1, r / OAR_ROLL_SIDE);
-    live.pose.s += (Math.sign(roll) * a * a * (3 - 2 * a) - live.pose.s) * k;
-    if (Math.abs(live.pose.s) > 0.05) live.side = Math.sign(live.pose.s);
+    const busy = live.assist && live.assist.mode !== 'armed';
+    live.pose.s += ((busy ? live.side : Math.sign(roll) * a * a * (3 - 2 * a)) - live.pose.s) * k;
+    if (!busy && Math.abs(live.pose.s) > 0.05) live.side = Math.sign(live.pose.s);
     if (ot.active) _oarStroke = null;
   };
   // (in place) The oar's hold for the stroke going on (or at rest, lifted beside the hull on
