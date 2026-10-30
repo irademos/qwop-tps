@@ -11,7 +11,7 @@
 // starts pointed at the island's fishing spot, the player facing over its side with the rod;
 // 🛶 Oar puts the oar in hand, faces the player forward and (if it's drifted round) turns the
 // canoe back to the fishing spot, so paddling straight on gets there (canoeBoat.js paddles: the
-// oar's blade with a gyro, else W / S / A / D or — touch screens — the joystick). Near the spot with
+// phone's tilt with a gyro, else W / S / A / D or — touch screens — the joystick). Near the spot with
 // dry ground in reach, 🛶 Get out → onLanded: Town starts there as the guest, normal UI.
 // ⬅ Lobby → onLobby (the start screen); Sign In → onSignIn (the login form).
 //
