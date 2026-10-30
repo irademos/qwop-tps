@@ -150,7 +150,11 @@ const OAR_ITEM_ID = 'canoe_oar';
 // themselves to fit (_oarPose: side, direction and tempo from the steer). The gyro-held oar that
 // came before (the tilt holding the blade, assisted strokes): docs/archive/canoe-gyro-paddling.md
 const OAR_STEER_DEAD = 6 * Math.PI / 180;
-const OAR_STEER_FULL = 28 * Math.PI / 180;
+const OAR_STEER_FULL = 28 * Math.PI / 180;      // tipped forward / back
+// Turning is gentler: all the way only by OAR_STEER_TURN_FULL, and eased in (OAR_STEER_TURN_CURVE —
+// a small lean turns it a little, a big one properly)
+const OAR_STEER_TURN_FULL = 40 * Math.PI / 180;
+const OAR_STEER_TURN_CURVE = 1.6;
 const OAR_POSE_RATE = 16;  // per s: the oar easing into the stroke's pose
 const OAR_LEAN_RATE = 6;   // per s: the hands moving over to the other side
 // The hull the oar is kept out of (player-local, the player standing at CANOE_STAND_Z facing
@@ -2968,9 +2972,9 @@ async function initCore(runtimeContext) {
   const _oarTilt = { steer: { fwd: 0, turn: 0 }, at: 0, rest: new THREE.Quaternion() };
   const _oarStrokeReset = () => { _oarStroke = null; _oarTilt.at = 0; _oarTilt.steer.fwd = 0; _oarTilt.steer.turn = 0; };
   const _oarDQ = new THREE.Quaternion();
-  const _oarSteerAxis = (a) => {
+  const _oarSteerAxis = (a, full = OAR_STEER_FULL, curve = 1) => {
     const m = Math.abs(a);
-    return m <= OAR_STEER_DEAD ? 0 : Math.sign(a) * Math.min(1, (m - OAR_STEER_DEAD) / (OAR_STEER_FULL - OAR_STEER_DEAD));
+    return m <= OAR_STEER_DEAD ? 0 : Math.sign(a) * Math.min(1, (m - OAR_STEER_DEAD) / (full - OAR_STEER_DEAD)) ** curve;
   };
   // q: the phone's hold, player-local (+X the player's left, +Z ahead) — any way it's held
   const _readOarTilt = (q, now) => {
@@ -2984,7 +2988,7 @@ async function initCore(runtimeContext) {
     const sinHalf = Math.sqrt(Math.max(0, 1 - _oarDQ.w * _oarDQ.w));
     const k = sinHalf > 1e-6 ? (2 * Math.acos(Math.min(1, _oarDQ.w))) / sinHalf : 2;
     ot.steer.fwd = _oarSteerAxis(_oarDQ.x * k);
-    ot.steer.turn = _oarSteerAxis(_oarDQ.z * k);
+    ot.steer.turn = _oarSteerAxis(_oarDQ.z * k, OAR_STEER_TURN_FULL, OAR_STEER_TURN_CURVE);
   };
   // The tilt's steer while the oar's out and the gyro's live, else null
   const _oarTiltSteer = () => (_oarActive && _oarTilt.at && performance.now() / 1000 - _oarTilt.at < 0.5 ? _oarTilt.steer : null);

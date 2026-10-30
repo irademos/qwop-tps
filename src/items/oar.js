@@ -45,7 +45,7 @@ export function oarGripPoint(up, lean, out) {
 export const OAR_STROKE_CATCH = 0.2;   // u: in the water from here…
 export const OAR_STROKE_PULL = 0.62;   // …pulling till here…
 export const OAR_STROKE_EXIT = 0.78;   // …out of it by here (the next stroke may start)
-const OAR_STROKE_S = [0.95, 0.6];      // s: a stroke at no / full strength
+const OAR_STROKE_S = [1.9, 1.3];       // s: a stroke at no / full strength
 const DEG = Math.PI / 180;
 export const OAR_REST_TILT = 62 * DEG; // from straight down: at rest, lifted clear
 const IN_TILT = 33 * DEG;              // in the water
@@ -58,6 +58,13 @@ export const OAR_REST_SWING = 8 * DEG;
 export const oarStrokeDuration = (strength) => OAR_STROKE_S[0] + (OAR_STROKE_S[1] - OAR_STROKE_S[0]) * Math.min(1, Math.max(0, strength));
 /** How far through the pull at u (0…1). */
 export const oarStrokePull = (u) => Math.min(1, Math.max(0, (u - OAR_STROKE_CATCH) / (OAR_STROKE_PULL - OAR_STROKE_CATCH)));
+/** How hard the blade's pushing at u (0…1): nothing out of the water, swelling and easing through
+ * the pull (a sine) — 1 on average over the whole stroke, so a push × this is the same push in all
+ * (canoeBoat.js: the canoe surges with each stroke and glides between). */
+export const oarStrokePush = (u) => {
+  const p = oarStrokePull(u);
+  return p > 0 && p < 1 ? Math.sin(Math.PI * p) * (Math.PI / 2) / (OAR_STROKE_PULL - OAR_STROKE_CATCH) : 0;
+};
 const ease = (a, b, t) => a + (b - a) * (t * t * (3 - 2 * t));
 /** The blade's pose at u of a stroke (dir: 1 forward, −1 back; lift 0…1 out of the water): { tilt, swing } in radians. */
 export function oarStrokePose(u, dir = 1, lift = 0) {

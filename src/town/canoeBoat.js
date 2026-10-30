@@ -5,8 +5,11 @@
 //
 // The steer's forward / back pushes it along (CANOE_STEER_ACCEL; back CANOE_PADDLE_BACK as hard),
 // its left / right turns it (CANOE_STEER_TURN). The oar's strokes play by themselves to fit
-// (bootstrapGameApp.js `_oarPose`); each one surges the push through its pull and eases it
-// between (CANOE_STROKE_SURGE), so the canoe moves with them. The hull slides along easily and
+// (bootstrapGameApp.js `_oarPose`), and the push / turn comes with them: CANOE_STROKE_SYNC of it
+// through each stroke's pull, swelling and easing like the blade's sweep (oarStrokePush — the
+// same in all), so the canoe surges with each stroke and glides between. It tilts with it too:
+// heeled over toward the side being paddled through the pull (CANOE_HEEL_STROKE), leaning out
+// of a turn (CANOE_HEEL_TURN), the bow lifting as it surges (CANOE_PITCH_PER_ACCEL). The hull slides along easily and
 // hardly sideways (CANOE_DRAG / CANOE_SIDE_DRAG). Up against the shore or a dock it slides / turns
 // along it, pushed off a little (bump), instead of stopping dead.
 //
@@ -16,12 +19,12 @@
 
 import * as THREE from 'three';
 import { createCanoe, CANOE_FLOOR_Y, CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
-import { oarStrokePull } from '../items/oar.js';
+import { oarStrokePull, oarStrokePush } from '../items/oar.js';
 import { createWaterSplash } from '../items/waterSplash.js';
 import {
-  CANOE_BOB, CANOE_DRAG, CANOE_MAX_SPEED, CANOE_MIN_DEPTH, CANOE_PADDLE_BACK, CANOE_SETTLE_DRAG,
-  CANOE_SIDE_DRAG, CANOE_SPLASH_EVERY, CANOE_STAND_Z, CANOE_STEER_ACCEL, CANOE_STEER_TURN, CANOE_STROKE_SURGE,
-  CANOE_TURN_DRAG,
+  CANOE_BOB, CANOE_DRAG, CANOE_HEEL_STROKE, CANOE_HEEL_TURN, CANOE_MAX_SPEED, CANOE_MIN_DEPTH, CANOE_PADDLE_BACK,
+  CANOE_PITCH_PER_ACCEL, CANOE_SETTLE_DRAG, CANOE_SIDE_DRAG, CANOE_SPLASH_EVERY, CANOE_STAND_Z, CANOE_STEER_ACCEL,
+  CANOE_STEER_TURN, CANOE_STROKE_SYNC, CANOE_TILT_RATE, CANOE_TURN_DRAG,
 } from './townConfig.js';
 
 // Where the hull's water depth is checked (canoe-local m: across, along)
@@ -36,6 +39,8 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     blade: null,        // the oar blade's last world position + time
     bladeIn: false,     // its blade in the water (for the splash going in / coming out)
     splashAt: 0,        // s (real clock): the next drops off a stroke
+    roll: 0, pitch: 0,  // rad: its tilt (+ roll = the left side up — heeled to the right, + pitch = bow down)
+    heelTo: 0, accel: 0, // this frame's paddling: the heel it wants, its push along it (m/s²)
   };
   // (world space: put beside the canoe in whatever holds it, the first time it moves)
   const splash = createWaterSplash();
@@ -65,7 +70,8 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
   // On the water, bobbing (t: s)
   const place = (t) => {
     boat.group.position.set(boat.x, waterY(boat.x, boat.z) + Math.sin(t * 1.7) * CANOE_BOB, boat.z);
-    boat.group.rotation.set(Math.sin(t * 1.1) * 0.015, boat.yaw, Math.sin(t * 1.3 + 1) * 0.02);
+    // (heading, then pitch, then roll — about the canoe's own axes)
+    boat.group.rotation.set(Math.sin(t * 1.1) * 0.015 + boat.pitch, boat.yaw, Math.sin(t * 1.3 + 1) * 0.02 + boat.roll, 'YXZ');
   };
   const stop = () => {
     boat.vx = 0;
@@ -120,15 +126,19 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
       c.blade = null;
       c.bladeIn = false;
     }
-    // The steer pushes / turns it — harder through a stroke's pull, less between (about the same
-    // on the whole: the pull is ~40 % of a stroke)
-    const surge = stroke ? (pulling ? 1 + CANOE_STROKE_SURGE : 1 - CANOE_STROKE_SURGE * 0.7) : 1;
+    // The steer pushes / turns it — with the strokes: mostly through their pulls, as the blade
+    // sweeps (the same on the whole), a little steady
+    const push = stroke ? oarStrokePush(stroke.u) : 1;
+    const surge = 1 - CANOE_STROKE_SYNC + CANOE_STROKE_SYNC * push;
+    c.accel = 0;
     if (Math.abs(steer.fwd) > 0.05) {
-      const a = steer.fwd * CANOE_STEER_ACCEL * (steer.fwd < 0 ? CANOE_PADDLE_BACK : 1) * surge * dt;
-      c.vx += Math.sin(c.yaw) * a;
-      c.vz += Math.cos(c.yaw) * a;
+      c.accel = steer.fwd * CANOE_STEER_ACCEL * (steer.fwd < 0 ? CANOE_PADDLE_BACK : 1) * surge;
+      c.vx += Math.sin(c.yaw) * c.accel * dt;
+      c.vz += Math.cos(c.yaw) * c.accel * dt;
     }
     if (Math.abs(steer.turn) > 0.05) c.w -= steer.turn * CANOE_STEER_TURN * surge * dt;
+    // (heeled over toward the side the blade's pulling on — side 1 = left: its side down, − roll)
+    c.heelTo = stroke ? -stroke.side * CANOE_HEEL_STROKE * (stroke.strength ?? 1) * Math.sin(Math.PI * oarStrokePull(stroke.u)) : 0;
   };
 
   // Up against the shore / a dock: the way off it (world, unit) — toward deeper water from the
@@ -212,6 +222,14 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
       if (fits(nx, nz, nyaw) || !fits(c.x, c.z, c.yaw)) { c.x = nx; c.z = nz; c.yaw = nyaw; }
       else bump(nx, nz, nyaw);
     }
+    // Its tilt: heeled toward the paddle, leaning out of the turn (turning left — w + — it leans
+    // right: + roll), the bow up as it surges on; eased in. Paddling's wants are used up here, so
+    // with none next frame (settled, the rod out, not aboard) it eases level.
+    const k = 1 - Math.exp(-CANOE_TILT_RATE * dt);
+    c.roll += (c.heelTo + c.w * CANOE_HEEL_TURN - c.roll) * k;
+    c.pitch += (-c.accel * CANOE_PITCH_PER_ACCEL - c.pitch) * k;
+    c.heelTo = 0;
+    c.accel = 0;
     place(t);
     const holder = boat.group.parent;
     if (holder && splash.group.parent !== holder) holder.add(splash.group);
