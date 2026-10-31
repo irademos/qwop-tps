@@ -118,10 +118,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   }
 
   // Wall climbing (PlayerControls._updateClimb): hand over hand up the wall in front,
-  // overriding the weapon grip while it lasts; scaled by the character's grip like the
-  // weapon hold, so smaller characters (village boy / girl) don't over-stretch their arms
+  // overriding the weapon grip while it lasts; scaled per character (holdByUrl `climb`),
+  // so smaller characters (village boy / girl) don't over-stretch their arms
   if (options.climbing && rig.floatingHands) {
-    const grip = characterHold(rig.characterUrl).grip;
+    const grip = characterHold(rig.characterUrl).climb;
     const phase = (options.climbPhase || 0) * CLIMB_HAND_CYCLES_PER_M * Math.PI * 2;
     for (const side of ['left', 'right']) {
       const reach = side === 'left' ? Math.sin(phase) : -Math.sin(phase);
