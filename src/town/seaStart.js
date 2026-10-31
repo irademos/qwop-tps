@@ -15,10 +15,11 @@
 // dry ground in reach, 🛶 Get out → onLanded: Town starts there as the guest, normal UI.
 // ⬅ Lobby → onLobby (the start screen); Sign In → onSignIn (the login form).
 //
-// Where the canoe starts out is a fishing spot: Town's fishing (townFishing.js) is installed on a
-// small stand-in for the town's state (`F`), the spot where the canoe starts (within
-// SEA_FISH_REACH), all water but the canoe itself; what's caught (up to BAG_MAX) is shown by the
-// tools and comes ashore into Town with the player (onLanded's `goods`).
+// Fishing works anywhere on the water, as from Town's canoe: Town's fishing (townFishing.js) is
+// installed on a small stand-in for the town's state (`F`) with F.fishAnywhere / F.fishWater (all
+// water but the canoe itself), the canoe coming to rest while the rod's out (boat.settle) and
+// the line reeled in past FISH_CANOE_DRIFT of drift; what's caught (up to BAG_MAX) is shown by
+// the tools and comes ashore into Town with the player (onLanded's `goods`).
 
 import * as THREE from 'three';
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
@@ -35,8 +36,6 @@ const SEA_LAND_CHECK_S = 0.25;    // s between looks for the shore
 const OCEAN_SIZE = 2400;          // m — the stand-in ocean, centred on the start
 const SEABED_DEPTH = 7;           // m under the surface
 const SEABED_COLOR = 0x1f5f78;
-const SEA_FISH_REACH = 30;        // m from where the canoe starts: its fishing spot
-const SEA_FISH_DRIFT = 4;         // m the canoe may drift with the line out before it's reeled in
 const SEA_NOTE_MS = 4000;         // a note's time on screen
 
 // ctx: the game (bootstrapGameApp.js); config: MAPS.islandTown.seaStart
@@ -133,7 +132,8 @@ export function createSeaStart(ctx, config) {
   };
 
   // ── Fishing: Town's (townFishing.js) on a stand-in for the town's state ──
-  // (the spot: where the canoe started; water: anywhere but in the canoe)
+  // (anywhere on the water, as from Town's canoe; water: anywhere but in the canoe)
+  const isSeaWater = (x, z) => !!boat && boat.floorAt(x, z) === undefined && waterDepth(x, z) > 0.4;
   const F = {
     hud,
     simT: 0,
@@ -141,14 +141,13 @@ export function createSeaStart(ctx, config) {
     sequence: null,
     jail: null,
     goods: { fish: 0 },
-    fishSpotReach: SEA_FISH_REACH,
-    fishCancelReach: SEA_FISH_DRIFT,
-    fishAwayText: 'Too far out — fish where you started, or paddle on to the island.',
+    fishAnywhere: () => active && !!boat,
+    fishWater: (x, z) => isSeaWater(x, z),
     layout: {
       places: { fishSpot: null },
       nav: {
         indexAt: (x, z) => ({ x, z }),
-        isWater: (p) => !!boat && boat.floorAt(p.x, p.z) === undefined && waterDepth(p.x, p.z) > 0.4,
+        isWater: (p) => isSeaWater(p.x, p.z),
       },
     },
     playerPos: () => ctx.getPlayerModel().position,
@@ -315,7 +314,11 @@ export function createSeaStart(ctx, config) {
       if (Math.abs(d) <= step) { boat.yaw = aimYaw; aimYaw = null; } else boat.yaw += Math.sign(d) * step;
     }
     if (held === 'oar' && aimYaw == null) boat.paddle(dt, ctx.getOarModel(), ctx.getSteer(), ctx.getOarStroke());
-    else boat.blade = null;
+    else {
+      boat.blade = null;
+      // (the rod out: the canoe comes to rest, as Town's does)
+      if (held === 'rod' && aimYaw == null) boat.settle(dt);
+    }
     boat.move(dt, simT);
     const s = boat.standPoint();
     ctx.carryPlayer(s.x, boat.floorY(), s.z, boat.yaw - yawBefore);
