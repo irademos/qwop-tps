@@ -2,6 +2,7 @@ import { CAMERA_CONFIG_DEFAULTS } from './controls.js';
 import {
   loadDraftRoutes, discardDraftRoutes, formatRoutes, isUsingDraftRoutes, setUsingDraftRoutes,
 } from '../map/stageRoutes.js';
+import { clearCacheAndReload } from '../core/appUpdate.js';
 const TAB_KEY = 'settings:lastTab';
 
 const TABS = [
@@ -1127,22 +1128,11 @@ async function handleAction(target) {
       updateNameSaveState();
     }
   } else if (action === 'clear-cache') {
-    // Service worker caches (public/service-worker.js) + the worker itself; the reload
-    // fetches fresh files and registers it again. localStorage / cookies are untouched.
+    // Service worker caches + the worker itself (src/core/appUpdate.js — also the update banner's button).
     if (!window.confirm('Clear the cached game files and reload?')) return;
     elements.clearCacheButton.disabled = true;
     elements.clearCacheStatus.textContent = 'Clearing cache...';
-    try {
-      if ('caches' in window) {
-        const keys = await caches.keys();
-        await Promise.all(keys.map(key => caches.delete(key)));
-      }
-      const registrations = await navigator.serviceWorker?.getRegistrations?.() ?? [];
-      await Promise.all(registrations.map(registration => registration.unregister()));
-    } catch (error) {
-      console.warn('Failed to clear cache:', error);
-    }
-    window.location.reload();
+    await clearCacheAndReload();
   } else if (action === 'delete-account') {
     if (elements.deleteAccountConfirm) {
       elements.deleteAccountConfirm.hidden = false;

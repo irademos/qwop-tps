@@ -959,6 +959,45 @@ body:not(.settings-ready) #settings-button {
   display: none;
 }
 
+/* "There's a new version of the game" — src/core/appUpdate.js */
+.update-banner {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translate(-50%, -140%);
+  opacity: 0;
+  z-index: 9600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 120px);
+  padding: 8px 8px 8px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  transition: transform 0.35s var(--ease), opacity 0.35s;
+}
+.update-banner.is-shown {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+.update-banner-text { flex: 1 1 auto; }
+.update-banner-btn {
+  flex: none;
+  padding: 6px 14px;
+  min-height: 0;
+  font-size: 13px;
+}
+@media (max-width: 520px) {
+  .update-banner { flex-wrap: wrap; justify-content: center; border-radius: var(--radius-md, 14px); text-align: center; }
+  .update-banner-text { flex-basis: 100%; }
+}
+
 #pickup-toast-container {
   position: fixed;
   left: 50%;
@@ -4818,7 +4857,7 @@ body.town-shop-open #action-buttons { visibility: hidden; }
    at the bottom (+ 🛶 Get out by the fishing spot); everything else on the page is hidden but
    the phone QR / calibration popups.
    Touch screens without a gyro get the joystick back while the oar's out (body.sea-steer). */
-body.sea-start > :not(#game-container):not(#sea-hud):not(#phone-sword-qr-modal):not(#phone-sword-connect-calib):not(#phone-sword-calib-modal) { display: none !important; }
+body.sea-start > :not(#game-container):not(#sea-hud):not(#update-banner):not(#phone-sword-qr-modal):not(#phone-sword-connect-calib):not(#phone-sword-calib-modal) { display: none !important; }
 body.sea-start.sea-steer > #joystick-container { display: block !important; }
 .sea-hud {
   position: fixed;

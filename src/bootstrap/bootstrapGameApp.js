@@ -1,4 +1,5 @@
 // app.js
+import '../core/appUpdate.js'; // "new version" banner — first, so it runs even if the game can't boot
 import QRCode from 'qrcode';
 import * as THREE from "three";
 import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/bloodEffect.js";
