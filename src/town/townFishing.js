@@ -27,9 +27,9 @@
 
 //
 // The guest's sea start (seaStart.js) installs this too, on a small stand-in for the town's
-// state: its fishing spot is where the canoe starts out, with its own reach (T.fishSpotReach, m)
-// and room for the canoe's drift (T.fishCancelReach, m) and its own line for out of reach
-// (T.fishAwayText).
+// state, fishing anywhere on the water from its canoe like Town's (T.fishAnywhere / T.fishWater).
+// (T.fishSpotReach / T.fishCancelReach / T.fishAwayText can still override the spot's reach, the
+// drift allowed and the out-of-reach line for a stand-in with a spot of its own.)
 
 import * as THREE from 'three';
 import { createFishingRig } from '../items/fishingRod.js';
