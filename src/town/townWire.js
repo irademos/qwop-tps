@@ -123,7 +123,7 @@ export function installTownWire(T, ctx) {
     n.knock = { vx: dir.x * 3, vz: dir.z * 3, left: 0.25 };
     if (n.hp <= 0) { T.die(n, { by, noCoins: true }); return; }
     T.clearTalk(n);
-    T.say(n, shout(SHOUT_HURT));
+    T.say(n, shout(SHOUT_HURT, n));
     T.flee(n, from);
   };
   // The host's part of a death: someone moves in later, everyone's told

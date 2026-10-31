@@ -2,7 +2,12 @@
 // (speechSynthesis) — free, no keys, no limits, the voices the system has (most offline).
 // Each speaker gets their own voice: one of the system's English voices (picked by a hash of
 // their key, from the pool that matches how they sound — `kind`) plus their own pitch and rate,
-// so even a system with one voice gives everyone a different one.
+// so even a system with one voice gives everyone a different one. A `family` (a kind of speaker —
+// Town's pumpkins, tree folk, frogs…) shares one accent: its preferred English locale if the system
+// has it (`ACCENTS`), else one voice picked by the family's name — so the frogs all sound like
+// frogs, not like a random draw.
+// Some systems (Firefox on Linux — speech-dispatcher / eSpeak) list one voice per accent and none
+// by gender: then every pool is the whole list and gender comes from pitch alone (`noPool`).
 // Volume: the audio manager's master × voice volume × distance falloff (audioManager.js
 // distanceGain — `at` = where the speaker is). The browser says one line at a time, so:
 //   'talk'    — a conversation with the player: cuts off any ambient line; `interrupt` cuts off
@@ -16,16 +21,28 @@ import { distanceGain } from './audioManager.js';
 
 // (names in the system's voice list that tell how a voice sounds; "female" is checked first —
 // it contains "male")
-const FEMALE_VOICE = /female|woman|girl|samantha|victoria|karen|moira|tessa|fiona|zira|susan|hazel|serena|allison|\bava\b|kate|veena|catherine|libby|sonia|natasha|aria|jenny|emma|amy|joanna|salli|kimberly|ivy|kendra|nicky|martha|shelley|sandy|flo|grandma|kathy|vicki|princess|zoe|nora|linda|heera|michelle|ana\b|clara|luciana|monica|paulina/i;
-const MALE_VOICE = /\bmale\b|\bman\b|daniel|david|mark|\balex\b|fred|george|james|oliver|rishi|\btom\b|aaron|arthur|gordon|guy|ryan|thomas|brian|joey|justin|matthew|eddy|reed|rocko|ralph|albert|junior|grandpa|lee|nathan|evan|christopher|eric|roger|steffan|william|liam|ravi|prabhat/i;
+const FEMALE_VOICE = /\+f\d|female|woman|girl|samantha|victoria|karen|moira|tessa|fiona|zira|susan|hazel|serena|allison|\bava\b|kate|veena|catherine|libby|sonia|natasha|aria|jenny|emma|amy|joanna|salli|kimberly|ivy|kendra|nicky|martha|shelley|sandy|flo|grandma|kathy|vicki|princess|zoe|nora|linda|heera|michelle|ana\b|clara|luciana|monica|paulina/i;
+const MALE_VOICE = /\+m\d|\bmale\d*\b|\bman\b|daniel|david|mark|\balex\b|fred|george|james|oliver|rishi|\btom\b|aaron|arthur|gordon|guy|ryan|thomas|brian|joey|justin|matthew|eddy|reed|rocko|ralph|albert|junior|grandpa|lee|nathan|evan|christopher|eric|roger|steffan|william|liam|ravi|prabhat/i;
 
 // Pitch / rate by how a speaker sounds (each speaker then gets a little of their own on top)
+// (`noPool`: the pitch when the system has no voice of that pool — most such voices are male,
+// so a female one is pitched further up and a male one a little further down)
 const KINDS = {
-  female: { pool: 'female', pitch: 1.15, rate: 1.0 },
-  male: { pool: 'male', pitch: 0.9, rate: 0.98 },
-  kid: { pool: 'female', pitch: 1.6, rate: 1.08 },
-  gruff: { pool: 'male', pitch: 0.6, rate: 0.92 },
-  old: { pool: 'male', pitch: 0.75, rate: 0.88 },
+  female: { pool: 'female', pitch: 1.15, noPool: 1.45, rate: 1.0 },
+  male: { pool: 'male', pitch: 0.9, noPool: 0.82, rate: 0.98 },
+  kid: { pool: 'female', pitch: 1.6, noPool: 1.75, rate: 1.08 },
+  gruff: { pool: 'male', pitch: 0.6, noPool: 0.55, rate: 0.92 },
+  old: { pool: 'male', pitch: 0.75, noPool: 0.7, rate: 0.88 },
+};
+// The accent a family of speakers prefers (tested on "<lang> <name>", first match wins); one with
+// none here, or none available, gets a voice picked by its name
+const ACCENTS = {
+  pumpkin: [/en[-_]us|america/i],
+  gem: [/en[-_]us|america/i],
+  tree: [/scot/i, /en[-_]ie|irish|ireland/i, /en[-_]gb|brit|england|\buk\b/i],
+  frog: [/en[-_]au|austral/i, /en[-_]nz|zealand/i],
+  antler: [/en[-_]gb|brit|england|\buk\b/i],
+  wizard: [/en[-_]gb|brit|england|\buk\b|received/i, /scot/i],
 };
 
 const hashOf = (s) => {
@@ -101,28 +118,33 @@ export function createSpeech({ audio = () => window.audioManager } = {}) {
 
   /**
    * A speaker's voice: `key` (a stable id — their name), `kind` ('female' | 'male' | 'kid' |
-   * 'gruff' | 'old'). → { voice, pitch, rate }
+   * 'gruff' | 'old'), `family` (optional — speakers who share an accent). → { voice, pitch, rate }
    */
-  const voiceFor = (key, kind = 'male') => {
+  const voiceFor = (key, kind = 'male', family = null) => {
     const k = KINDS[kind] ?? KINDS.male;
     const h = hashOf(String(key));
-    const pool = pools[k.pool]?.length ? pools[k.pool] : pools.all;
-    const voice = pool.length ? pool[h % pool.length] : null;
+    const pooled = pools[k.pool]?.length > 0;
+    const pool = pooled ? pools[k.pool] : pools.all;
+    let voice = null;
+    if (pool.length && family) {
+      const accented = (ACCENTS[family] ?? []).map((re) => pool.filter((v) => re.test(`${v.lang} ${v.name}`))).find((l) => l.length);
+      voice = accented ? accented[h % accented.length] : pool[hashOf(`family:${family}`) % pool.length];
+    } else if (pool.length) voice = pool[h % pool.length];
     const jitter = (bits) => (((h >>> bits) & 0xff) / 255) * 2 - 1; // −1 … 1
     return {
       voice,
-      pitch: Math.max(0.1, Math.min(2, k.pitch + jitter(8) * 0.14)),
+      pitch: Math.max(0.1, Math.min(2, (pooled ? k.pitch : k.noPool) + jitter(8) * 0.14)),
       rate: Math.max(0.5, Math.min(2, k.rate + jitter(16) * 0.08)),
     };
   };
 
   /**
-   * Say `text`. `key` / `kind` pick the voice (voiceFor), `at` = where the speaker is (quieter
+   * Say `text`. `key` / `kind` / `family` pick the voice (voiceFor), `at` = where the speaker is (quieter
    * further from the listener — `falloff` = distanceGain options), `volume` a multiplier,
    * `priority` 'talk' | 'ambient', `interrupt` (talk) cuts off whatever's being said.
    * → true if it was said (or queued)
    */
-  const say = (text, { key = 'someone', kind = 'male', at = null, falloff, volume = 1, priority = 'ambient', interrupt = false } = {}) => {
+  const say = (text, { key = 'someone', kind = 'male', family = null, at = null, falloff, volume = 1, priority = 'ambient', interrupt = false } = {}) => {
     if (!supported) return false;
     const words = speakable(text);
     if (!words) return false;
@@ -130,7 +152,7 @@ export function createSpeech({ audio = () => window.audioManager } = {}) {
     const dist = at && am?.distanceTo ? am.distanceTo(at) : 0;
     const level = (am ? (am.masterVolume ?? 1) * (am.voiceVolume ?? 1) : 1) * volume * distanceGain(dist, falloff);
     if (level < 0.02) return false;
-    const v = voiceFor(key, kind);
+    const v = voiceFor(key, kind, family);
     const u = new Utterance(words);
     if (v.voice) { u.voice = v.voice; u.lang = v.voice.lang; }
     u.pitch = v.pitch;

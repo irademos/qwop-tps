@@ -492,7 +492,7 @@ export function installTownTrade(T, ctx) {
       return true;
     };
     if (!pay(food)) return;
-    T.say(n, shout(SHOUT_EAT_BUY));
+    T.say(n, shout(SHOUT_EAT_BUY, n));
     setTimeout(() => { if (T.active && merchant.alive) T.say(merchant, `That's ${T.market.price(food)} coins!`); }, 900);
     n.needs.hunger = 0;
     if (Math.random() < FIREWOOD_CHANCE) pay('wood');

@@ -84,7 +84,7 @@ export function installTownLaw(T, ctx) {
     // Kids can't be hurt: they just run off
     if (n.def.unhurt) {
       n.attitude = Math.max(-1, n.attitude - 0.3);
-      T.say(n, shout(SHOUT_HURT));
+      T.say(n, shout(SHOUT_HURT, n));
       flee(n);
       return;
     }
@@ -109,11 +109,11 @@ export function installTownLaw(T, ctx) {
     if (outlaw) T.heroic(n);
     else crime('assault', n);
     if (n.def.law || Math.random() < n.def.brave) {
-      T.say(n, shout(n.def.law ? SHOUT_LAW : SHOUT_FIGHT));
+      T.say(n, shout(n.def.law ? SHOUT_LAW : SHOUT_FIGHT, n));
       T.endBrawl(n);
       promote(n);
     } else {
-      T.say(n, shout(SHOUT_HURT));
+      T.say(n, shout(SHOUT_HURT, n));
       flee(n);
     }
     if (!outlaw) T.rally(n);
@@ -214,9 +214,9 @@ export function installTownLaw(T, ctx) {
       if (kind === 'murder' && w !== victim) T.remember(w, 'sawMurder', { who: victim ? firstName(victim.name) : 'them' });
       else if (kind === 'theft' && w === victim) T.remember(w, 'stole');
       if (w === victim || w.fighter || w.def.law) continue;
-      if (kind === 'theft') { T.say(w, shout(SHOUT_THIEF)); continue; }
+      if (kind === 'theft') { T.say(w, shout(SHOUT_THIEF, w)); continue; }
       flee(w);
-      if (Math.random() < 0.6) T.say(w, kind === 'murder' ? shout(SHOUT_MURDER) : shout(SHOUT_HELP));
+      if (Math.random() < 0.6) T.say(w, kind === 'murder' ? shout(SHOUT_MURDER, w) : shout(SHOUT_HELP, w));
     }
     if (kind === 'theft' && victim?.alive && witnesses.includes(victim)) T.say(victim, 'Oi! Those are mine!');
     if (T.law.stars > before) {
