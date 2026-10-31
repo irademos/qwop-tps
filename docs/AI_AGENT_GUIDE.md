@@ -16,6 +16,7 @@
 | Game orchestrator / main loop / stages | `src/bootstrap/bootstrapGameApp.js` (~5.5k lines) |
 | Phone controller page | `public/phone-sword.html` (reconnect: `connectToGame`; game side `_createGyroPeer` / `_attachPhoneSwordConn` in `bootstrapGameApp.js`) |
 | Pause while settings open (Showdown / Classic / tutorial / Town) | `_isSettingsPauseWanted` / `_attacksHeld` + top of `animate` in `bootstrapGameApp.js` |
+| "New version" banner (build id `__BUILD_ID__` vs `/version.json`, Update = clear cache + reload, Dismiss) | `src/core/appUpdate.js`; `versionFile` / `define` in `vite.config.js`; `/version.json` no-store in `vercel.json` |
 | Keep the screen awake (Screen Wake Lock) | game `src/core/wakeLock.js`; phone `keepScreenAwake` in `public/phone-sword.html` |
 | Shared runtime state (DI container) | `src/core/appContext.js` |
 | HTML shell + all HUD elements | `index.html` |
@@ -44,7 +45,7 @@
 ```
 src/
   bootstrap/    bootstrapGameApp.js       ← game init, maps (MAPS / _setActiveMap), stages (_ps*), phone link, shop/stats, rAF loop
-  core/         appContext, exposeDebugGlobals, firebase-init, externalDeps (PeerJS/NippleJS CDN), utils (cookies), wakeLock (keepScreenAwake)
+  core/         appContext, exposeDebugGlobals, firebase-init, externalDeps (PeerJS/NippleJS CDN), utils (cookies), wakeLock (keepScreenAwake), appUpdate (new-version banner + clearCacheAndReload)
   player/       playerProfile (Firebase stats/inventory/PIN/leaderboards incl. multiplayerStats {wins, losses, kills, deaths}), healthUtils
   map/          spawnUtils, MapLoader.ts (.mappack loader), stageRoutes (hand-authored Showdown stage routes + drafts)
   environment/  terrainHeight (height resolver registry; layered ground under / over a height — getTerrainLayersAt — and a sideways wall probe — isMapWallBetween — for walking under bridges / overhangs), mapCollision (bullet / bomb segment raycast vs the map BVH), artStyle (load-time texture pass that matches characters/props to the map's look), blobShadows (cheap disc shadows under characters on the low performance tier)
