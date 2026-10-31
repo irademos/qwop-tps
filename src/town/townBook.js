@@ -1,4 +1,4 @@
-// The town book (📖 left of 🔔 on the Town HUD; M key): two pages —
+// The town book (📖 under ⚙️ on the Town HUD; M key): two pages —
 //   Map:  the town from above (the nav grid's ground / roads / water, the houses, the places) with
 //         everyone on it, live — townsfolk (the law blue, bandits orange, anyone fighting the
 //         player red), ❗ / ❓ over whoever has a job / a reward, 📍 where a job's work is, the

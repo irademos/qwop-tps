@@ -83,7 +83,7 @@
 //   peerIds(), send(to, data), broadcast(data), loadRoomState(), saveRoomState(state),
 //   roomId(), canSave(), playerCount(), sendBounty(to, coins)
 
-import { FOUNDING_ROLES, ROLES, TOWN_NAME, characterForRole, firstName, livesOut, randomName } from './townPeople.js';
+import { FOUNDING_ROLES, ROLES, TOWN_NAME, characterForRole, firstName, livesOut, randomName, speciesOf } from './townPeople.js';
 import { GOODS, GOOD_IDS, createMarket } from './townEconomy.js';
 import * as THREE from 'three';
 import { createJobTalk, createQuestTracker } from './townJobs.js';
@@ -336,13 +336,15 @@ export function createTownMode(ctx) {
     if (n.url === glbCharacterConfig.villageGirlUrl) return 'female';
     return FEMININE.has(firstName(n.name)) ? 'female' : 'male';
   };
+  // Who shares an accent: each kind of townsperson (speech.js ACCENTS); the plain folk each their own
+  const voiceFamily = (n) => { const s = speciesOf(n); return s === 'folk' ? null : s; };
   const voiceAt = (n) => ({ x: n.x, y: T.groundY(n) + 1.5, z: n.z });
   // Someone near the player says something (townFolk.js say) — heard, if nothing else is
   // being said; a shout carries further
   const speakNear = (n, text, { big = false } = {}) => {
     if (jobTalk.isOpen() && T.talking?.npc !== n) return;
     speech.say(text, {
-      key: n.name, kind: voiceKind(n), at: voiceAt(n), priority: 'ambient',
+      key: n.name, kind: voiceKind(n), family: voiceFamily(n), at: voiceAt(n), priority: 'ambient',
       volume: big ? 1 : 0.85, falloff: big ? { ref: 4, rolloff: 1, max: SPEECH_SHOUT_DIST } : { ref: 2, rolloff: 1.3, max: SPEECH_DIST },
     });
   };
@@ -358,7 +360,7 @@ export function createTownMode(ctx) {
     const n = T.talking?.npc && firstName(T.talking.npc.name) === first ? T.talking.npc
       : T.npcs.find((x) => x.alive && firstName(x.name) === first);
     speech.say(text, {
-      key: n?.name ?? first, kind: n ? voiceKind(n) : 'male', at: n ? voiceAt(n) : null,
+      key: n?.name ?? first, kind: n ? voiceKind(n) : 'male', family: n ? voiceFamily(n) : null, at: n ? voiceAt(n) : null,
       priority: 'talk', interrupt, falloff: { ref: 3, rolloff: 1, max: 30 },
     });
   };

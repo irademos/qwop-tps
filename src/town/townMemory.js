@@ -19,19 +19,19 @@ const MEMORY_BIAS_MAX = 0.5;         // what memories can hold an attitude at, e
 // weight: how much it holds their attitude up (or down) as it fades; lines: what they say
 // about it ({when}, {name}, {who}, {rel}, {what}, {c})
 const KINDS = {
-  gift:      { weight: 0.03, lines: ['You gave me coins {when}. I won\'t forget it.', 'Still thinking about those coins you gave me {when}, {name}.'] },
-  helped:    { weight: 0.08, lines: ['You helped me out {when} — {what}. Thank you again.', 'Ah, {name}! You helped me {when}. Anything you need.'] },
-  kidHome:   { weight: 0.15, lines: ['You brought {who} home {when}. I can\'t ever repay that.', 'Every time I see {who} playing, I think of you, {name}.'] },
-  saved:     { weight: 0.12, lines: ['You saved me from {who} {when}! I owe you my life.', 'If you hadn\'t come along {when}… thank you, {name}.'] },
+  gift:      { weight: 0.03, lines: ['You gave me coins {when}. I won\'t forget it. I\'ve already spent them, but I won\'t forget.', 'Still thinking about those coins you gave me {when}, {name}. Fondly. Like a pet.'] },
+  helped:    { weight: 0.08, lines: ['You helped me out {when}, {what}. Thank you again.', 'Ah, {name}! You helped me {when}. Anything you need. Anything sensible.'] },
+  kidHome:   { weight: 0.15, lines: ['You brought {who} home {when}. I can\'t ever repay that. Partly because I\'m skint.', 'Every time I see {who} playing, I think of you, {name}. Then I think about getting a lead.'] },
+  saved:     { weight: 0.12, lines: ['You saved me from {who} {when}! I owe you my life. Can I pay it off in instalments?', 'If you hadn\'t come along {when}... thank you, {name}. Truly.'] },
   intro:     { weight: 0.05, lines: ['Settling in, {name}? {what} {when} — you\'re a natural.', 'Good to see you, {name}. Remember {what} {when}?'] },
-  customer:  { weight: 0.02, lines: ['My best supplier! That\'s {c} things you\'ve sold me {when}.', 'Bring me more like {when}, {name} — business is good.'], min: 4 },
-  forgave:   { weight: 0.1, lines: ['You let my debt go {when}. I haven\'t forgotten.', 'Kindest thing anyone\'s done for me, {when}.'] },
-  collected: { weight: -0.06, lines: ['You squeezed me for coins {when}. I remember.', 'Come to shake me down again, like {when}?'] },
-  hurt:      { weight: -0.08, lines: ['You hit me {when}! I remember.', 'Stay back — you hit me {when}.'], over: ['You hit me {when}… but I suppose we\'re past that.'] },
-  stole:     { weight: -0.05, lines: ['You took veg from my field {when}. I saw you.', 'Keep your hands off my crops this time.'] },
+  customer:  { weight: 0.02, lines: ['My best supplier! That\'s {c} things you\'ve sold me {when}. I\'m naming a shelf after you.', 'Bring me more like {when}, {name}. Business is good. Suspiciously good.'], min: 4 },
+  forgave:   { weight: 0.1, lines: ['You let my debt go {when}. I haven\'t forgotten. My creditors have, thanks to you.', 'Kindest thing anyone\'s done for me, {when}. Second kindest was a sandwich in 1203.'] },
+  collected: { weight: -0.06, lines: ['You squeezed me for coins {when}. I remember. My purse remembers. It\'s still thin.', 'Come to shake me down again, like {when}? I\'ve nothing left but lint.'] },
+  hurt:      { weight: -0.08, lines: ['You hit me {when}! I remember. The bruise remembers too. We talk about you.', 'Stay back. You hit me {when}.'], over: ['You hit me {when}... but I suppose we\'re past that. Mostly. The bruise isn\'t.'] },
+  stole:     { weight: -0.05, lines: ['You took veg from my field {when}. I saw you. The carrots saw you.', 'Keep your hands off my crops this time. I\'ve counted them. Twice.'] },
   sawMurder: { weight: -0.15, lines: ['I saw what you did to {who} {when}.', 'I know what you did to {who}. Everyone does.'] },
   killedKin: { weight: -0.6, lines: ['You killed my {rel}, {who}. I\'ll never forget.', '{who} was my {rel}. Murderer.'], forever: true },
-  jailed:    { weight: -0.02, lines: ['Behaving yourself since the cell {when}?', 'Locked you up {when}. Don\'t make me do it again.'] },
+  jailed:    { weight: -0.02, lines: ['Behaving yourself since the cell {when}? The bed\'s still warm, if you miss it.', 'Locked you up {when}. Don\'t make me do it again. The paperwork alone.'] },
 };
 
 // Mood toward the player (attitude −1..1), as shown when talking to them

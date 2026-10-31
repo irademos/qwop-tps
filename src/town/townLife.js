@@ -176,7 +176,7 @@ export function installTownLife(T, ctx) {
     if (t.type === 'social' && !n.bubble && Math.random() < dt / 9) {
       const others = T.npcs.filter((o) => o !== n && o.alive && o.task?.type === 'social' && o.task.phase === 'do' && dist2(o.x, o.z, n.x, n.z) < 4);
       if (others.length) {
-        const lines = chatLines(T.gossip, ctx.getPlayerName());
+        const lines = chatLines(T.gossip, ctx.getPlayerName(), n);
         T.say(n, lines[0]);
         const o = pickOf(others);
         setTimeout(() => { if (T.active && o.alive) T.say(o, lines[1]); }, 2200);
@@ -204,7 +204,7 @@ export function installTownLife(T, ctx) {
     const o = T.npcs.find((m) => m !== n && m.alive && T.mine(m) && !m.fighter && !m.inside && m.fear <= 0
       && (m.task?.type === 'wander') && dist2(m.x, m.z, n.x, n.z) < 6);
     if (!o) return;
-    const lines = chatLines(T.gossip, ctx.getPlayerName());
+    const lines = chatLines(T.gossip, ctx.getPlayerName(), n);
     const dur = rand(6, 9);
     n.task = { type: 'chat', t: 0, phase: 'do', with: o, dur, lines };
     o.task = { type: 'chat', t: 0, phase: 'do', with: n, dur };
