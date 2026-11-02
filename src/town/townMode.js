@@ -1115,6 +1115,8 @@ export function createTownMode(ctx) {
     wantsLantern: () => !!(T.active && T.ready && T.lantern),
     // 0 day … 1 night (twilight in between)
     nightLevel: () => (T.active ? T.nightLevel : 0),
+    // In a house's room / the jail (under the map — no sky; the birds stay away)
+    isIndoors: () => !!(T.active && (T.inRoom || T.jail)),
     // The phone's Block bar label while there's something to do (undefined: it stays Block; null:
     // interact, nothing to do — in the canoe, where Block means nothing)
     interactLabel: () => (T.active && T.acts.length ? T.acts[0].label : T.active && T.inCanoe() ? null : undefined),

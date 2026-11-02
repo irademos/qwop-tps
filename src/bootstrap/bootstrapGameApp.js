@@ -15,6 +15,7 @@ import { registerMapMeshes } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { presetStyleReference, setStyleReference, stylizeObject } from '../environment/artStyle.js';
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
+import { createBirds } from '../environment/birds.js';
 import { showFeatureLoading } from '../features/loadingState.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
@@ -8134,8 +8135,19 @@ async function initCore(runtimeContext) {
   showdownTutorial = createShowdownTutorial(tutorialCtx);
 
   // Clear the field (enemies, bombs, stage) and put the player back on their feet
+  // Birds flying past now and then (src/environment/birds.js): Showdown and Town only
+  const birds = createBirds({ scene });
+  let _birdsMode = false;
+  const _birdsWanted = () => {
+    if (!_birdsMode || _classicMode) return false;
+    if (town?.isActive()) return !town.isIndoors() && town.nightLevel() < 0.5;
+    return (lastAutoMode || getAutoMode()) !== 'night';
+  };
+
   const _resetForMenu = () => {
     cancelBowDraw();
+    _birdsMode = false;
+    birds.clear();
     town?.exit();
     seaStart?.exit();
     _psStopSong();
@@ -9440,6 +9452,8 @@ async function initCore(runtimeContext) {
 
   let _modeStartToken = 0;
   const _startMode = (gameMode) => {
+    _birdsMode = false;
+    birds.clear();
     if (gameMode === 'showdown') {
       _resetForMenu();
       void _psInit();
@@ -9454,6 +9468,8 @@ async function initCore(runtimeContext) {
     } else {
       startTutorialMode();
     }
+    // (after the mode's start: those reset to the menu on the way in)
+    _birdsMode = gameMode === 'showdown' || gameMode === 'town';
   };
 
   // Mode picked on the start screen (first time, after the tutorial, leaving the lobby):
@@ -10872,6 +10888,8 @@ async function initCore(runtimeContext) {
     // Town mode: the townsfolk, the clock, the law
     town?.update(frameDelta);
     _updateTownLantern(frameDelta);
+    // Birds flying past (Showdown / Town)
+    if (playerModel) birds.update(frameDelta, playerModel.position, _birdsWanted());
     // The guest's sea start: the canoe on the sea, the player in it
     seaStart?.update(frameDelta);
     // Ships on the sea bob on the swell
