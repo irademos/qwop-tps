@@ -2856,6 +2856,83 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   opacity: 0.5;
 }
 
+/* ── The bow: held to draw (its own button), crosshair while drawn ─────────────── */
+.ps-bow-btn {
+  background: rgba(120, 84, 40, 0.6) !important;
+  color: #fff !important;
+  border: 1px solid rgba(253, 224, 171, 0.7) !important;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.ps-bow-btn.ps-bow-drawing {
+  background: rgba(217, 160, 72, 0.92) !important;
+  border-color: #fff !important;
+  box-shadow: 0 0 16px rgba(251, 191, 36, 0.75);
+  transform: scale(0.94);
+}
+.ps-bow-btn.ps-bow-empty {
+  opacity: 0.5;
+}
+/* The crosshair (the middle of the screen = where the arrow goes): a dot and four ticks that
+   close in as the string comes back (--spread), the distance in metres beside it */
+.bow-crosshair {
+  --spread: 16px;
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  z-index: 900;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.18s var(--ease, ease);
+}
+.bow-crosshair.is-on {
+  opacity: 1;
+}
+.bow-crosshair i {
+  position: absolute;
+  display: block;
+  background: #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.85);
+  transition: transform 0.08s linear;
+}
+.bow-crosshair .bow-ch-dot {
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+}
+.bow-crosshair .bow-ch-tick.t,
+.bow-crosshair .bow-ch-tick.b {
+  width: 2px;
+  height: 9px;
+  margin-left: -1px;
+}
+.bow-crosshair .bow-ch-tick.l,
+.bow-crosshair .bow-ch-tick.r {
+  width: 9px;
+  height: 2px;
+  margin-top: -1px;
+}
+.bow-crosshair .bow-ch-tick.t { bottom: var(--spread); }
+.bow-crosshair .bow-ch-tick.b { top: var(--spread); }
+.bow-crosshair .bow-ch-tick.l { right: var(--spread); }
+.bow-crosshair .bow-ch-tick.r { left: var(--spread); }
+.bow-crosshair .bow-ch-dist {
+  position: absolute;
+  left: 18px;
+  bottom: 12px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+}
+
 /* ── Town: the flying broom (on / off) ─────────────────────────────────────── */
 .ps-broom-btn {
   background: rgba(146, 64, 14, 0.55) !important;

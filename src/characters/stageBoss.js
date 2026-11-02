@@ -13,7 +13,7 @@
 
 // Gear added stage by stage: stage 1 sword only, stage 2 + shield, stage 3 + bubble, …
 export const STAGE_BOSS_GEAR_ORDER = ['shield', 'bubble', 'bombs', 'gun', 'wand'];
-const GEAR_ICONS = { shield: '🛡️', bubble: '🫧', bombs: '💣', gun: '🔫', wand: '🪄' };
+const GEAR_ICONS = { shield: '🛡️', bubble: '🫧', bombs: '💣', gun: '🏹', wand: '🪄' };
 export function stageBossGear(stage) {
   const n = Math.max(0, Math.min(STAGE_BOSS_GEAR_ORDER.length, Math.floor(stage) - 1));
   const gear = {};

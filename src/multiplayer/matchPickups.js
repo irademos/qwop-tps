@@ -13,8 +13,8 @@ import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 // pops back.
 
 export const PICKUP_TYPES = {
-  gun: { label: 'Gun', emoji: '🔫', color: 0xf59e0b, respawnMs: 25000, weight: 2, mesh: 'gun' },
-  ammo: { label: 'Bullets', emoji: '🔶', color: 0xfacc15, respawnMs: 14000, weight: 1.6, mesh: 'bullets' },
+  gun: { label: 'Bow', emoji: '🏹', color: 0xf59e0b, respawnMs: 25000, weight: 2, mesh: 'gun' },
+  ammo: { label: 'Arrows', emoji: '🪶', color: 0xfacc15, respawnMs: 14000, weight: 1.6, mesh: 'bullets' },
   shield: { label: 'Shield', emoji: '🛡️', color: 0x38bdf8, respawnMs: 25000, weight: 1.4, mesh: 'shield' },
   bomb: { label: 'Bombs', emoji: '💣', color: 0xf97316, respawnMs: 16000, weight: 1.8, mesh: 'bomb' },
   wand: { label: 'Magic Wand', emoji: '🪄', color: 0xa855f7, respawnMs: 30000, weight: 1, mesh: 'wand' },

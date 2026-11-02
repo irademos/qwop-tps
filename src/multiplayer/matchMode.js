@@ -140,7 +140,7 @@ const BOT_WANTS_BOMBS_BELOW = 4;
 const BOT_WANTS_BUBBLES_BELOW = 2;
 const randIn = ([a, b]) => a + Math.random() * (b - a);
 
-const KIND_ICONS = { sword: '⚔️', gun: '🔫', bomb: '💣', fire: '🔥', ice: '❄️' };
+const KIND_ICONS = { sword: '⚔️', gun: '🏹', bomb: '💣', fire: '🔥', ice: '❄️' };
 const cleanKind = (k) => (KIND_ICONS[k] ? k : 'sword');
 
 const BOT_NAMES = ['Bruno', 'Kira', 'Otto', 'Mira', 'Rex', 'Juno', 'Pip', 'Zara', 'Hugo', 'Nell'];

@@ -20,7 +20,7 @@ import { createMatchMode, MATCH_CHARACTERS } from '../multiplayer/matchMode.js';
 import { PlayerControls } from '../controls/controls.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
-import { spawnProjectile, updateProjectiles, loadSpecialWeapons } from '../features/combatFeature.js';
+import { spawnProjectile, updateProjectiles, loadSpecialWeapons, arrowShotOptions, ARROW_SPEED_MAX, ARROW_GRAVITY_SCALE, BOT_ARROW_SPEED } from '../features/combatFeature.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
@@ -56,6 +56,7 @@ import {
 import { setWandGlow, createWandModel } from '../items/magicWand.js';
 import { createFishingRodModel, ROD_HOLD_PITCH } from '../items/fishingRod.js';
 import { createLantern } from '../items/lantern.js';
+import { loadBowAssets, createBowMesh, createArrowMesh, bowArrowTipWorld } from '../items/bowModel.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
@@ -237,6 +238,8 @@ const mixerClock = new THREE.Clock();
 // --- Physics + presence state ---
 let rapierWorld;
 const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
+const _rbFaceDir = new THREE.Vector3();
+const _rbFaceZ = new THREE.Vector3(0, 0, 1);
 let physicsAccumulator = 0;
 const FIXED_DT = 1 / 60;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
@@ -1003,7 +1006,7 @@ async function initCore(runtimeContext) {
   // (`kind` 'shield' | 'gun'); the constructor's pose is only a fallback
   const _WEAPON_HOLD_FALLBACK = {
     shield: { PosX: -0.18, PosY: 0.2, PosZ: 0.2, RotX: 90, RotY: 0, RotZ: 0 },
-    gun: { PosX: 0, PosY: 0, PosZ: 0, RotX: 0, RotY: 180, RotZ: 0 },
+    gun: { PosX: 0, PosY: 0, PosZ: 0, RotX: 0, RotY: 0, RotZ: 0 },
   };
   const _weaponHoldEuler = new THREE.Euler(0, 0, 0, 'YXZ');
   function _applyWeaponHoldCfg(weapon, kind) {
@@ -1021,9 +1024,11 @@ async function initCore(runtimeContext) {
     // Shield: holdOffset (meters) and holdRotation (degrees) relative to hand
     shieldPosX: -0.02, shieldPosY: -0.17, shieldPosZ: 0.2,
     shieldRotX: 0, shieldRotY: 0, shieldRotZ: 0,
-    // Gun: holdOffset (meters) and holdRotation (degrees) relative to hand
-    gunPosX: -0.02, gunPosY: 0.06, gunPosZ: 0.02,
-    gunRotX: 7, gunRotY: 180, gunRotZ: 0,
+    // Bow (the 'gun' slot): holdOffset (meters) and holdRotation (degrees) relative to the
+    // hand — the local player's bow turns to the crosshair itself (pistol.js); this is how
+    // other fighters hold it
+    gunPosX: 0, gunPosY: 0, gunPosZ: 0,
+    gunRotX: 0, gunRotY: 0, gunRotZ: -10,
   };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 2100,   // deg/s — minimum speed to register as any swing (slow tier)
@@ -1802,13 +1807,14 @@ async function initCore(runtimeContext) {
       }
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
+      const speed = Number.isFinite(data.speed) ? data.speed : ARROW_SPEED_MAX;
       if (fromTown) {
         // (Town: drawn here only — the shooter's game deals the damage)
-        spawnPistolBullet(position, direction, peerId);
+        spawnPistolBullet(position, direction, peerId, speed);
         const shot = projectiles[projectiles.length - 1];
         if (shot) shot.userData.remoteShot = true;
-      } else if (fromMatch) spawnPistolBullet(position, direction, peerId);
-      else spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      } else if (fromMatch) spawnPistolBullet(position, direction, peerId, speed);
+      else spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id, arrowShotOptions({ speed }));
     }
   }
 
@@ -2469,54 +2475,13 @@ async function initCore(runtimeContext) {
     foamSword.mesh.visible = false;
   }
 
+  // The bow (the weapon that was the gun — item id 'pistol'; bowModel.js)
+  loadBowAssets();
   pistol = new Pistol(scene);
   await pistol.load();
   window.pistol = pistol;
-  if (pistol.mesh) {
-    pistol.mesh.visible = false;
-  }
   pistol.onPickup = () => {};
   pistol.onDrop = () => {};
-
-  // Replace the pistol's box fallback with a gun-shaped procedural mesh
-  if (pistol.mesh) {
-    scene.remove(pistol.mesh);
-    const _darkMetal = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.38, metalness: 0.85 });
-    const _lightMetal = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.5, metalness: 0.7 });
-    const hordeGunGroup = new THREE.Group();
-    hordeGunGroup.name = 'horde-pistol';
-    // Slide (top body)
-    const slideMesh = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.18), _darkMetal.clone());
-    slideMesh.position.set(0, 0.01, 0);
-    slideMesh.castShadow = true;
-    hordeGunGroup.add(slideMesh);
-    // Barrel
-    const barrelGeo = new THREE.CylinderGeometry(0.009, 0.009, 0.07, 8);
-    barrelGeo.rotateX(Math.PI / 2);
-    const barrelMesh = new THREE.Mesh(barrelGeo, _darkMetal.clone());
-    barrelMesh.position.set(0, 0.004, -0.125);
-    barrelMesh.castShadow = true;
-    hordeGunGroup.add(barrelMesh);
-    // Frame / grip
-    const frameMesh = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.095, 0.068), _lightMetal.clone());
-    frameMesh.position.set(0, -0.065, 0.042);
-    frameMesh.castShadow = true;
-    hordeGunGroup.add(frameMesh);
-    // Trigger guard (half-torus)
-    const guardGeo = new THREE.TorusGeometry(0.018, 0.004, 6, 12, Math.PI);
-    const guardMesh = new THREE.Mesh(guardGeo, _lightMetal.clone());
-    guardMesh.position.set(0, -0.02, -0.01);
-    guardMesh.rotation.set(0, 0, Math.PI / 2);
-    guardMesh.castShadow = true;
-    hordeGunGroup.add(guardMesh);
-    // Sight (tiny nub on top)
-    const sightMesh = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.01, 0.006), _darkMetal.clone());
-    sightMesh.position.set(0, 0.042, -0.075);
-    hordeGunGroup.add(sightMesh);
-    hordeGunGroup.visible = false;
-    scene.add(hordeGunGroup);
-    pistol.mesh = hordeGunGroup;
-  }
 
   let player = new PlayerCharacter(playerName);
   let playerModel = player.model;
@@ -2866,7 +2831,7 @@ async function initCore(runtimeContext) {
       icon: '/assets/ui/items/sword.png'
     },
     pistol: {
-      name: 'Pistol',
+      name: 'Bow',
       icon: ''
     },
     [SHIELD_ITEM_ID]: {
@@ -3124,7 +3089,7 @@ async function initCore(runtimeContext) {
   const getPickupFallbackIcon = (itemId) => {
     if (itemId === 'coins') return '🪙';
     if (itemId === SHIELD_ITEM_ID) return '🛡️';
-    if (itemId === 'pistol') return '🔫';
+    if (itemId === 'pistol') return '🏹';
     if (itemId === PISTOL_AMMO_KEY) return '🔶';
     if (itemId === 'bubble') return '🫧';
     if (itemId === 'showdown_bomb') return '💣';
@@ -3194,7 +3159,7 @@ async function initCore(runtimeContext) {
     if (!Number.isFinite(amount)) return;
     const nextAmount = getPistolAmmoCount() + amount;
     setPistolAmmoCount(nextAmount);
-    if (amount > 0) showPickupToast(PISTOL_AMMO_KEY, amount, 'Bullets');
+    if (amount > 0) showPickupToast(PISTOL_AMMO_KEY, amount, 'Arrows');
   }
 
   function seedPistolAmmoIfNeeded() {
@@ -3402,22 +3367,20 @@ async function initCore(runtimeContext) {
     }
     if (itemId === 'pistol') {
       if (!pistol?.mesh || !playerControls) return;
-      const heldMesh = ensureLocalHeldWeaponMesh(pistol, 'pistol', { forceNew: true });
-      pistol.useHeldMeshWhenHeld = true;
-      if (heldMesh) {
-        heldMesh.visible = true;
+      // The bow in hand (its own model — it fills itself in once bow.glb is loaded); the
+      // camera stays third person (the draw zooms it over the shoulder — _bowDraw)
+      if (!pistol.heldMesh) {
+        pistol.heldMesh = createBowMesh();
+        scene.add(pistol.heldMesh);
       }
+      pistol.useHeldMeshWhenHeld = true;
+      pistol.heldMesh.visible = true;
       pistol.mesh.visible = false;
+      pistol.draw = 0;
+      pistol.nocked = true;
       pistol.localHoldOrigin = 'inventory';
       pistol.holder = playerControls;
       setPlayerWeaponType(playerControls, pistol.type);
-      // Aiming a gun: first-person camera while it is held (not saved — unequipping goes
-      // back to the player's own camera setting)
-      playerControls.forceFirstPerson = true;
-      // Pistol: fixed depth regardless of hand size
-      if (playerControls.playerModel) {
-        playerControls.playerModel.userData.handDepthOverride = { left: 0.3 };
-      }
       playerControls.updateAmmoUI?.(true);
       playerControls.setAmmo?.(
         getPistolAmmoCount(),
@@ -3486,7 +3449,7 @@ async function initCore(runtimeContext) {
         delete playerControls.playerModel.userData.handDepthOverride;
       }
       clearPlayerWeaponType(playerControls, pistol.type);
-      playerControls.forceFirstPerson = false;
+      pistol.draw = 0;
       playerControls?.updateAmmoUI?.(false);
       updateSettingsUI();
     }
@@ -3896,15 +3859,12 @@ async function initCore(runtimeContext) {
     }
   }
 
-  // A pistol bullet (same look / speed as the local player's — PlayerControls.attemptFireProjectileForHand)
-  function spawnPistolBullet(position, direction, shooterId) {
-    spawnProjectileWithPerfFlags(scene, projectiles, position.clone(), direction.clone(), shooterId, {
-      geometry: new THREE.SphereGeometry(0.08, 8, 8),
-      colliderDesc: RAPIER.ColliderDesc.ball(0.08).setRestitution(0.3).setFriction(0.5),
-      color: new THREE.Color(0xffee44),
-      speed: 28,
-      lifetime: 2500
-    });
+  // An arrow someone else loosed (a bow — the weapon that was the gun; PlayerControls.fireArrow)
+  // or a battle bot / boss shot: `speed` as theirs said (bots / bosses: straight and level)
+  function spawnPistolBullet(position, direction, shooterId, speed = null) {
+    const loosed = Number.isFinite(speed);
+    spawnProjectileWithPerfFlags(scene, projectiles, position.clone(), direction.clone(), shooterId,
+      arrowShotOptions({ speed: loosed ? THREE.MathUtils.clamp(speed, 5, 60) : BOT_ARROW_SPEED, gravityScale: loosed ? ARROW_GRAVITY_SCALE : 0 }));
   }
 
   function asVec3(p) {
@@ -3926,11 +3886,11 @@ async function initCore(runtimeContext) {
   }
 
   function getAmmoLabelForType() {
-    return 'Bullets';
+    return 'Arrows';
   }
 
   function getAmmoIconForType() {
-    return '🔫';
+    return '🏹';
   }
 
   // `value` = coins this pickup is worth (tutorial coins are worth more than 1)
@@ -4150,14 +4110,8 @@ async function initCore(runtimeContext) {
     enemy,
     getTarget: () => (_attacksHeld() ? null : playerModel),
     getWeaponGear: () => matchCtx.getWeaponGear(),
-    fireBullet: (origin, dir) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton', {
-      geometry: new THREE.SphereGeometry(0.1, 8, 8),
-      colliderDesc: RAPIER.ColliderDesc.ball(0.1).setRestitution(0.3).setFriction(0.5),
-      color: new THREE.Color(0xff4422),
-      speed: PEMBERTON_BULLET_SPEED,
-      lifetime: 2500,
-      hostile: true,
-    }),
+    fireBullet: (origin, dir) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton',
+      arrowShotOptions({ speed: PEMBERTON_BULLET_SPEED, gravityScale: 0, hostile: true })),
     throwBomb: (origin, target) => playerBombs.throw(origin, target, { getBlastTargets: () => _pembertonBombTargets, keepHeld: true }),
     onShieldBlock: () => duelCtx.onShieldHit(),
     wandRange: WAND_ENEMY_RANGE,
@@ -4840,7 +4794,7 @@ async function initCore(runtimeContext) {
   let playerRoll = null; // { restoreIds }
   const tryPlayerRoll = (dx, dy) => {
     if (!playerControls?.enabled || _classicMode || _gamePaused || playerDead) return false; // Classic: Block only
-    if (playerRoll || playerBombThrow || isPlayerFrozen() || _wandShieldHold) return false;
+    if (playerRoll || playerBombThrow || isPlayerFrozen() || _wandShieldHold || _bowDraw.active) return false;
     if (bossTalk.isOpen() || _isSwordCalibPromptOpen()) return false;
     if (!(playerControls.moveSpeedScale > 0)) return false; // (the village intro holds the player still)
     if (_matchLoadout && !matchMode?.isFighting()) return false;
@@ -6506,7 +6460,127 @@ async function initCore(runtimeContext) {
     else _equipByPlayer(itemId);
     playerControls?.refreshActionButtons?.();
   };
+  // ── The bow (the weapon that was the gun): hold its button to draw, let go to loose ──
+  // Holding the Bow button (on screen, the phone's, Q / the right mouse button) takes the bow
+  // out, draws the string back over BOW_DRAW_S and eases the camera in over the shoulder
+  // (PlayerControls.bowAiming / bowZoom) with a crosshair; letting go looses an arrow at the
+  // crosshair — as fast as it was drawn — and puts back whatever was in hand before.
+  const BOW_DRAW_S = 0.85;          // s to full draw
+  const BOW_MIN_POWER = 0.22;       // a quick tap still looses a (slow) arrow
+  const BOW_FOLLOW_MS = 220;        // the bow stays up this long after loosing, then it's put away
+  const _bowDraw = { active: false, startMs: 0, prev: null, restoreAt: 0 };
+  const _bowAimPoint = new THREE.Vector3();
+  const _bowTip = new THREE.Vector3();
+  const _bowDir = new THREE.Vector3();
+  const _bowCrosshair = (() => {
+    const el = document.createElement('div');
+    el.id = 'bow-crosshair';
+    el.className = 'bow-crosshair';
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = '<i class="bow-ch-dot"></i><i class="bow-ch-tick t"></i><i class="bow-ch-tick r"></i>'
+      + '<i class="bow-ch-tick b"></i><i class="bow-ch-tick l"></i><span class="bow-ch-dist"></span>';
+    document.body.appendChild(el);
+    return { el, dist: el.querySelector('.bow-ch-dist'), lastDist: null, lastSpread: null };
+  })();
+  const _bowDrawAmount = () => (_bowDraw.active ? THREE.MathUtils.clamp((performance.now() - _bowDraw.startMs) / (BOW_DRAW_S * 1000), 0, 1) : 0);
+  const _ownsBow = () => (inventoryState.pistol?.count ?? 0) > 0;
+  const _canDrawBow = () => !!playerControls?.enabled && !playerDead && !_gamePaused && !_classicMode
+    && !_mpSwordOnly() && !town?.inCanoe?.() && _ownsBow() && !playerRoll && !playerBombThrow
+    && !isPlayerFrozen() && !_wandShieldHold && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
+    && !(_matchLoadout && !matchMode?.isFighting());
+  // Back to what was in hand before the draw (nothing: empty hands — Town)
+  const _bowPutAway = () => {
+    _bowDraw.restoreAt = 0;
+    const prev = _bowDraw.prev;
+    _bowDraw.prev = null;
+    if (!isInventoryItemEquipped('pistol')) return;
+    if (prev && prev !== 'pistol') equipInventoryItem(prev);
+    if (isInventoryItemEquipped('pistol')) unequipInventoryItem('pistol');
+    playerControls?.refreshActionButtons?.();
+  };
+  const startBowDraw = () => {
+    if (_bowDraw.active) return false;
+    if (!_canDrawBow()) return false;
+    if (getPistolAmmoCount() <= 0) {
+      showPickupToast('pistol', 1, '', { text: 'No arrows' });
+      return false;
+    }
+    if (_bowDraw.restoreAt) {
+      // (drawn again before it was put away: the bow stays out, the old item is still the one to go back to)
+      _bowDraw.restoreAt = 0;
+    } else {
+      const before = getEquippedInventoryItemIdForHand('right');
+      equipInventoryItem('pistol');
+      if (!isInventoryItemEquipped('pistol')) return false;
+      _bowDraw.prev = before;
+    }
+    _bowDraw.active = true;
+    _bowDraw.startMs = performance.now();
+    pistol.nocked = true;
+    playerControls.bowAiming = true;
+    audioManager?.playSynth?.('bowDraw', 0.5);
+    playerControls.refreshActionButtons?.();
+    return true;
+  };
+  const releaseBowDraw = (cancel = false) => {
+    if (!_bowDraw.active) return;
+    const draw = _bowDrawAmount();
+    _bowDraw.active = false;
+    playerControls.bowAiming = false;
+    if (!cancel && pistol?.holder === playerControls && !_gamePaused && !playerDead) {
+      const power = Math.max(BOW_MIN_POWER, draw);
+      const held = pistol.heldMesh;
+      const aim = playerControls.getBowAimPoint?.(_bowAimPoint);
+      const tip = held ? bowArrowTipWorld(held, pistol.draw, _bowTip) : null;
+      const dir = aim && tip ? _bowDir.subVectors(aim, tip) : null;
+      if (dir && dir.lengthSq() > 1e-4 && playerControls.fireArrow(power, tip, dir.normalize())) {
+        pistol.nocked = false;
+        audioManager?.playSynth?.('bowRelease', 0.6 + 0.4 * power);
+      }
+    }
+    pistol.draw = 0;
+    _bowDraw.restoreAt = performance.now() + (cancel ? 0 : BOW_FOLLOW_MS);
+    playerControls.refreshActionButtons?.();
+  };
+  // Each frame (before the bow's own update): the string, the crosshair, putting it away
+  const _updateBowDraw = () => {
+    if (_bowDraw.active && (pistol?.holder !== playerControls || playerDead || !_canDrawBow())) {
+      // (something else took it out of hand — a roll, a hit that knocked it away, a mode change)
+      releaseBowDraw(true);
+    }
+    if (_bowDraw.active) pistol.draw = _bowDrawAmount();
+    if (_bowDraw.restoreAt && performance.now() >= _bowDraw.restoreAt) _bowPutAway();
+    // (the bow only comes out for a draw: one left in hand some other way — a loadout put back —
+    // goes back to the sword / empty hands)
+    else if (!_bowDraw.active && !_bowDraw.restoreAt && pistol?.holder === playerControls) {
+      if (_townLoadout && !_townLoadout.hasSword) _putWeaponsAway();
+      else equipInventoryItem(FOAM_SWORD_ITEM_ID);
+      if (pistol.holder === playerControls) unequipInventoryItem('pistol');
+      playerControls?.refreshActionButtons?.();
+    }
+    playerControls?.updateBowButton?.();
+    const ch = _bowCrosshair;
+    const show = _bowDraw.active && !!playerControls;
+    ch.el.classList.toggle('is-on', show);
+    if (show) {
+      // the ticks close in as the string comes back
+      const spread = Math.round(16 - 10 * pistol.draw);
+      if (spread !== ch.lastSpread) { ch.el.style.setProperty('--spread', `${spread}px`); ch.lastSpread = spread; }
+      const aim = playerControls.getBowAimPoint?.(_bowAimPoint);
+      const d = aim && playerModel ? Math.round(aim.distanceTo(playerModel.position)) : null;
+      const text = d != null && playerControls.bowAimHit ? String(d) : '';
+      if (text !== ch.lastDist) { ch.dist.textContent = text; ch.lastDist = text; }
+    }
+  };
+  // (a mode ending mid-draw: put it away at once)
+  const cancelBowDraw = () => {
+    if (_bowDraw.active) releaseBowDraw(true);
+    if (_bowDraw.restoreAt) _bowPutAway();
+    _bowDraw.prev = null;
+  };
+
   const _handlePhoneAction = (action) => {
+    if (action === 'bowUp') { releaseBowDraw(); return; } // (always let go)
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
     if (action === 'heldUp') { town?.useHeld(false); return; } // (always let go)
     if (action === 'heldDown') { if (!_gamePaused) town?.useHeld(true); return; }
@@ -6529,10 +6603,9 @@ async function initCore(runtimeContext) {
       appStateRef?.throwBomb?.();
     } else if (action === 'bubble') {
       appStateRef?.activateBubble?.();
-    } else if (action === 'fire') {
-      if (playerControls.getEquippedWeapon?.('right')?.itemId === 'pistol') playerControls.attemptFireProjectile?.();
-    } else if (action === 'gun') {
-      _toggleRemoteWeapon('pistol');
+    } else if (action === 'bowDown' || action === 'gun') {
+      // The bow: held to draw (bowUp looses — handled above, so it always lets go)
+      startBowDraw();
     } else if (action === 'shield') {
       _toggleRemoteWeapon(SHIELD_ITEM_ID);
     } else if (action === 'wand') {
@@ -6617,7 +6690,9 @@ async function initCore(runtimeContext) {
       ammo: getPistolAmmoCount(),
       hasWand: isWandAllowed(),
       mana: getMana(),
-      equipped: _heldWeaponId() ?? (_townLoadout ? 'none' : FOAM_SWORD_ITEM_ID),
+      // (the bow is only out while its button's held: the phone keeps showing what goes back)
+      equipped: ((_bowDraw.active || _bowDraw.restoreAt) ? _bowDraw.prev : _heldWeaponId()) ?? (_townLoadout ? 'none' : FOAM_SWORD_ITEM_ID),
+      drawing: _bowDraw.active,
       // Town: the sword is bought; 🗡 / ✋ puts everything away; the fishing rod once bought
       hasSword: _townLoadout ? _townLoadout.hasSword : true,
       hasRod: isRodAllowed(),
@@ -7235,6 +7310,14 @@ async function initCore(runtimeContext) {
     getMaxMana: () => MAX_MANA,
     getInventory: () => getInventory(),
     getPistolAmmoCount: () => getPistolAmmoCount(),
+    // The bow: held to draw, let go to loose (the on-screen Bow button, Q, the right mouse button)
+    startBowDraw: () => startBowDraw(),
+    releaseBowDraw: (cancel) => releaseBowDraw(cancel),
+    isBowDrawing: () => _bowDraw.active,
+    // while the bow is out for a draw: what goes back in hand after ({ prev } — null = nothing)
+    getBowDrawPrev: () => ((_bowDraw.active || _bowDraw.restoreAt) ? { prev: _bowDraw.prev } : null),
+    ownsBow: () => _ownsBow(),
+    canDrawBow: () => _canDrawBow(),
     addPistolAmmo: (amount) => addPistolAmmo(amount),
     seedPistolAmmoIfNeeded: () => seedPistolAmmoIfNeeded(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
@@ -7308,9 +7391,9 @@ async function initCore(runtimeContext) {
     mana_potion: { name: 'Mana Potion', desc: 'Fills your mana to full — the magic wand runs on mana' },
     magic_wand: { name: 'Magic Wand' },
     shield: { desc: 'Blocks hits from in front until it breaks' },
-    pistol: { desc: 'Shoot enemies from afar (needs bullets)' },
-    'gun bullets': { desc: 'One bullet for the gun' },
-    treasure_chest: { name: 'Mystery Chest', desc: 'A random prize — coins, bombs, a shield, maybe even a gun!' },
+    pistol: { desc: 'Hold Bow to draw, let go to shoot (needs arrows)' },
+    'gun bullets': { desc: 'One arrow for the bow' },
+    treasure_chest: { name: 'Mystery Chest', desc: 'A random prize — coins, bombs, a shield, maybe even a bow!' },
   };
   let _villageMerchant = null;
   const _villageOwned = (itemId) => {
@@ -7345,8 +7428,8 @@ async function initCore(runtimeContext) {
       { w: 18, emoji: '💣', give: () => { setStat('bombs', getPlayerBombCount() + 3, { skipSave: true }); return '3 bombs'; } },
       { w: 14, emoji: '🫧', give: () => { setStat('bubbles', getBubbleCount() + 2, { skipSave: true }); return '2 bubbles'; } },
       { w: 12, emoji: '🛡️', give: () => { addToInventory(SHIELD_ITEM_ID, 1); return 'a shield'; } },
-      { w: hasGun ? 12 : 0, emoji: '🔫', give: () => { addPistolAmmo(5); return '5 gun bullets'; } },
-      { w: hasGun ? 0 : 5, emoji: '🔫', give: () => { addToInventory('pistol', 1); seedPistolAmmoIfNeeded(); return 'a gun!'; } },
+      { w: hasGun ? 12 : 0, emoji: '🪶', give: () => { addPistolAmmo(5); return '5 arrows'; } },
+      { w: hasGun ? 0 : 5, emoji: '🏹', give: () => { addToInventory('pistol', 1); seedPistolAmmoIfNeeded(); return 'a bow!'; } },
       { w: appState.isShopItemMaxed('heart_upgrade') ? 0 : 4, emoji: '❤️', give: () => { appState.applyShopUpgrade('heart_upgrade'); return '+1 max health!'; } },
       { w: appState.isShopItemMaxed('shield_upgrade') ? 0 : 5, emoji: '⬆️', give: () => { appState.applyShopUpgrade('shield_upgrade'); return 'a shield upgrade'; } },
       { w: 3, emoji: '💰', give: () => { appState.addCoins(150); return 'the jackpot — 150 coins!'; } },
@@ -7779,6 +7862,7 @@ async function initCore(runtimeContext) {
     if (name === 'bomb') return pc.psBombBtn;
     if (name === 'bubble') return pc.psBubbleBtn;
     if (name === 'block' || name === 'fire') return pc.punchButton;
+    if (name === 'gun') return pc.psBowBtn; // (the bow: held to draw)
     const itemId = name === 'gun' ? 'pistol' : name === 'shield' ? SHIELD_ITEM_ID : name === 'wand' ? MAGIC_WAND_ITEM_ID : name;
     return [pc.psWeaponBtn1, pc.psWeaponBtn2, pc.psWeaponBtn3].find(b => b?.dataset.psWeaponId === itemId) || null;
   };
@@ -7981,6 +8065,7 @@ async function initCore(runtimeContext) {
 
   // Clear the field (enemies, bombs, stage) and put the player back on their feet
   const _resetForMenu = () => {
+    cancelBowDraw();
     town?.exit();
     seaStart?.exit();
     _psStopSong();
@@ -8433,18 +8518,18 @@ async function initCore(runtimeContext) {
         _matchLoadout.ammoBank = 0;
         if (hasGun) {
           inventoryState.pistol = { ...inventoryState.pistol, [PISTOL_AMMO_KEY]: getPistolAmmoCount() + ammo };
-          text = `+${ammo} Bullets`;
+          text = `+${ammo} Arrows`;
         } else {
           inventoryState.pistol = ensureCatalogEntry('pistol', { count: 1, [PISTOL_AMMO_KEY]: ammo });
-          text = `Gun · ${ammo} bullets`;
+          text = `Bow · ${ammo} arrows`;
         }
       } else if (type === 'ammo') {
         if (hasGun) {
           inventoryState.pistol = { ...inventoryState.pistol, [PISTOL_AMMO_KEY]: getPistolAmmoCount() + MATCH_AMMO_PICKUP };
-          text = `+${MATCH_AMMO_PICKUP} Bullets`;
+          text = `+${MATCH_AMMO_PICKUP} Arrows`;
         } else {
           _matchLoadout.ammoBank += MATCH_AMMO_PICKUP;
-          text = `+${MATCH_AMMO_PICKUP} Bullets (for when you find a gun)`;
+          text = `+${MATCH_AMMO_PICKUP} Arrows (for when you find a bow)`;
         }
       } else if (type === 'shield') {
         inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
@@ -8531,7 +8616,9 @@ async function initCore(runtimeContext) {
         // The pose the player holds it in (a weapon not in hand still has its constructor's)
         _applyWeaponHoldCfg(weapon, kind);
         const { offset, quaternion } = weapon.getHoldPose();
-        return { createMesh: cloneOf(weapon), offset, quaternion, grip: weapon.getGripTarget(new THREE.Vector3()) };
+        // (the bow: a fresh one — it fills itself in once bow.glb is loaded)
+        const createMesh = kind === 'gun' ? () => createBowMesh() : cloneOf(weapon);
+        return { createMesh, offset, quaternion, grip: weapon.getGripTarget(new THREE.Vector3()) };
       };
       return { gun: gearOf(pistol, 'gun'), shield: gearOf(shield, 'shield') };
     },
@@ -9371,7 +9458,12 @@ async function initCore(runtimeContext) {
         const t = rb.translation();
         mesh.position.set(t.x, t.y, t.z);
       }
-      {
+      if (mesh.userData?.faceVelocity) {
+        // (an arrow flies tip first)
+        const v = rb.linvel();
+        _rbFaceDir.set(v.x, v.y, v.z);
+        if (_rbFaceDir.lengthSq() > 0.25) mesh.quaternion.setFromUnitVectors(_rbFaceZ, _rbFaceDir.normalize());
+      } else {
         const r = rb.rotation();
         mesh.quaternion.set(r.x, r.y, r.z, r.w);
       }
@@ -9924,6 +10016,7 @@ async function initCore(runtimeContext) {
     if (pistol?.holder === playerControls) _applyWeaponHoldCfg(pistol, 'gun');
     // Gun / shield: the phone gyro turns and pitches the aim
     _updateWeaponGyroAim(frameDelta);
+    _updateBowDraw();
     pistol?.update();
     shield?.update();
 

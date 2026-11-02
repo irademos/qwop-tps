@@ -14,8 +14,8 @@ const MAGIC_WAND_ITEM_ID = 'magic_wand';
 
 const merchantItemCatalog = {
   shield: { name: 'Shield', price: 50, count: 5 },
-  pistol: { name: 'Gun', price: 200, count: 1 },
-  [GUN_BULLETS_ITEM_ID]: { name: 'Gun Bullets', price: 10, count: 10, ammoAmount: 1 },
+  pistol: { name: 'Bow', price: 200, count: 1 },
+  [GUN_BULLETS_ITEM_ID]: { name: 'Arrows', price: 10, count: 10, ammoAmount: 1 },
   // Upgrades — never sell out, applied immediately via appState.applyShopUpgrade
   [HEART_UPGRADE_ITEM_ID]: { name: 'Heart', price: 350, count: 1, unlimited: true, description: '+1 max health segment' },
   [SHIELD_UPGRADE_ITEM_ID]: { name: 'Shield Upgrade', price: 150, count: 1, unlimited: true, description: '+10 durability for all shields' },

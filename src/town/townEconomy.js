@@ -29,9 +29,9 @@ const SELL_SHARE = 0.6;    // what the merchant pays, as a share of the price
 export const SHOP_GEAR = [
   { id: 'sword',  kind: 'sword',  label: 'Sword',      emoji: '🗡️', price: 30,  desc: 'Swing it with the phone. Chops trees too.' },
   { id: 'rod',    kind: 'rod',    label: 'Fishing Rod', emoji: '🎣', price: 25,  desc: 'Swing it forward to cast at the fishing spot, pull back to hook, reel it in.' },
-  { id: 'shield', kind: 'shield', label: 'Shield',     emoji: '🛡️', price: 40,  desc: 'Stops swings, bullets and bombs from in front.' },
-  { id: 'gun',    kind: 'gun',    label: 'Gun',        emoji: '🔫', price: 80,  desc: 'Comes with 12 bullets.' },
-  { id: 'ammo',   kind: 'ammo',   label: '10 Bullets', emoji: '🔶', price: 15,  n: 10, needs: 'gun' },
+  { id: 'shield', kind: 'shield', label: 'Shield',     emoji: '🛡️', price: 40,  desc: 'Stops swings, arrows and bombs from in front.' },
+  { id: 'gun',    kind: 'gun',    label: 'Bow',        emoji: '🏹', price: 80,  desc: 'Hold Bow to draw, let go to shoot. Comes with 12 arrows.' },
+  { id: 'ammo',   kind: 'ammo',   label: '10 Arrows',  emoji: '🪶', price: 15,  n: 10, needs: 'gun' },
   { id: 'bomb',   kind: 'bomb',   label: 'Bomb',       emoji: '💣', price: 12,  n: 1 },
   { id: 'seeds',  kind: 'seeds',  label: '3 Veg Seeds', emoji: '🌱', price: 6, n: 3, desc: 'Plant them anywhere: a veg by tomorrow, or in under a minute watered with the hose.' },
   { id: 'lockpick', kind: 'lockpick', label: 'Lock-pick', emoji: '🔧', price: 15, desc: 'Opens one locked door, then it breaks. A break-in is a crime if anyone sees.' },

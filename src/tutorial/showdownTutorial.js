@@ -10,7 +10,7 @@
  *   5. Coins + auto-buy + throwing a bomb at three distant swordsmen (stationary)
  *   6. Shield (bought, equipped, then hit until it breaks)
  *   7. Bubble (bought, activated, enemy swords bounce off it)
- *   8. Gun + bullets (bought, equipped, shoot a distant swordsman)
+ *   8. Bow + arrows (bought, held to draw, loosed at a distant swordsman)
  *   9. Magic wand (lent for the lesson): swipe a blast past a horizontal block
  *  10. Blocking a wand enemy's horizontal blast (blade along the blast)
  *  11. Frozen by a wand enemy's ice blast: shaking the phone breaks out
@@ -429,7 +429,7 @@ export function createShowdownTutorial(ctx) {
   // 9. Coins, auto-buy, and throwing a bomb
   step(async () => {
     panel(9, TOTAL, 'COINS',
-      'Coins buy items: bombs, bubbles, shields, the gun and bullets. Walk near these coins — they drift to you.');
+      'Coins buy items: bombs, bubbles, shields, the bow and arrows. Walk near these coins — they drift to you.');
     await collectCoins(await ctx.getPrice('showdown_bomb'));
     if (!(await ctx.buy('showdown_bomb'))) ctx.giveItem('showdown_bomb');
     setHighlight('bomb');
@@ -447,7 +447,7 @@ export function createShowdownTutorial(ctx) {
     onCleanup(() => removeMarker(ring));
 
     panel(9, TOTAL, 'AUTO-BUY',
-      'You just bought a bomb! When you run out of bombs, bubbles, shields or bullets, your coins are spent on a new one automatically.');
+      'You just bought a bomb! When you run out of bombs, bubbles, shields or arrows, your coins are spent on a new one automatically.');
     await delay(4000);
     panel(10, TOTAL, 'THROW A BOMB',
       'Bombs reach distant enemies. Face the group and tap 💣 — the bomb lands where the ring is.');
@@ -538,20 +538,18 @@ export function createShowdownTutorial(ctx) {
     await delay(1500);
   });
 
-  // 13. Gun + bullets
+  // 13. Bow + arrows: held to draw (the bow comes out, the camera eases in over the shoulder),
+  // let go to loose at the crosshair
   step(async () => {
     removeEnemy(swordsman);
     const ownsGun = ctx.hasItem('pistol');
     const bulletsPrice = await ctx.getPrice('gun bullets');
-    panel(13, TOTAL, 'GUN',
-      ownsGun ? 'Collect these coins to buy bullets for your gun.' : 'Collect these coins to buy the gun and bullets.');
+    panel(13, TOTAL, 'BOW',
+      ownsGun ? 'Collect these coins to buy arrows for your bow.' : 'Collect these coins to buy the bow and arrows.');
     await collectCoins((ownsGun ? 0 : await ctx.getPrice('pistol')) + bulletsPrice);
     if (!ownsGun) await ctx.buy('pistol');
     await ctx.buy('gun bullets');
     if (ctx.getAmmo() < 5) ctx.addAmmo(5 - ctx.getAmmo());
-    panel(13, TOTAL, 'EQUIP THE GUN', 'Tap Gun to equip it.');
-    frameHandler = () => setHighlight('gun');
-    await waitFor(() => ctx.isEquipped('pistol'));
 
     const dir = ctx.getForward(new THREE.Vector3());
     const target = ctx.spawnSwordsman({
@@ -562,13 +560,12 @@ export function createShowdownTutorial(ctx) {
     });
     onCleanup(() => { if (!target.isDead) removeEnemy(target); });
     panel(13, TOTAL, 'SHOOT!',
-      'The gun is aimed with your phone’s gyro — point it at the enemy, then tap Fire.');
+      'Hold Bow to draw an arrow — the longer you hold, the harder it flies. Put the crosshair on the enemy, then let go to shoot.');
     frameHandler = () => {
-      const equipped = ctx.isEquipped('pistol');
-      setHighlight(equipped ? 'fire' : 'gun');
-      if (equipped && ctx.getAmmo() === 0) {
+      setHighlight('gun');
+      if (ctx.getAmmo() === 0) {
         ctx.addAmmo(5);
-        overlay.setHint('Out of bullets — here are a few more.', 'warn');
+        overlay.setHint('Out of arrows — here are a few more.', 'warn');
       }
     };
     await waitFor(() => target.isDead);
