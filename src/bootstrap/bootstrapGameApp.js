@@ -9,6 +9,8 @@ import { updateRemotePlayerRig, setPlayerCharacterUrl, startBlockedStagger, isBl
 import { glbCharacterConfig, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, registerWallProbe, setTerrainFloor } from '../environment/terrainHeight.js';
+import { setMapObstacles } from '../environment/obstacles.js';
+import { measureTrunk } from '../environment/treeTrunks.js';
 import { registerMapMeshes } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { presetStyleReference, setStyleReference, stylizeObject } from '../environment/artStyle.js';
@@ -1895,7 +1897,7 @@ async function initCore(runtimeContext) {
   //   scale (mappacks too): uniform world scale of the whole map; coordinates written for a map
   //                   (spawn, DUEL_LOCATION / ARENA_LOCATION, STAGE_ROUTES) are in scaled world units
   //   kind 'mappack': an editor .mappack (zip); map objects whose model file matches
-  //                   `noGround` (trees) aren't stood on — characters walk through them,
+  //                   `noGround` (trees) aren't stood on (their trunks are solid — _measureMapTrunks),
   //                   bullets still stop at them. A pack with a sea level gets an ocean
   //                   (MapLoader's 'sea' / 'seabed' meshes — not ground) and the ground floor
   //                   SEA_WADE_DEPTH under it (setTerrainFloor): characters wade, never sink.
@@ -2182,6 +2184,10 @@ async function initCore(runtimeContext) {
     _glbHeightCache.clear();
     setTerrainFloor(loaded.floor);
     _syncPhysicsGround();
+    // (the trees' trunks are solid: measured once per map, with its ground in place)
+    loaded.trunks ??= _measureMapTrunks(loaded);
+    setMapObstacles(loaded.trunks);
+    _syncTrunkColliders();
     setSpawnCenter(MAPS[key].spawn);
     registerMapMeshes(loaded.meshes); // bullets stop at buildings / walls (src/items/projectiles.js)
     return true;
@@ -2192,6 +2198,62 @@ async function initCore(runtimeContext) {
   let _preMapFloor = 0;
   function _syncPhysicsGround() {
     _physicsGroundRb?.setTranslation({ x: 0, y: (_activeMap?.floor ?? _preMapFloor) - 1, z: 0 }, true);
+  }
+  // Tree trunks are solid: the map's placed trees (model file matching TREE_TRUNK_RE) aren't
+  // ground (`noGround` — their crowns would be stood on), so the walls the player stops at don't
+  // include them. Instead each trunk is a column (measureTrunk — only the trunk, the leaves stay
+  // walk-through): the player slides round it (src/environment/obstacles.js, in PlayerControls'
+  // movement) and enemies' dynamic bodies bump into a Rapier cylinder there (_syncTrunkColliders).
+  // Each tree model is measured once (its first copy) and the trunk carried over to the other
+  // copies in the model's own frame: ~160 trees, 14 models on the island — tens of ms at map
+  // load, a grid lookup a frame.
+  const TREE_TRUNK_RE = /tree/i;
+  function _measureMapTrunks(loaded) {
+    const out = [];
+    const byFile = new Map(); // modelFile → { local: trunk middle in the model's frame, r: its radius there, h: height there }
+    const v = new THREE.Vector3();
+    const sc = new THREE.Vector3();
+    loaded.group.updateMatrixWorld(true);
+    loaded.group.traverse((o) => {
+      const file = o.userData?.mapObject?.modelFile;
+      if (!file || !TREE_TRUNK_RE.test(file) || !o.visible) return;
+      const base = o.getWorldPosition(new THREE.Vector3());
+      // (the ground at the trunk: some trees are placed sunk into it)
+      const gy = Math.max(base.y, getTerrainHeight(base.x, base.z));
+      o.getWorldScale(sc);
+      const s = (Math.abs(sc.x) + Math.abs(sc.z)) / 2 || 1;
+      let m = byFile.get(file);
+      if (!m) {
+        const t = measureTrunk(o, base.x, base.z, gy);
+        const inv = new THREE.Matrix4().copy(o.matrixWorld).invert();
+        const top = new THREE.Box3().setFromObject(o).max.y;
+        m = { local: new THREE.Vector3(t.cx, gy, t.cz).applyMatrix4(inv), r: t.r / s, h: (top - base.y) / (Math.abs(sc.y) || 1) };
+        byFile.set(file, m);
+      }
+      v.copy(m.local).applyMatrix4(o.matrixWorld);
+      const r = THREE.MathUtils.clamp(m.r * s, 0.12, 0.5);
+      out.push({ x: v.x, z: v.z, r, y0: gy - 1.5, y1: Math.max(gy + 2, base.y + m.h * Math.abs(sc.y)) });
+    });
+    return out;
+  }
+  // One fixed Rapier body holding a cylinder per trunk of the active map (from below the map's
+  // floor, where enemies' bodies can be, up to the tree's top)
+  let _trunkRb = null;
+  function _syncTrunkColliders() {
+    if (!rapierWorld) return;
+    if (_trunkRb) { removeRigidBodySafely(rapierWorld, _trunkRb); _trunkRb = null; }
+    const trunks = _activeMap?.trunks;
+    if (!trunks?.length) return;
+    _trunkRb = rapierWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    const floor = _activeMap.floor ?? 0;
+    for (const t of trunks) {
+      const lo = Math.min(floor, t.y0) - 2;
+      const half = (t.y1 - lo) / 2;
+      rapierWorld.createCollider(
+        RAPIER.ColliderDesc.cylinder(half, t.r).setTranslation(t.x, lo + half, t.z),
+        _trunkRb
+      );
+    }
   }
   // The default map loads alongside the rest of the boot (weapons, physics, the settings panel)
   // and is awaited once the ⚙️ button is up (see `settings-ready`), so the settings button
@@ -2247,6 +2309,7 @@ async function initCore(runtimeContext) {
     _physicsGroundRb
   );
   _syncPhysicsGround();
+  _syncTrunkColliders(); // (the default map may have come in before the physics world)
 
   // Prime with an initial distant wave
 

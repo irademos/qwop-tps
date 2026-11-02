@@ -10,6 +10,7 @@
 // scaled) and put back as they were on leaving Town (resetTrees). Shared town: a felling and a
 // split log go to everyone (`tree` op, the host passes it on); each game plays the rest itself.
 import * as THREE from 'three';
+import { measureTrunk as measureTrunkOf } from '../environment/treeTrunks.js';
 import {
   CHOP_REACH, LOG_LENGTH, TREE_FELL_HITS, TREE_GROW_S, TREE_LIE_S, TREE_LOGS, TREE_SINK_S,
   TREE_STUMP_S, dist2,
@@ -102,32 +103,11 @@ export function installTownTrees(T, ctx) {
     }
   };
 
-  // The trunk: its middle and radius near the ground, from the model's vertices (once a tree is
-  // first hit — the closest ring of vertices round the base, under the leaves)
+  // The trunk: its middle and radius near the ground (once a tree is first hit —
+  // measureTrunk in src/environment/treeTrunks.js)
   const measureTrunk = (t) => {
     if (t.r) return;
-    const pts = [];
-    t.object.updateWorldMatrix(true, true);
-    t.object.traverse((m) => {
-      const pos = m.isMesh ? m.geometry?.attributes?.position : null;
-      if (!pos) return;
-      const step = Math.max(1, Math.floor(pos.count / 6000));
-      for (let i = 0; i < pos.count; i += step) {
-        _v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
-        const h = _v.y - t.gy;
-        if (h > 0.1 && h < 1) pts.push([_v.x, _v.z, Math.hypot(_v.x - t.bx, _v.z - t.bz)]);
-      }
-    });
-    t.cx = t.bx;
-    t.cz = t.bz;
-    t.r = 0.25;
-    if (pts.length < 6) return;
-    pts.sort((a, b) => a[2] - b[2]);
-    const near = pts.slice(0, Math.max(6, Math.floor(pts.length * 0.3)));
-    t.cx = near.reduce((s, p) => s + p[0], 0) / near.length;
-    t.cz = near.reduce((s, p) => s + p[1], 0) / near.length;
-    const d = near.map((p) => Math.hypot(p[0] - t.cx, p[1] - t.cz)).sort((a, b) => a - b);
-    t.r = THREE.MathUtils.clamp(d[Math.floor(d.length / 2)], 0.12, 0.5);
+    Object.assign(t, measureTrunkOf(t.object, t.bx, t.bz, t.gy));
   };
 
   // ── Posing a tree (in its parent's frame): tilted `angle` about its axis, sunk, scaled ──
