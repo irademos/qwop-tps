@@ -2,6 +2,10 @@ import { appContext } from '../core/appContext.js';
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { WALK_UNDER_CLEARANCE, getTerrainHeight, getTerrainLayersAt, isMapWallBetween } from '../environment/terrainHeight.js';
+import { pushOutOfObstacles, slideStep } from '../environment/obstacles.js';
+
+// The player's radius against tree trunks (src/environment/obstacles.js)
+const TRUNK_PLAYER_RADIUS = 0.3;
 import { getSpawnPosition } from '../map/spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../combat/knockback.js";
@@ -1282,8 +1286,9 @@ export class PlayerControls {
   // wall in the air left the player inside a building, standing on nothing to be seen.
   // Returns false when the wall stopped the step altogether.
   _walkStep(stepX, stepZ) {
-    const len = Math.hypot(stepX, stepZ);
-    if (len < 1e-6) return true;
+    if (Math.hypot(stepX, stepZ) < 1e-6) return true;
+    // (tree trunks: slides round them — straight at one, steps round it)
+    ({ x: stepX, z: stepZ } = slideStep(this.playerX, this.playerZ, this.playerY, stepX, stepZ, TRUNK_PLAYER_RADIUS));
     const lead = CLIMB_CONFIG.wallLead;
     const blocked = (dx, dz) => {
       const l = Math.hypot(dx, dz);
@@ -1471,6 +1476,12 @@ export class PlayerControls {
           movement.x * speed * deltaSeconds + (autoLen > 1e-6 ? autoMove.x : 0),
           movement.z * speed * deltaSeconds + (autoLen > 1e-6 ? autoMove.z : 0)
         );
+      }
+      // (never inside a tree trunk — a roll, a climb's drift or a knock that ended up there)
+      const outOfTrunk = pushOutOfObstacles(this.playerX, this.playerZ, this.playerY, TRUNK_PLAYER_RADIUS);
+      if (outOfTrunk) {
+        this.playerX = outOfTrunk.x;
+        this.playerZ = outOfTrunk.z;
       }
       // (a hook that keeps the player inside an area — the pirate ship's deck on a voyage)
       if (typeof this.positionConstraint === 'function') this.positionConstraint(this);
