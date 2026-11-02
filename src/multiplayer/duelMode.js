@@ -616,7 +616,7 @@ export function createDuelMode(ctx) {
         );
         return;
       case 'blocked':
-        ctx.onSwingBlocked();
+        ctx.onSwingBlocked(ctx.getRemoteModel(duel.opponentId));
         return;
       case 'dead':
         // Only for the round being played (a stale one from a previous round is ignored)
@@ -681,6 +681,7 @@ export function createDuelMode(ctx) {
     if (phase !== 'fighting' || !duel) return null;
     const model = ctx.getRemoteModel(duel.opponentId);
     if (!model) return null;
+    _combat.model = model;
     _combat.position.copy(model.position);
     _combat.center.copy(model.position);
     _combat.center.y += 0.8;

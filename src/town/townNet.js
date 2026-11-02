@@ -245,7 +245,7 @@ export function createTownNet(ctx) {
         return;
       }
       case 'pvpb':
-        ctx.onSwingBlocked();
+        ctx.onSwingBlocked(ctx.getRemoteModel(from));
         return;
       case 'bounty': {
         const coins = Math.max(0, Math.min(200, Math.floor(Number(data.coins) || 0)));
@@ -376,6 +376,7 @@ export function createTownNet(ctx) {
       const model = ctx.getRemoteModel(p.id);
       if (!model?.visible) continue;
       const c = p.combat;
+      c.model = model;
       c.position.copy(model.position);
       c.center.copy(model.position);
       c.center.y += 0.8;

@@ -2128,6 +2128,7 @@ export function createMatchMode(ctx) {
       combat.ownBlood = !!c.enemy;
       const model = combatantModel(c);
       if (!model) return;
+      combat.model = model;
       combat.position.copy(model.position);
       combat.center.copy(model.position);
       combat.center.y += BODY_CENTER_Y;
@@ -2247,7 +2248,7 @@ export function createMatchMode(ctx) {
           return;
         }
         case 'blocked':
-          ctx.onSwingBlocked();
+          ctx.onSwingBlocked(combatantModel(c));
           return;
         case 'botHit':
         case 'botBlocked': {

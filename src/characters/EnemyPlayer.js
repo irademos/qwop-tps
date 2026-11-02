@@ -13,7 +13,7 @@
 import { spawnBloodBurst } from '../combat/bloodEffect.js';
 import * as THREE from 'three';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
-import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig, blockedStaggerHand, BLOCKED_STAGGER_S } from '../models/glbCharacterModel.js';
 
 // Cycles the character model per spawned swordsman: a quarter each pumpkins, antler guys, frog men, gemhorns
 let _enemyModelIndex = 0;
@@ -178,6 +178,9 @@ const _toTarget = new THREE.Vector3();
 const _chaseVia = new THREE.Vector3();
 const _tmpV    = new THREE.Vector3();
 const _tmpQ    = new THREE.Quaternion();
+const _staggerHand = new THREE.Vector3();
+const _yAxis = new THREE.Vector3(0, 1, 0);
+const _tipV = new THREE.Vector3();
 const _swordTipWorld  = new THREE.Vector3();
 const _swordGuardWorld = new THREE.Vector3();
 const _bladeDir = new THREE.Vector3();
@@ -357,6 +360,9 @@ export class EnemyPlayer {
     // Sword bounce state (triggered when player sword collides with this sword)
     this._bounceActive  = false;
     this._bounceEndTime = 0;
+    // Blocked stagger (applySwordBounce): sword in one hand, the other flung out, no blocking
+    this._staggerStart = 0;
+    this._staggerUntil = 0;
 
     // Sword quaternion (updated each frame)
     this._swordQuaternion = new THREE.Quaternion().setFromEuler(REST_SWORD_EULER);
@@ -919,6 +925,7 @@ export class EnemyPlayer {
 
     // ── Left hand grips pommel (depends on sword orientation) ─────────────
     if (!this.gripTarget) this._updateLeftHandToPommel(dt);
+    this._applyStaggerHand(dt);
     this._solveArm('left');
     this._glbCharacter?.stepFluff(dt);
 
@@ -950,7 +957,7 @@ export class EnemyPlayer {
     const r = Math.random();
     const swing = Math.min(0.9, Math.max(0, this.swingChance));
     const blockCut = (1 - swing) * (40 / 65);
-    if (r < blockCut) {
+    if (r < blockCut && !this.isStaggered()) {
       this._attackPhase    = 'block';
       this._attackPhaseDur = 1.5 + Math.random() * 2.5;
       this._blockSeed      = Math.random() * 100;
@@ -1136,6 +1143,25 @@ export class EnemyPlayer {
     return !this.isDead && !(this._frozenLeft > 0) && this._aiState === 'attack' && this._attackPhase === 'block';
   }
 
+  /** True during the blocked stagger (applySwordBounce): open to a counter, no blocking. */
+  isStaggered() {
+    return Date.now() < this._staggerUntil;
+  }
+
+  // The free hand (the -X one; the sword is in the +X hand) flung out and waggling while
+  // staggered — blended over the grip it was given this frame
+  _applyStaggerHand(dt) {
+    if (!this._staggerUntil) return;
+    const w = blockedStaggerHand((Date.now() - this._staggerStart) / 1000, -1, _staggerHand);
+    if (w <= 0) {
+      if (Date.now() >= this._staggerUntil) { this._staggerUntil = 0; this._staggerPos = null; }
+      return;
+    }
+    this._staggerPos ??= this._leftHandGroup.position.clone();
+    this._staggerPos.lerp(_staggerHand, 1 - Math.exp(-30 * dt));
+    this._leftHandGroup.position.lerp(this._staggerPos, w);
+  }
+
   /**
    * Whether this enemy's block stops a magic blast (see magicBlast.js): only in the block
    * stance, with the blade along the blast's line.
@@ -1291,11 +1317,18 @@ export class EnemyPlayer {
     this._bounceActive    = true;
     this._bounceEndTime   = Date.now() + dur;
     this._bounceInitDone  = false; // force recoil target rebuild on next _updateSword
-    // Cancel any in-flight swing so the bounce doesn't immediately re-hit
+    // Staggered: the sword recoils in one hand, the other is flung out, the blocked clip
+    // plays and no block until it's over (isStaggered) — open to a counter
+    this._staggerStart = Date.now();
+    this._staggerUntil = this._staggerStart + BLOCKED_STAGGER_S * 1000;
+    this._staggerPos = null;
+    this._glbCharacter?.playReaction(glbCharacterConfig.blockedClip);
+    // Cancel any in-flight swing so the bounce doesn't immediately re-hit (and no new swing
+    // before the stagger is over)
     if (this._attackPhase === 'swing_execute') {
       this._attackPhase    = 'swing_hold';
       this._attackPhaseT   = 0;
-      this._attackPhaseDur = 0.6;
+      this._attackPhaseDur = Math.max(0.6, BLOCKED_STAGGER_S);
     }
     // Show enemy block flash (gray spiky) if a callback is registered
     window._pswShowBlockFlash?.('enemy');
@@ -1317,8 +1350,13 @@ export class EnemyPlayer {
         // Build recoil target: rotate current sword Q by bounceAngle around world Y
         if (!this._bounceTargetQ) this._bounceTargetQ = new THREE.Quaternion();
         if (!this._bounceInitDone) {
-          const yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), bounceAngle);
-          this._bounceTargetQ.copy(yRot).multiply(this._swordQuaternion);
+          // Recoil toward the sword hand's side (local +X) — the free hand goes the other way
+          this.group.getWorldQuaternion(_rootQ).invert();
+          const tipX = (a) => _tipV.set(0, 0, 1)
+            .applyQuaternion(_tmpQ.setFromAxisAngle(_yAxis, a).multiply(this._swordQuaternion))
+            .applyQuaternion(_rootQ).x;
+          const angle = tipX(-bounceAngle) > tipX(bounceAngle) ? -bounceAngle : bounceAngle;
+          this._bounceTargetQ.setFromAxisAngle(_yAxis, angle).multiply(this._swordQuaternion);
           this._bounceInitDone = true;
         }
         this._swordQuaternion.slerp(this._bounceTargetQ, 1 - Math.exp(-snapSpeed * dt));
@@ -1420,7 +1458,7 @@ export class EnemyPlayer {
     // Player sword block: only while the player holds the block button, with their blade in
     // the way of this sword, and only if the swing crosses their blade (see swingCrossesBlade).
     const playerBladePoints = window.phoneSwordBladePoints;
-    if (window.phoneSwordGyro?.blocking && playerBladePoints?.length >= 2) {
+    if (window.phoneSwordGyro?.blocking && !window.isPlayerStaggered?.() && playerBladePoints?.length >= 2) {
       // Forgiving reach: the enemy's tip or guard anywhere near the player's blade counts
       _swordGuardWorld.copy(this._swordGroup.position);
       const intercepted = playerBladePoints.some(pp =>
@@ -1565,6 +1603,8 @@ export class EnemyPlayer {
       this._die();
       return true; // killing blow
     }
+    // A hit that doesn't knock them down (a blast's knock-down / ragdoll clip wins)
+    this._glbCharacter?.playReaction(glbCharacterConfig.smallHitClip);
     return false; // survived
   }
 

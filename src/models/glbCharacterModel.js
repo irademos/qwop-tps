@@ -32,6 +32,10 @@
  * suspended like death), then returns to walk/idle; actionProgress / actionActive
  * let the caller time events (e.g. the bomb thrower's release) against the clip.
  *
+ * Reactions: playReaction(url) plays a clip once over the body like playAction(), but the arm
+ * IK keeps the hands on whatever they hold (the hit / blocked stagger — smallHitClip /
+ * blockedClip); it never cuts off a playAction() / playPose() / death.
+ *
  * Poses: playPose(url) loops a clip over the whole body (arm IK suspended) until endPose()
  * (sitting on Town's broom — sitClip).
  *
@@ -51,7 +55,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { FluffyCharacter } from './fluffyCharacter.ts';
+import { FluffyCharacter, preloadAnimation } from './fluffyCharacter.ts';
 import { stylizeObject, whenStyleReferenceReady } from '../environment/artStyle.js';
 import { addBlobShadow } from '../environment/blobShadows.js';
 
@@ -73,6 +77,8 @@ export const glbCharacterConfig = {
   runClip: '/models/animations/Slow Run.fbx',  // replaces the walk above runSpeed
   rollClip: '/models/animations/Roll.fbx',     // player's dodge roll (playAction)
   sitClip: '/models/animations/Sitting.fbx',   // riding Town's broom (playPose)
+  smallHitClip: '/models/animations/Small Hit Reaction.fbx', // a hit that doesn't knock them down (playReaction)
+  blockedClip: '/models/animations/Blocked Reaction.fbx',    // own swing blocked — the stagger (playReaction)
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
   // Moving characters run once their measured ground speed (m/s, world space — every
   // player, remote player and enemy alike) goes above runSpeed, and walk again below
@@ -133,6 +139,30 @@ const ARM_CHAIN_FOR_HAND = { right: 'Left', left: 'Right' };
 // Clip-excluded subtrees: the clavicles and everything below them
 const ARM_ROOT_BONES = ['LeftShoulder', 'RightShoulder'];
 
+// ── Blocked stagger (a swing that was blocked) ──────────────────────────────
+// The sword stays in one hand and recoils; the other hand lets go and is flung out to the
+// other side, waggling for balance, while blockedClip plays (playReaction). Players and
+// enemies can't block meanwhile — they're open to a counter.
+export const BLOCKED_STAGGER_S = 1.0;
+const STAGGER_IN_S = 0.1;   // the free hand flies out this fast…
+const STAGGER_OUT_S = 0.3;  // …and comes back to the grip over the last of the stagger
+
+/**
+ * Where the free hand goes `t` s into a blocked stagger (character-local, the game's hand
+ * coordinates; `side` = +1 out to local +X, -1 to -X) — written to `out`. Returns how much of
+ * it to use (0..1: easing in / out over the stagger), so the caller blends from its own target.
+ */
+export function blockedStaggerHand(t, side, out, duration = BLOCKED_STAGGER_S) {
+  if (!(t >= 0) || t >= duration) return 0;
+  const wobble = Math.exp(-t * 1.6); // flailing that settles as the balance comes back
+  out.set(
+    side * (0.62 + 0.07 * Math.sin(t * 15) * wobble),
+    0.95 + 0.14 * Math.sin(t * 11 + 0.6) * wobble,
+    0.02 + 0.1 * Math.sin(t * 8.5 + 1.7) * wobble,
+  );
+  return Math.min(1, t / STAGGER_IN_S, (duration - t) / STAGGER_OUT_S);
+}
+
 const DEFAULT_HOLD = Object.freeze({ grip: 1, sword: 1, climb: 1 });
 /** How a character holds weapons: { grip, sword } scales + `climb` = how far the hands reach
  *  up / out when wall climbing (glbCharacterConfig.holdByUrl). */
@@ -165,6 +195,15 @@ function getCharacterGLTF(url = glbCharacterConfig.url) {
 /** Start loading a character's GLB (+ its art-style pass) ahead of the first instance. */
 export function preloadCharacterModel(url = glbCharacterConfig.url) {
   getCharacterGLTF(url).catch(() => {});
+}
+
+// The reaction clips play the moment someone's hit / blocked: loaded with the first character
+let _reactionClipsPreloaded = false;
+function preloadReactionClips() {
+  if (_reactionClipsPreloaded) return;
+  _reactionClipsPreloaded = true;
+  preloadAnimation(glbCharacterConfig.smallHitClip);
+  preloadAnimation(glbCharacterConfig.blockedClip);
 }
 
 /** True once a character's GLB has finished loading (or failed) — a new instance then shows at once. */
@@ -398,6 +437,7 @@ export class GLBCharacter {
   setArmIKHands({ left = true, right = true } = {}) {
     if (left === this._ikHands.left && right === this._ikHands.right) return;
     this._ikHands = { left, right };
+    if (this._action?.reaction && !this._dead) { this._setArmIK(this._armIK); return; } // (the clip plays on)
     if (this._dead || this._action) return; // applied by revive() / _endAction()
     this._setArmIK(this._armIK);
     this._gaitClip = null;
@@ -418,6 +458,27 @@ export class GLBCharacter {
       .then(() => { if (this._action === action) action.started = true; })
       .catch((e) => {
         console.warn('[GLBCharacter] action clip load failed:', e);
+        if (this._action === action) this._endAction();
+      });
+  }
+
+  /**
+   * Plays `url` once over the body with the IK arms left on the IK (the hands keep their
+   * weapon), then back to walk / idle. A reaction replaces a reaction; it is ignored while
+   * dead or while a playAction() / playPose() clip owns the body (a throw / roll / sitting).
+   */
+  playReaction(url, { fade = 0.08 } = {}) {
+    if (this._dead || !url || (this._action && !this._action.reaction)) return;
+    const action = { started: false, reaction: true };
+    this._action = action;
+    this._gaitClip = null;
+    this.fluffy.play(url, {
+      inPlace: true, fade, loop: false,
+      excludeBones: this._armIK ? this._ikShoulders() : [],
+    })
+      .then(() => { if (this._action === action) action.started = true; })
+      .catch((e) => {
+        console.warn('[GLBCharacter] reaction clip load failed:', e);
         if (this._action === action) this._endAction();
       });
   }
@@ -445,12 +506,15 @@ export class GLBCharacter {
     if (this._action?.pose) this._endAction();
   }
 
-  /** True from playAction() until its clip has finished. */
-  get actionActive() { return !!this._action; }
+  /** True from playAction() until its clip has finished (not for a playReaction()). */
+  get actionActive() { return !!this._action && !this._action.reaction; }
+
+  /** True while a playReaction() clip plays. */
+  get reactionActive() { return !!this._action?.reaction; }
 
   /** Playback position (0..1) of the playAction() clip; 0 while it is still loading. */
   get actionProgress() {
-    if (!this._action) return 1;
+    if (!this._action || this._action.reaction) return 1;
     return this._action.started ? this.fluffy.clipProgress : 0;
   }
 
@@ -522,7 +586,7 @@ export class GLBCharacter {
   solveArm(hand, targetObject, { writeBack = true } = {}) {
     const arm = this.arms[hand];
     if (!arm || !targetObject) return;
-    if (this._dead || this._action || !this._armIK || !this._ikHands[hand]) {
+    if (this._dead || (this._action && !this._action.reaction) || !this._armIK || !this._ikHands[hand]) {
       // A clip owns the arm: just keep the floating hand (and anything held) on the palm
       if (writeBack && targetObject.parent) {
         targetObject.position.copy(targetObject.parent.worldToLocal(this.getPalmWorldPosition(hand, _v)));
@@ -635,6 +699,7 @@ export class GLBCharacter {
  */
 export async function createGLBCharacterInstance(opts = {}) {
   const url = opts.url ?? glbCharacterConfig.url;
+  preloadReactionClips();
   const targetHeight = (opts.targetHeight ?? glbCharacterConfig.targetHeight)
     * (glbCharacterConfig.heightScaleByUrl[url] ?? 1);
   const gltf = await getCharacterGLTF(url);
