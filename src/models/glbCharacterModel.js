@@ -97,8 +97,8 @@ export const glbCharacterConfig = {
   // Per-model weapon hold (characterHold): `grip` scales where the hands hold the sword /
   // shield / gun (and the unarmed gyro arm) around the feet, `sword` scales the held sword
   holdByUrl: {
-    '/models/glb_characters/village_boy.glb': { grip: 0.76, sword: 0.8 },
-    '/models/glb_characters/village_girl.glb': { grip: 0.76, sword: 0.8 },
+    '/models/glb_characters/village_boy.glb': { grip: 0.76, sword: 0.8, climb: 0.6 },
+    '/models/glb_characters/village_girl.glb': { grip: 0.76, sword: 0.8, climb: 0.6 },
   },
 
   // Arm IK
@@ -133,8 +133,9 @@ const ARM_CHAIN_FOR_HAND = { right: 'Left', left: 'Right' };
 // Clip-excluded subtrees: the clavicles and everything below them
 const ARM_ROOT_BONES = ['LeftShoulder', 'RightShoulder'];
 
-const DEFAULT_HOLD = Object.freeze({ grip: 1, sword: 1 });
-/** How a character holds weapons: { grip, sword } scales (glbCharacterConfig.holdByUrl). */
+const DEFAULT_HOLD = Object.freeze({ grip: 1, sword: 1, climb: 1 });
+/** How a character holds weapons: { grip, sword } scales + `climb` = how far the hands reach
+ *  up / out when wall climbing (glbCharacterConfig.holdByUrl). */
 export function characterHold(url) {
   const hold = url && glbCharacterConfig.holdByUrl[url];
   return hold ? { ...DEFAULT_HOLD, ...hold } : DEFAULT_HOLD;
