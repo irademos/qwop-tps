@@ -194,6 +194,12 @@ export interface MapLoadOptions {
    * Defaults to '/basis/' — copy public/basis/ from this repo to your project.
    */
   transcoderPath?: string
+  /**
+   * (game edit) false = no ocean plane of its own and only a small seabed apron
+   * (`SEA_APRON_EXTENT`) — an island placed out on another map's sea, which
+   * draws the ocean. The water data (seaLevel) is kept either way.
+   */
+  sea?: boolean
 }
 
 // ── Exported low-level functions ───────────────────────────────────────────
@@ -1107,6 +1113,8 @@ export function sampleMapWaterLevel(w: MapWaterInfo, x: number, z: number): numb
 
 /** How far the sea reaches, as a multiple of the terrain's larger side. */
 export const SEA_EXTENT = 12
+/** (game edit) The seabed's reach for a pack loaded with { sea: false }. */
+export const SEA_APRON_EXTENT = 1.5
 
 /** Flat, subdivided sea plane centred on the terrain (terrain-local). */
 export function buildSeaGeometry(worldWidth: number, worldDepth: number, seaLevel: number): THREE.BufferGeometry {
@@ -1137,8 +1145,11 @@ export function buildSeabedGeometry(
   worldWidth: number, worldDepth: number, level: number,
   shoreColor: THREE.ColorRepresentation,
   shape: 'rectangle' | 'circle' = 'rectangle',
+  extent: number = SEA_EXTENT,
 ): THREE.BufferGeometry {
-  const size = Math.max(worldWidth, worldDepth) * SEA_EXTENT
+  const size = Math.max(worldWidth, worldDepth) * extent
+  // (the shore colour fades to deep blue over 2 half-extents, or by the edge of a small apron)
+  const fade = Math.max(0.1, Math.min(2, extent - 1))
   const geo  = new THREE.PlaneGeometry(size, size, 96, 96)
   geo.rotateX(-Math.PI / 2)
   geo.translate(0, level, 0)
@@ -1152,7 +1163,7 @@ export function buildSeabedGeometry(
     const nx = Math.abs(pos.getX(k)) / (worldWidth / 2)
     const nz = Math.abs(pos.getZ(k)) / (worldDepth / 2)
     const e  = shape === 'circle' ? Math.sqrt(nx * nx + nz * nz) : Math.max(nx, nz)
-    const u  = Math.max(0, Math.min(1, (e - 1) / 2))
+    const u  = Math.max(0, Math.min(1, (e - 1) / fade))
     c.copy(shore).lerp(SEABED_DEEP_COLOR, u * u * (3 - 2 * u))
     cols[k * 3] = c.r; cols[k * 3 + 1] = c.g; cols[k * 3 + 2] = c.b
   }
@@ -1325,7 +1336,7 @@ export class MapLoader {
     source: File | Blob | ArrayBuffer | string,
     options: MapLoadOptions = {}
   ): Promise<THREE.Group> {
-    const { renderer, transcoderPath = '/basis/' } = options
+    const { renderer, transcoderPath = '/basis/', sea = true } = options
     const zip      = await this.openZip(source)
     const manifest = await this.readManifest(zip)
 
@@ -1413,18 +1424,20 @@ export class MapLoader {
 
     // Sea
     const seaLevel = typeof manifest.water?.seaLevel === 'number' ? manifest.water.seaLevel : null
-    if (seaLevel !== null) {
+    if (seaLevel !== null && sea) {
       const seaMat  = createWaterMaterial()
       const seaMesh = new THREE.Mesh(buildSeaGeometry(worldWidth, worldDepth, seaLevel), seaMat)
       seaMesh.name        = 'sea'
       seaMesh.renderOrder = 1
       seaMesh.onBeforeRender = () => { seaMat.uniforms.uTime.value = performance.now() / 1000 }
       terrainRoot.add(seaMesh)
-
+    }
+    if (seaLevel !== null) {
       const seabed = new THREE.Mesh(
         buildSeabedGeometry(
           worldWidth, worldDepth, computeSeabedLevel(heights, seaLevel),
           lowestStopColor(manifest.terrain.colorStops), shape,
+          sea ? SEA_EXTENT : SEA_APRON_EXTENT,
         ),
         createSeabedMaterial(),
       )
