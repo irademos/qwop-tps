@@ -271,7 +271,7 @@ export function installTownTrade(T, ctx) {
     const item = list.find((x) => x.id === id);
     const items = ctx.getItems();
     const missing = item.needs && !items?.[item.needs];
-    const needLabel = { gun: 'Gun', wand: 'Magic Wand' }[item.needs];
+    const needLabel = { gun: 'Bow', wand: 'Magic Wand' }[item.needs];
     return {
       name: item.label,
       desc: item.desc || '',
@@ -401,8 +401,8 @@ export function installTownTrade(T, ctx) {
       { w: 16, emoji: '💣', give: () => (ctx.grantItem('bomb', 2) ? '2 bombs' : null) },
       { w: 14, emoji: GOODS[good].emoji, give: () => { const n = gain(good, 3); return n ? `${n} ${GOODS[good].label.toLowerCase()}` : null; } },
       { w: items.shield >= ctx.shieldMax ? 0 : 10, emoji: '🛡️', give: () => (ctx.grantItem('shield') ? 'a shield' : null) },
-      { w: items.gun ? 10 : 0, emoji: '🔶', give: () => (ctx.grantItem('ammo', 6) ? '6 bullets' : null) },
-      { w: items.gun ? 0 : 4, emoji: '🔫', give: () => (ctx.grantItem('gun') ? 'a gun!' : null) },
+      { w: items.gun ? 10 : 0, emoji: '🪶', give: () => (ctx.grantItem('ammo', 6) ? '6 arrows' : null) },
+      { w: items.gun ? 0 : 4, emoji: '🏹', give: () => (ctx.grantItem('gun') ? 'a bow!' : null) },
       { w: items.sword ? 0 : 6, emoji: '🗡️', give: () => (ctx.grantItem('sword') ? 'a sword!' : null) },
       { w: 3, emoji: '💰', give: () => { ctx.addCoins(100); return 'the jackpot — 100 coins!'; } },
     ].filter((p) => p.w > 0);

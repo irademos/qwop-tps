@@ -8,6 +8,8 @@ import { getKnockbackImpulse, getKnockbackMotion } from "../combat/knockback.js"
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
 import { characterCameraHeight } from '../models/glbCharacterModel.js';
 import { loadNippleJs } from '../core/externalDeps.js';
+import { raycastMapSegment } from '../environment/mapCollision.js';
+import { arrowShotOptions, ARROW_SPEED_MIN, ARROW_SPEED_MAX } from '../items/projectiles.js';
 
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
@@ -69,6 +71,17 @@ export const CLIMB_CONFIG = {
 };
 // Weapon button id for "put everything away" (Town: nothing in hand)
 const HANDS_ID = 'hands';
+// The bow drawn (bowAiming, set by bootstrapGameApp.js `_bowDraw`): the third-person camera
+// eases in over the right shoulder (bowZoom 0 → 1), the crosshair at the middle of the screen
+// is where arrows go (getBowAimPoint)
+const BOW_CAM_DISTANCE = 0.8;       // m behind (the normal view: DEFAULT_CAMERA_DISTANCE)
+const BOW_CAM_SIDE = 0.3;           // m to the right (× the character's camera height)
+const BOW_CAM_LOOK_HEIGHT = 1.18;   // over the shoulder (the normal view: DEFAULT_CAMERA_LOOK_HEIGHT)
+const BOW_CAM_FOV_DELTA = 10;       // degrees narrower, fully drawn in
+const BOW_CAM_ZOOM_IN_S = 0.85;     // eased in over about the draw…
+const BOW_CAM_ZOOM_OUT_S = 0.3;     // …and back out quicker
+const BOW_AIM_MAX_DIST = 120;       // m: the crosshair ray's reach (past it: a point that far)
+const BOW_AIM_BEHIND = 0.2;         // m: the ray starts this far short of the player's depth
 
 // Dodge roll (startRoll — a swipe on the touch screen or the phone controller): ROLL.distance m
 // along the swipe over ROLL.duration s (fastest mid-roll), body turned to face the roll
@@ -168,6 +181,12 @@ export class PlayerControls {
     // Gun / shield aim pitch from the phone gyro (radians, + = up; null = aim with the camera).
     // Set each frame by the weapon gyro aim in bootstrapGameApp.js.
     this.weaponAimPitch = null;
+    // The bow drawn: over-the-shoulder camera + crosshair aim (see BOW_CAM_*)
+    this.bowAiming = false;
+    this.bowZoom = 0;
+    this.bowAimHit = false;   // the crosshair ray hit the map (getBowAimPoint)
+    this._bowAimFrame = -1;
+    this._bowAimPoint = new THREE.Vector3();
 
     // Initial player position
     const spawn = getSpawnPosition();
@@ -215,8 +234,8 @@ export class PlayerControls {
     this.ammoContainerEl = document.getElementById('ammo-display');
     this.ammoCountEl = document.getElementById('ammo-count');
     this.ammoIconEl = document.getElementById('ammo-icon');
-    this.ammoLabel = 'Bullets';
-    this.ammoIcon = '🔫';
+    this.ammoLabel = 'Arrows';
+    this.ammoIcon = '🏹';
     this.lastAmmoValue = null;
     this.lastAmmoEmpty = null;
     this.lastHasGun = null;
@@ -243,8 +262,8 @@ export class PlayerControls {
   }
 
   // Partial update ({ firstPerson, eyeHeight, eyeForward, fov }), saved per device
-  // First-person camera in use: the saved setting, or forced on while a gun is equipped
-  // (forceFirstPerson — temporary, never saved, so unequipping returns to the setting)
+  // First-person camera in use: the saved setting (forceFirstPerson — temporary, never saved;
+  // nothing sets it now: the bow stays third person)
   get isFirstPersonView() {
     return !!(this.cameraConfig?.firstPerson || this.forceFirstPerson);
   }
@@ -602,6 +621,33 @@ export class PlayerControls {
     bindPress(this.psWeaponBtn4, makePsWeaponHandler(this.psWeaponBtn4));
     bindPress(this.psWeaponBtn5, makePsWeaponHandler(this.psWeaponBtn5));
 
+    // The bow: held to draw (equips it, the string comes back, the camera eases in over the
+    // shoulder), let go to loose — then what was in hand comes back (bootstrapGameApp.js _bowDraw)
+    this.psBowBtn = createButton('ps-bow-btn', 'mobile-primary-action ps-weapon-btn ps-bow-btn', 'Bow');
+    this.psBowBtn.setAttribute('aria-label', 'Hold to draw the bow, let go to shoot');
+    {
+      let bowTouch = false;
+      const down = (event) => {
+        if (event) this.safePreventDefault(event);
+        if (!this.enabled) return;
+        if (getAppState()?.startBowDraw?.()) this.psBowBtn.classList.add('ps-bow-drawing');
+      };
+      const up = (cancel) => {
+        this.psBowBtn.classList.remove('ps-bow-drawing');
+        getAppState()?.releaseBowDraw?.(cancel);
+      };
+      this.psBowBtn.addEventListener('touchstart', (e) => { bowTouch = true; this.lastTouchButtonTime = performance.now(); down(e); }, { passive: false });
+      this.psBowBtn.addEventListener('touchend', (e) => { this.safePreventDefault(e); up(false); }, { passive: false });
+      this.psBowBtn.addEventListener('touchcancel', () => up(true), { passive: false });
+      this.psBowBtn.addEventListener('mousedown', (e) => {
+        if (bowTouch || (performance.now() - this.lastTouchButtonTime) <= 550) return;
+        down(e);
+      });
+      this.psBowBtn.addEventListener('mouseup', () => { if (!bowTouch) up(false); });
+      this.psBowBtn.addEventListener('mouseleave', () => { if (!bowTouch && getAppState()?.isBowDrawing?.()) up(false); });
+      this.psBowBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+
     // Protective bubble (bought in the shop); label/count kept fresh by the game loop
     this.psBubbleBtn = createButton('ps-bubble-btn', 'mobile-primary-action ps-bubble-btn', `🫧 ${getAppState()?.getBubbleCount?.() ?? 0}`);
     this.psBubbleBtn.setAttribute('aria-label', 'Activate protective bubble');
@@ -724,7 +770,9 @@ export class PlayerControls {
     const appState = appContext.uiState.appState ?? window.appState;
     const heldBar = appState?.getTownHeldBar?.();
     if (heldBar) return heldBar;
-    const itemId = this.getEquippedItemId();
+    // (the bow out for a draw: the bar stays what it was for the item that comes back)
+    const bowDraw = appState?.getBowDrawPrev?.();
+    const itemId = bowDraw ? (bowDraw.prev ?? (appState?.isUnarmedAllowed?.() ? null : 'foamSword')) : this.getEquippedItemId();
     if (itemId === 'pistol') return 'fire';
     if (itemId === 'shield') return appState?.isWandShieldHeld?.() ? 'shield' : 'sword';
     if (itemId === 'magic_wand') {
@@ -749,7 +797,6 @@ export class PlayerControls {
     if (!this.punchButton) return;
     const appState = appContext.uiState.appState ?? window.appState;
     const inventory = appState?.getInventory?.() || {};
-    const hasGun = (inventory.pistol?.count ?? 0) > 0;
     const hasShield = (inventory.shield?.count ?? 0) > 0;
     const hasWand = !!appState?.isWandAllowed?.();
     const hasRod = !!appState?.isRodAllowed?.();
@@ -761,12 +808,13 @@ export class PlayerControls {
     const weapons = inCanoe ? (hasRod ? [{ id: 'canoe_oar', label: 'Oar' }, { id: 'fishing_rod', label: 'Rod' }] : []) : [
       ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
       ...(hasWand ? [{ id: 'magic_wand', label: 'Wand' }] : []),
-      ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
       ...(hasRod ? [{ id: 'fishing_rod', label: 'Rod' }] : []),
     ];
-    // Default to foamSword when nothing detected (unless nothing in hand is allowed)
-    const equippedId = this.getEquippedItemId();
+    // Default to foamSword when nothing detected (unless nothing in hand is allowed); while
+    // the bow is out for a draw, the item that comes back after
+    const bowDraw = appState?.getBowDrawPrev?.();
+    const equippedId = bowDraw ? bowDraw.prev : this.getEquippedItemId();
     const others = weapons.filter(w => w.id !== equippedId);
     if (unarmedAllowed && equippedId && !inCanoe) others.push({ id: HANDS_ID, label: 'Hands' });
     [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5].forEach((button, index) => {
@@ -776,6 +824,7 @@ export class PlayerControls {
       button.style.display = w ? '' : 'none';
       button.classList.toggle('ps-wand-btn', w?.id === 'magic_wand');
     });
+    this.updateBowButton(false);
     // Town's broom: Broom (get on) / Land (get off)
     if (this.psBroomBtn) {
       const riding = !!appState?.isRidingBroom?.();
@@ -795,6 +844,25 @@ export class PlayerControls {
     this.layoutMobileActionButtons();
   }
 
+  // The bow (held to draw): its own button with the arrows left on it — kept fresh each frame
+  // by the game (bootstrapGameApp.js _updateBowDraw); a change of shown / hidden re-lays out
+  updateBowButton(relayout = true) {
+    const btn = this.psBowBtn;
+    if (!btn) return;
+    const appState = appContext.uiState.appState ?? window.appState;
+    const show = !!appState?.ownsBow?.() && !appState?.isInCanoe?.();
+    const display = show ? '' : 'none';
+    if (btn.style.display !== display) {
+      btn.style.display = display;
+      if (relayout) this.layoutMobileActionButtons();
+    }
+    const arrows = appState?.getPistolAmmoCount?.() ?? 0;
+    const label = `🏹 ${arrows}`;
+    if (btn.dataset.label !== label) { btn.dataset.label = label; btn.textContent = label; }
+    btn.classList.toggle('ps-bow-empty', arrows <= 0);
+    btn.classList.toggle('ps-bow-drawing', !!appState?.isBowDrawing?.());
+  }
+
   isTouchLayout() {
     return !!window.matchMedia?.('(pointer: coarse)').matches;
   }
@@ -807,7 +875,7 @@ export class PlayerControls {
 
   // Block/fire button + two weapon switch buttons, bubble and bomb
   layoutMobileActionButtons() {
-    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBubbleBtn, this.psBombBtn, this.psBroomBtn, this.psBoostBtn].forEach((button) => {
+    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBowBtn, this.psBubbleBtn, this.psBombBtn, this.psBroomBtn, this.psBoostBtn].forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
@@ -822,8 +890,8 @@ export class PlayerControls {
       if (shown(this.psBombBtn)) this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: rows[1]++ });
       if (shown(this.psBroomBtn)) this.applyMobileButtonPosition(this.psBroomBtn, { x: 1, y: rows[1]++ });
       if (shown(this.psBoostBtn)) this.applyMobileButtonPosition(this.psBoostBtn, { x: 1, y: rows[1]++ });
-      for (const b of [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5]) {
-        if (!b.dataset.psWeaponId) continue;
+      for (const b of [this.psBowBtn, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5]) {
+        if (b === this.psBowBtn ? !shown(b) : !b.dataset.psWeaponId) continue;
         const col = rows[1] <= rows[0] ? 1 : 0;
         this.applyMobileButtonPosition(b, { x: col, y: rows[col]++ });
       }
@@ -849,6 +917,8 @@ export class PlayerControls {
     if (this.psWeaponBtn5.dataset.psWeaponId) {
       this.applyMobileButtonPosition(this.psWeaponBtn5, { x: 1, y: blockInGrid ? 3 : 2 });
     }
+    // The bow: its own column, left of the weapon buttons
+    this.applyMobileButtonPosition(this.psBowBtn, { x: 3, y: 0 });
     // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
     this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: blockInGrid ? 1 : 0 });
     // Bomb sits above the bubble (the jump/gyro column and weapon buttons stay clear)
@@ -866,6 +936,10 @@ export class PlayerControls {
       this.keysPressed.add(key);
       if (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === ' ') {
         this.safePreventDefault(e);
+      }
+      // Q held: draw the bow (let go to loose)
+      if (key === 'q' && !e.repeat && !e.target?.closest?.('input, textarea')) {
+        (appContext.uiState.appState ?? window.appState)?.startBowDraw?.();
       }
       // B: on / off Town's flying broom
       if (key === 'b' && !e.repeat && !e.target?.closest?.('input, textarea')) {
@@ -887,6 +961,7 @@ export class PlayerControls {
     document.addEventListener("keyup", (e) => {
       this.keysPressed.delete(e.key.toLowerCase());
       if (e.key === 'Shift') (appContext.uiState.appState ?? window.appState)?.setBroomBoost?.(false);
+      if (e.key.toLowerCase() === 'q') (appContext.uiState.appState ?? window.appState)?.releaseBowDraw?.();
     });
     
     // Handle window resize
@@ -903,10 +978,17 @@ export class PlayerControls {
       this.applyMobilePortraitCameraTuning();
     });
 
-    this.domElement.addEventListener("click", () => {
-      // Don't fire if chat or settings are open
-      if (!this.enabled || this.isMobile) return;
-      this.attemptFireProjectile();
+    // The right mouse button held on the game: draw the bow (let go to loose)
+    this.domElement.addEventListener('mousedown', (e) => {
+      if (e.button !== 2 || !this.enabled || this.isMobile) return;
+      (appContext.uiState.appState ?? window.appState)?.startBowDraw?.();
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (e.button !== 2) return;
+      (appContext.uiState.appState ?? window.appState)?.releaseBowDraw?.();
+    });
+    this.domElement.addEventListener('contextmenu', (e) => {
+      if ((appContext.uiState.appState ?? window.appState)?.ownsBow?.()) e.preventDefault();
     });
   }
 
@@ -1516,15 +1598,26 @@ export class PlayerControls {
       // other way — a lower camera looks up)
       const targetPitch = this.isFirstPersonView
         ? Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.weaponAimPitch))
-        : Math.max(-Math.PI / 8, Math.min(Math.PI / 4, -this.weaponAimPitch * WEAPON_AIM_CAMERA_FOLLOW));
+        : this.bowAiming
+          // (the bow: the crosshair is the aim, so the camera follows all of it)
+          ? Math.max(-Math.PI / 4, Math.min(Math.PI / 4, -this.weaponAimPitch))
+          : Math.max(-Math.PI / 8, Math.min(Math.PI / 4, -this.weaponAimPitch * WEAPON_AIM_CAMERA_FOLLOW));
       this.pitch += (targetPitch - this.pitch) * (1 - Math.exp(-GYRO_LERP_SPEED * delta));
     } else {
       // Gyroscope: smoothly slerp yaw/pitch toward device orientation target
       this._applyGyroUpdate(delta);
     }
 
+    // The bow drawn: eased in over the shoulder (in quicker than out — BOW_CAM_*)
+    {
+      const target = this.bowAiming ? 1 : 0;
+      const span = target > this.bowZoom ? BOW_CAM_ZOOM_IN_S : BOW_CAM_ZOOM_OUT_S;
+      const step = Math.min(1, (Number.isFinite(delta) ? delta : 0.016) / span);
+      this.bowZoom = target > this.bowZoom ? Math.min(target, this.bowZoom + step) : Math.max(target, this.bowZoom - step);
+    }
+    const bowEase = this.bowZoom * this.bowZoom * (3 - 2 * this.bowZoom);
     const fovLerpFactor = 1 - Math.exp(-CAMERA_FOV_LERP_SPEED * this.deltaSeconds);
-    const targetFov = Math.max(45, this.defaultFov - WEAPON_CAMERA_FOV_DELTA);
+    const targetFov = Math.max(30, this.defaultFov - WEAPON_CAMERA_FOV_DELTA - BOW_CAM_FOV_DELTA * bowEase);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, fovLerpFactor);
     this.camera.updateProjectionMatrix();
 
@@ -1548,10 +1641,16 @@ export class PlayerControls {
       this.camera.lookAt(eyePosition.clone().add(lookDirection));
     } else {
       // Normal view: orbit the look point using yaw + pitch
-      const lookPoint = this.playerModel.position.clone().add(new THREE.Vector3(0, DEFAULT_CAMERA_LOOK_HEIGHT * heightScale, 0));
+      // (the bow drawn: lower, closer and off to the right — over the shoulder)
+      const lookHeight = THREE.MathUtils.lerp(DEFAULT_CAMERA_LOOK_HEIGHT, BOW_CAM_LOOK_HEIGHT, bowEase);
+      const side = BOW_CAM_SIDE * bowEase * heightScale;
+      const lookPoint = this.playerModel.position.clone().add(new THREE.Vector3(
+        -Math.cos(this.yaw) * side, lookHeight * heightScale, Math.sin(this.yaw) * side
+      ));
       const pitchClamped = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
       // (further back on the broom, the faster it flies — broom.js `ride.camDist`)
-      const camDistance = DEFAULT_CAMERA_DISTANCE + (Number.isFinite(this.ride?.camDist) ? this.ride.camDist : 0);
+      const camDistance = THREE.MathUtils.lerp(DEFAULT_CAMERA_DISTANCE, BOW_CAM_DISTANCE, bowEase)
+        + (Number.isFinite(this.ride?.camDist) ? this.ride.camDist : 0);
       const horizontalDist = camDistance * Math.cos(pitchClamped);
       const verticalOffset = DEFAULT_CAMERA_RAISE + camDistance * Math.sin(pitchClamped);
       this.camera.position.set(
@@ -1659,20 +1758,58 @@ export class PlayerControls {
     }
 
     this.playAction('projectile');
-    this.spawnProjectile(
-      this.scene,
-      this.projectiles,
-      position,
-      direction,
-      shooterId,
-      {
-        geometry: new THREE.SphereGeometry(0.08, 8, 8),
-        colliderDesc: RAPIER.ColliderDesc.ball(0.08).setRestitution(0.3).setFriction(0.5),
-        color: new THREE.Color(0xffee44),
-        speed: 28,
-        lifetime: 2500
-      }
-    );
+    this.spawnProjectile(this.scene, this.projectiles, position, direction, shooterId, arrowShotOptions());
+    return true;
+  }
+
+  /**
+   * Where the crosshair (the middle of the screen) points: the first map surface along the
+   * camera's centre ray from the player's depth on (bowAimHit = true), else a point
+   * BOW_AIM_MAX_DIST out.
+   * Worked out once a frame.
+   */
+  getBowAimPoint(out = new THREE.Vector3()) {
+    const frame = this.renderer?.info?.render?.frame ?? -2;
+    if (frame !== this._bowAimFrame || frame < 0) {
+      this._bowAimFrame = frame;
+      const cam = this.camera;
+      cam.updateMatrixWorld();
+      const origin = new THREE.Vector3().setFromMatrixPosition(cam.matrixWorld);
+      const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.getWorldQuaternion(new THREE.Quaternion())).normalize();
+      // (from the player's depth on: nothing between the camera and the player counts)
+      const toPlayer = this.playerModel ? this.playerModel.position.clone().sub(origin).dot(dir) : 0;
+      const start = origin.clone().addScaledVector(dir, Math.max(0, toPlayer - BOW_AIM_BEHIND));
+      const end = origin.clone().addScaledVector(dir, Math.max(0, toPlayer) + BOW_AIM_MAX_DIST);
+      const hit = raycastMapSegment(start, end);
+      this.bowAimHit = !!hit;
+      this._bowAimPoint.copy(hit ? hit.point : end);
+    }
+    return out.copy(this._bowAimPoint);
+  }
+
+  /**
+   * Looses an arrow from `from` along `direction` (normalised), as fast as the bow was drawn
+   * (`power` 0 … 1). Uses an arrow (ammo); false with none left.
+   */
+  fireArrow(power, from, direction) {
+    if (!this.canFireProjectile('right')) return false;
+    const speed = THREE.MathUtils.lerp(ARROW_SPEED_MIN, ARROW_SPEED_MAX, THREE.MathUtils.clamp(power, 0, 1));
+    const position = from.clone();
+    this.consumeAmmo();
+    const shooterId = this.multiplayer?.getId?.() ?? 'local';
+    if (this.multiplayer) {
+      const payload = {
+        type: 'projectile',
+        id: shooterId,
+        position: position.toArray(),
+        direction: direction.toArray(),
+        weapon: 'bow',
+        speed
+      };
+      if (this.sendProjectile) this.sendProjectile(payload);
+      else this.multiplayer.send?.(payload);
+    }
+    this.spawnProjectile(this.scene, this.projectiles, position, direction.clone(), shooterId, arrowShotOptions({ speed }));
     return true;
   }
 

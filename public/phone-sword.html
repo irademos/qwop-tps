@@ -444,8 +444,8 @@
     <div id="action-grid">
       <button class="ctl-btn row-btn" id="btn-sword" data-action="sword">🗡️
 Sword</button>
-      <button class="ctl-btn row-btn" id="btn-gun" data-action="gun">🔫
-Gun</button>
+      <button class="ctl-btn row-btn" id="btn-gun" data-action="bowDown" data-release="bowUp">🏹
+Bow</button>
       <button class="ctl-btn row-btn" id="btn-shield" data-action="shield">🛡
 Shield</button>
       <button class="ctl-btn row-btn" id="btn-wand" data-action="wand">🪄
@@ -639,18 +639,20 @@ Boost</button>
         e.preventDefault();
         if (btn.disabled) return;
         btn.classList.add('pressed');
+        // (a held button keeps the finger even if it slides off — the bow while aiming)
+        if (btn.dataset.release) { try { btn.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ } }
         if (navigator.vibrate) navigator.vibrate(15);
         sendAction(btn.dataset.action);
         if (btn.dataset.action === 'recalibrate') flashRecalibrated(btn);
       });
-      // (a held button — Boost: its release sends an action too)
+      // (a held button — Boost, the bow: its release sends an action too)
       const unpress = () => {
         if (btn.dataset.release && btn.classList.contains('pressed')) sendAction(btn.dataset.release);
         btn.classList.remove('pressed');
       };
       btn.addEventListener('pointerup', unpress);
       btn.addEventListener('pointercancel', unpress);
-      btn.addEventListener('pointerleave', unpress);
+      btn.addEventListener('pointerleave', (e) => { if (!btn.hasPointerCapture?.(e.pointerId)) unpress(); });
     });
     document.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -714,9 +716,10 @@ Boost</button>
       const back = st.hasSword === false ? '✋\nHands' : '🗡️\nSword';
       btnGun.disabled = !st.hasGun;
       btnShield.disabled = !st.hasShield;
-      btnGun.classList.toggle('equipped', st.equipped === 'pistol');
+      // The bow: held to draw, let go to shoot (the arrows left on it)
+      btnGun.classList.toggle('equipped', !!st.drawing);
       btnShield.classList.toggle('equipped', st.equipped === 'shield');
-      btnGun.textContent = st.equipped === 'pistol' ? back : '🔫\nGun';
+      btnGun.textContent = `🏹 Bow\n${st.ammo ?? 0}`;
       btnShield.textContent = st.equipped === 'shield' ? back : '🛡\nShield';
       // Magic wand (once owned / picked up): swaps with the sword; shows the mana left
       btnWand.classList.toggle('owned', !!st.hasWand);

@@ -132,7 +132,7 @@ function getFallbackIcon(itemId) {
   if (itemId === 'bubble') return '🫧';
   if (itemId === 'foamSword') return '🗡️';
   if (itemId === 'shield') return '🛡️';
-  if (itemId === 'pistol') return '🔫';
+  if (itemId === 'pistol') return '🏹';
   if (itemId === 'gun bullets') return '🔶';
   if (itemId === 'magic_wand') return '🪄';
   if (itemId === 'mana_potion') return '🧪';

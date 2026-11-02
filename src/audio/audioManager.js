@@ -176,6 +176,71 @@ export class AudioManager {
     }
   }
 
+  // Little synthesised sounds with no sample of their own: 'bowDraw' (the string creaking back)
+  // and 'bowRelease' (the twang + the arrow's whoosh)
+  playSynth(kind, volume = 1) {
+    this.ensureAudioContext();
+    const ctx = this.context;
+    if (!ctx || !this.sfxGain || ctx.state !== 'running') return;
+    const t = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = Math.max(0, Math.min(1, volume));
+    out.connect(this.sfxGain);
+    const noise = (seconds) => {
+      const buf = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * seconds)), ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      return src;
+    };
+    if (kind === 'bowDraw') {
+      // a soft rising creak: band-passed noise, its pitch climbing, a slow tremble
+      const src = noise(0.8);
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.Q.value = 9;
+      band.frequency.setValueAtTime(380, t);
+      band.frequency.linearRampToValueAtTime(900, t + 0.75);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.22, t + 0.12);
+      g.gain.linearRampToValueAtTime(0.12, t + 0.6);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+      src.connect(band).connect(g).connect(out);
+      src.start(t);
+      src.stop(t + 0.82);
+    } else if (kind === 'bowRelease') {
+      // the twang: a plucked low note dropping in pitch
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(190, t);
+      osc.frequency.exponentialRampToValueAtTime(95, t + 0.25);
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.0001, t);
+      og.gain.exponentialRampToValueAtTime(0.5, t + 0.006);
+      og.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      osc.connect(og).connect(out);
+      osc.start(t);
+      osc.stop(t + 0.32);
+      // the whoosh: high-passed noise, a quick swell
+      const src = noise(0.35);
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'bandpass';
+      hp.Q.value = 0.8;
+      hp.frequency.setValueAtTime(2400, t);
+      hp.frequency.exponentialRampToValueAtTime(900, t + 0.3);
+      const ng = ctx.createGain();
+      ng.gain.setValueAtTime(0.0001, t);
+      ng.gain.exponentialRampToValueAtTime(0.3, t + 0.03);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.33);
+      src.connect(hp).connect(ng).connect(out);
+      src.start(t);
+      src.stop(t + 0.35);
+    }
+    setTimeout(() => { try { out.disconnect(); } catch (_) { /* ignore */ } }, 1200);
+  }
+
   setMasterVolume(value) {
     this.masterVolume = Math.max(0, Math.min(1, value));
     if (this.masterGain) {

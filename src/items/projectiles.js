@@ -4,6 +4,54 @@ import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../player/healthU
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { spawnBulletImpact } from '../combat/bulletImpact.js';
+import { createArrowMesh } from './bowModel.js';
+
+// Arrows (the bow — the weapon that was the gun): every shot in the game is one. A loosed
+// arrow's speed follows how far the bow was drawn (PlayerControls.fireArrow); it flies tip
+// first (`faceVelocity`, turned by the physics sync in bootstrapGameApp.js), drops a little
+// (`gravityScale`) and sticks in what it hits for a while.
+export const ARROW_SPEED_MIN = 16;       // m/s, a quick tap
+export const ARROW_SPEED_MAX = 44;       // m/s, fully drawn
+export const ARROW_GRAVITY_SCALE = 0.22; // of the world's gravity
+export const BOT_ARROW_SPEED = 28;       // battle bots' / bosses' (level, like the old bullets)
+const ARROW_RADIUS = 0.05;
+const ARROW_STICK_S = 6;                 // s an arrow stays stuck in a wall / the ground
+const ARROW_STICK_MAX = 24;
+const ARROW_STICK_DEPTH = 0.07;          // m of the tip in it
+
+/** spawnProjectile options for an arrow (`hostile`, `speed`, `gravityScale`…) */
+export function arrowShotOptions(extra = {}) {
+  return {
+    arrow: true,
+    colliderDesc: RAPIER.ColliderDesc.ball(ARROW_RADIUS).setRestitution(0.1).setFriction(0.8).setSensor(true),
+    speed: ARROW_SPEED_MAX,
+    gravityScale: ARROW_GRAVITY_SCALE,
+    lifetime: 3000,
+    ...extra,
+  };
+}
+
+const _stuck = [];
+const _arrowDir = new THREE.Vector3();
+const _zAxis = new THREE.Vector3(0, 0, 1);
+function stickArrow(scene, point, dir) {
+  if (!scene || dir.lengthSq() < 1e-6) return;
+  const mesh = createArrowMesh();
+  _arrowDir.copy(dir).normalize();
+  mesh.quaternion.setFromUnitVectors(_zAxis, _arrowDir);
+  mesh.position.copy(point).addScaledVector(_arrowDir, ARROW_STICK_DEPTH);
+  scene.add(mesh);
+  _stuck.push({ mesh, until: performance.now() + ARROW_STICK_S * 1000 });
+  while (_stuck.length > ARROW_STICK_MAX) disposeProjectileMesh(_stuck.shift().mesh);
+}
+function updateStuckArrows() {
+  const now = performance.now();
+  for (let i = _stuck.length - 1; i >= 0; i--) {
+    if (now < _stuck[i].until) continue;
+    disposeProjectileMesh(_stuck[i].mesh);
+    _stuck.splice(i, 1);
+  }
+}
 
 const disposeProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -73,15 +121,25 @@ function removeProjectileAt(projectiles, index) {
 export function spawnProjectile(scene, projectiles, position, direction, shooterId, options = {}) {
   const size = 0.5;
   const half = size / 2;
-  const geometry = options.geometry || new THREE.BoxGeometry(size, size, size);
-  const color = options.color || new THREE.Color(Math.random(), Math.random(), Math.random());
-  const material = new THREE.MeshStandardMaterial({ color });
-  const mesh = new THREE.Mesh(geometry, material);
+  let mesh;
+  if (options.arrow) {
+    mesh = createArrowMesh();
+    mesh.quaternion.setFromUnitVectors(_zAxis, _arrowDir.copy(direction).normalize());
+    mesh.userData.arrow = true;
+    mesh.userData.faceVelocity = true;
+  } else {
+    const geometry = options.geometry || new THREE.BoxGeometry(size, size, size);
+    const color = options.color || new THREE.Color(Math.random(), Math.random(), Math.random());
+    const material = new THREE.MeshStandardMaterial({ color });
+    mesh = new THREE.Mesh(geometry, material);
+  }
   const spawnPosition = position.clone();
   mesh.position.copy(spawnPosition);
   // Rapier body
   const world = window.rapierWorld;
   const rbDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(mesh.position.x, mesh.position.y, mesh.position.z);
+  if (Number.isFinite(options.gravityScale)) rbDesc.setGravityScale(options.gravityScale);
+  if (options.arrow) rbDesc.lockRotations();
   const rb = world.createRigidBody(rbDesc);
   const colDesc = options.colliderDesc || RAPIER.ColliderDesc.cuboid(half, half, half)
     .setRestitution(0.2)
@@ -131,6 +189,7 @@ export function updateProjectiles({
   const removeProjectile = (index) => {
     removeProjectileAt(projectiles, index);
   };
+  updateStuckArrows();
 
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const proj = projectiles[i];
@@ -175,7 +234,9 @@ export function updateProjectiles({
     }
     const segEnd = wallHit ? _wallPoint : proj.position;
     const stopAtWall = () => {
-      if (proj.parent) spawnBulletImpact(proj.parent, _wallPoint, _wallNormal);
+      // (an arrow sticks in it; anything else sparks)
+      if (proj.userData.arrow) stickArrow(proj.parent, _wallPoint, vel);
+      else if (proj.parent) spawnBulletImpact(proj.parent, _wallPoint, _wallNormal);
       removeProjectile(i);
     };
 

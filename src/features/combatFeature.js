@@ -1,9 +1,9 @@
 import { showFeatureLoading } from './loadingState.js';
-import { spawnProjectile, updateProjectiles } from '../items/projectiles.js';
+import { spawnProjectile, updateProjectiles, arrowShotOptions, ARROW_SPEED_MIN, ARROW_SPEED_MAX, ARROW_GRAVITY_SCALE, BOT_ARROW_SPEED } from '../items/projectiles.js';
 
 let specialWeaponsPromise = null;
 
-export { spawnProjectile, updateProjectiles };
+export { spawnProjectile, updateProjectiles, arrowShotOptions, ARROW_SPEED_MIN, ARROW_SPEED_MAX, ARROW_GRAVITY_SCALE, BOT_ARROW_SPEED };
 
 export async function loadSpecialWeapons() {
   if (!specialWeaponsPromise) {

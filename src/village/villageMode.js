@@ -40,6 +40,7 @@ import { raycastMapSegment } from '../environment/mapCollision.js';
 import { PEMBERTON_SCALE, addRedGlow } from '../characters/pembertonBoss.js';
 import { talkAutoHoldSeconds } from '../characters/stageBoss.js';
 import { createWandModel } from '../items/magicWand.js';
+import { createBowMesh, createArrowMesh } from '../items/bowModel.js';
 import { createBroomModel, BROOM_SEAT_TO_END } from '../items/broom.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -527,16 +528,15 @@ export function buildItemMesh(kind) {
   const g = new THREE.Group();
   const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.1, ...extra });
   if (kind === 'gun') {
-    const dark = std(0x2b2d33, { metalness: 0.4, roughness: 0.45 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.24), dark);
-    body.position.set(0, 0.1, 0);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.12, 12), dark);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.115, 0.17);
-    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.11, 0.06), std(0x6b4425));
-    grip.position.set(0, 0.04, -0.08);
-    grip.rotation.x = -0.25;
-    g.add(body, barrel, grip);
+    // The bow (the weapon that was the gun — bowModel.js), laid flat with an arrow beside it
+    const bow = createBowMesh();
+    bow.scale.setScalar(0.5);
+    bow.rotation.z = Math.PI / 2;
+    bow.position.y = 0.03;
+    const arrow = createArrowMesh({ own: false });
+    arrow.scale.setScalar(0.6);
+    arrow.position.set(0.03, 0.012, 0.16);
+    g.add(bow, arrow);
     g.rotation.y = Math.PI / 2.6;
   } else if (kind === 'shield' || kind === 'shieldUpgrade') {
     const r = kind === 'shield' ? 0.2 : 0.13;
@@ -556,18 +556,15 @@ export function buildItemMesh(kind) {
       g.rotation.x = -0.25;
     }
   } else if (kind === 'bullets') {
-    const brass = std(0xd4a640, { metalness: 0.7, roughness: 0.3 });
-    const tip = std(0xb87333, { metalness: 0.6, roughness: 0.35 });
+    // A bundle of arrows (the bow's ammo — still 'gun bullets' as an item)
     for (let i = 0; i < 5; i++) {
-      const b = new THREE.Group();
-      const casing = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.07, 10), brass);
-      casing.position.y = 0.035;
-      const head = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.035, 10), tip);
-      head.position.y = 0.087;
-      b.add(casing, head);
-      b.position.set((i % 3) * 0.045 - 0.045, 0, Math.floor(i / 3) * 0.045);
-      g.add(b);
+      const arrow = createArrowMesh({ own: false });
+      arrow.scale.setScalar(0.6);
+      arrow.position.set((i - 2) * 0.03, 0.012 + (i % 2) * 0.012, 0.16 + (i % 3) * 0.015);
+      arrow.rotation.z = i * 0.7;
+      g.add(arrow);
     }
+    g.rotation.y = Math.PI / 5;
   } else if (kind === 'bubble') {
     const ball = new THREE.Mesh(
       new THREE.SphereGeometry(0.13, 24, 16),
