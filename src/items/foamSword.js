@@ -194,7 +194,8 @@ export class FoamSword extends Weapon {
         active?.scale.setScalar(grip);
         return;
       }
-      const blocking = !!window.phoneSwordGyro?.blocking;
+      // (a blocked stagger lets go of the block — window.isPlayerStaggered)
+      const blocking = !!window.phoneSwordGyro?.blocking && !window.isPlayerStaggered?.();
       const blockSign = blocking ? -1 : 1;
       // Lateral: sword right → hands right (inverted + compressed toward center in blocking mode)
       const _blockLatScale = blocking ? (window.phoneSwordSwingCfg?.blockLateralScale ?? 0.3) : 1;

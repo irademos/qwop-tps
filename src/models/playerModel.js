@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createGLBCharacterInstance, glbCharacterConfig, characterHold } from './glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig, characterHold, blockedStaggerHand, BLOCKED_STAGGER_S } from './glbCharacterModel.js';
 
 export function createProceduralBody(THREE) {
   const root = new THREE.Group();
@@ -24,6 +24,7 @@ export function createProceduralBody(THREE) {
 const _fsHandTarget = new THREE.Vector3();
 const _defaultHandPos = new THREE.Vector3();
 const _gyroArmDir = new THREE.Vector3();
+const _staggerHand = new THREE.Vector3();
 
 // Unarmed gyro arm (game 'left' hand = the anatomical right arm): the hand follows the
 // direction the phone points like the sword grip does, one-handed, beside the body
@@ -117,6 +118,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     }
   }
 
+  // Blocked stagger (startBlockedStagger): the free hand lets go and flails out
+  if (rig.floatingHands && !options.climbing) applyStaggerHand(playerGroup, rig, dt);
+
   // Wall climbing (PlayerControls._updateClimb): hand over hand up the wall in front,
   // overriding the weapon grip while it lasts; scaled per character (holdByUrl `climb`),
   // so smaller characters (village boy / girl) don't over-stretch their arms
@@ -159,7 +163,52 @@ export function updateRemotePlayerRig(playerGroup, deltaSeconds) {
       rig.floatingHands[side].position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
     }
   }
+  if (armed && rig.floatingHands) applyStaggerHand(playerGroup, rig, dt);
   updateGLBCharacter(rig, dt, speed > 0.4);
+}
+
+// ── Reactions ───────────────────────────────────────────────────────────────
+
+/**
+ * A swing of this player's was blocked (local player, or another player whose swing our
+ * block stopped): blockedClip plays over the body and the free hand — the game 'right' one,
+ * the sword is in the 'left' — lets go and is flung out to +X, waggling, for
+ * BLOCKED_STAGGER_S (applyStaggerHand). The sword's recoil is the caller's.
+ */
+export function startBlockedStagger(playerGroup) {
+  const ud = playerGroup?.userData;
+  if (!ud) return;
+  const now = performance.now();
+  ud.blockedStagger = { start: now, until: now + BLOCKED_STAGGER_S * 1000 };
+  ud.qwopRig?.glbCharacter?.playReaction(glbCharacterConfig.blockedClip);
+}
+
+/** True during this player's blocked stagger (they can't block meanwhile). */
+export function isBlockedStaggered(playerGroup) {
+  return performance.now() < (playerGroup?.userData?.blockedStagger?.until ?? 0);
+}
+
+/** A hit that doesn't knock this player down: smallHitClip plays over the body. */
+export function playHitReaction(playerGroup) {
+  playerGroup?.userData?.qwopRig?.glbCharacter?.playReaction(glbCharacterConfig.smallHitClip);
+}
+
+// The free hand ('right'; not while it carries Town's lantern) during a blocked stagger
+function applyStaggerHand(playerGroup, rig, dt) {
+  const ud = playerGroup.userData;
+  const st = ud.blockedStagger;
+  if (!st || ud.lanternHeld) return;
+  const w = blockedStaggerHand((performance.now() - st.start) / 1000, 1, _staggerHand);
+  if (w <= 0) {
+    if (performance.now() >= st.until) ud.blockedStagger = null;
+    return;
+  }
+  _staggerHand.multiplyScalar(characterHold(rig.characterUrl).grip);
+  const hand = rig.floatingHands.right;
+  // (the hand's own path out — smoothed — blended over the grip target it was just given)
+  st.pos ??= hand.position.clone();
+  st.pos.lerp(_staggerHand, 1 - Math.exp(-30 * dt));
+  hand.position.lerp(st.pos, w);
 }
 
 // Another player's dodge roll (their duel / battle `state` says `ro` while it lasts): the

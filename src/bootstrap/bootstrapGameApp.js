@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/bloodEffect.js";
 import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
-import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
+import { updateRemotePlayerRig, setPlayerCharacterUrl, startBlockedStagger, isBlockedStaggered, playHitReaction } from "../models/playerModel.js";
 import { glbCharacterConfig, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, registerWallProbe, setTerrainFloor } from '../environment/terrainHeight.js';
@@ -3600,8 +3600,15 @@ async function initCore(runtimeContext) {
     const intensity = THREE.MathUtils.clamp((previousHealth - nextHealth) / 2, 0.6, 2);
     spawnBloodBurst(scene, playerBloodOrigin, { groundY, intensity });
     if (nextHealth <= 0) audioManager?.playOuch('playerDeath', 'ouch-player');
-    else audioManager?.playOuch('player', 'ouch-player');
+    else {
+      audioManager?.playOuch('player', 'ouch-player');
+      // A hit that doesn't knock them down (a blast's knock-down clip wins — see playReaction)
+      playHitReaction(playerModel);
+    }
   };
+  // During a blocked stagger (startBlockedStagger) the player's block doesn't hold
+  window.isPlayerStaggered = () => isBlockedStaggered(playerModel);
+  const _playerBlockHeld = () => !!window.phoneSwordGyro?.blocking && !window.isPlayerStaggered();
 
   window.setStat = setStat;
   window.getPlayerStrength = () => {
@@ -4467,7 +4474,7 @@ async function initCore(runtimeContext) {
         return true;
       }
       const pts = window.phoneSwordBladePoints;
-      if (window.phoneSwordGyro?.blocking && !isPlayerFrozen() && foamSword?.holder === playerControls && pts?.length >= 3 &&
+      if (_playerBlockHeld() && !isPlayerFrozen() && foamSword?.holder === playerControls && pts?.length >= 3 &&
           bladeBlocksBlast(_magicBladeDir.subVectors(pts[2], pts[0]), blast.line, blast.forward)) {
         window._pswShowBlockFlash?.('player');
         audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
@@ -7947,7 +7954,7 @@ async function initCore(runtimeContext) {
       if (!window.phoneSwordGyro?.connected || foamSword?.holder !== playerControls || !(pts?.length >= 3)) return null;
       return out.subVectors(pts[2], pts[0]);
     },
-    isBlocking: () => !!window.phoneSwordGyro?.blocking,
+    isBlocking: () => _playerBlockHeld(),
     isPhoneConnected: () => !!window.phoneSwordGyro?.connected,
     requestPhoneSetup: () => {
       if (window.phoneSwordGyro?.connected || !_phoneSwordPeerId) return false;
@@ -8287,7 +8294,7 @@ async function initCore(runtimeContext) {
           q: _duelSwordLocalQ.toArray().map(_round3)
         },
         hand: hand ? [_round3(hand.x), _round3(hand.y), _round3(hand.z)] : null,
-        blocking: !!window.phoneSwordGyro?.blocking
+        blocking: _playerBlockHeld()
       };
     },
     // The opponent's sword landed on us (battles: also a bullet / bomb blast, `ranged` =
@@ -8321,7 +8328,9 @@ async function initCore(runtimeContext) {
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.55, { cooldownKey: 'shield-hit', cooldownMs: 120 });
     },
     // Our block stopped the opponent's swing
-    onSwingBlocked: () => {
+    // (`attackerModel`: the other player whose swing it was — their blocked stagger)
+    onSwingBlocked: (attackerModel) => {
+      if (attackerModel) startBlockedStagger(attackerModel);
       window._pswShowBlockFlash?.('player');
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
     },
@@ -8644,7 +8653,7 @@ async function initCore(runtimeContext) {
     getLocalHealth: () => statsState.health,
     getLocalSwordState: duelCtx.getLocalSwordState,
     applyHit: duelCtx.applyHit,
-    onSwingBlocked: duelCtx.onSwingBlocked,
+    onSwingBlocked: (attackerModel) => duelCtx.onSwingBlocked(attackerModel),
     // A host bot's sword landed on the local player (damage is applied by EnemyPlayer)
     knockbackLocal: (dir) => {
       _playerKnockback.vx = dir.x * 4.5;
@@ -8919,7 +8928,7 @@ async function initCore(runtimeContext) {
       town.onPvpHurt(fromId);
       duelCtx.applyHit(dmg, dir, ranged);
     },
-    onSwingBlocked: () => duelCtx.onSwingBlocked(),
+    onSwingBlocked: (attackerModel) => duelCtx.onSwingBlocked(attackerModel),
     onAttackPlayer: (info) => town?.onAttackPlayer(info),
     onBounty: (name, coins) => town?.onBounty(name, coins),
     onWorldMessage: (from, data) => town?.handleNet(from, data),
@@ -9784,7 +9793,7 @@ async function initCore(runtimeContext) {
       // Pressing/releasing Block flips the hands into/out of the block stance (and jolts
       // the phone), so the tip jumps in one frame. That isn't a swing: ignore swings for
       // a moment after every block toggle and restart the swing-direction history.
-      const _blockingNow = !!window.phoneSwordGyro?.blocking;
+      const _blockingNow = _playerBlockHeld();
       if (_blockingNow !== _psw.lastBlocking) {
         if (_blockingNow) comboMeter.end(); // blocking ends the combo
         _psw.lastBlocking = _blockingNow;
@@ -9806,13 +9815,21 @@ async function initCore(runtimeContext) {
       const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
       const _playerMovingFast = !_blockingNow && !_blockToggleSettling &&
         _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
-      // Blocked swing: knock the player's sword sideways (snap, hold, return to live gyro)
+      // Blocked swing: knock the player's sword sideways (snap, hold, return to live gyro) —
+      // to the sword hand's side (the game 'left' hand, local -X), held in that hand alone:
+      // the other hand is flung out the other way and the blocked stagger plays
+      // (startBlockedStagger — no blocking meanwhile)
       const _startSwordBounce = () => {
         if (_psw.bounceActive) return;
         const _bounceCfg = window.phoneSwordSwingCfg;
-        const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
+        let _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
         const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
-        const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
+        const _yAxis = new THREE.Vector3(0, 1, 0);
+        const _tipX = (a) => new THREE.Vector3(0, 0, 1).applyQuaternion(
+          new THREE.Quaternion().setFromAxisAngle(_yAxis, a).multiply(_activeQ).multiply(_phoneSwordBaseQ)).x;
+        if (_tipX(-_bounceAngle) < _tipX(_bounceAngle)) _bounceAngle = -_bounceAngle;
+        const _yRot = new THREE.Quaternion().setFromAxisAngle(_yAxis, _bounceAngle);
+        startBlockedStagger(playerModel);
         _psw.bounceActive    = true;
         _psw.bounceStartTime = _nowSecPS;
         _psw.bounceDur       = _bounceDur;
@@ -9957,6 +9974,7 @@ async function initCore(runtimeContext) {
             if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
             _sweepDir.normalize();
             _opp.onHit(1, _sweepDir);
+            if (!_opp.ownBlood && _opp.model) playHitReaction(_opp.model); // (bots react themselves)
             if (!_opp.ownBlood) spawnBloodBurst(scene, _opp.center, { groundY: _opp.position.y, intensity: 0.8 });
             audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
             _swingHitOccurred = true;

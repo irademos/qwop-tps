@@ -102,6 +102,11 @@ function loadAnimationTemplate(url: string): Promise<AnimationTemplate> {
   return p
 }
 
+/** Starts loading a clip so its first play() doesn't wait on the download. */
+export function preloadAnimation(url: string) {
+  loadAnimationTemplate(url).catch(() => {})
+}
+
 // Each character gets its own copy of the FBX hierarchy so several characters
 // can play the same clip independently.
 async function loadAnimation(url: string): Promise<AnimationSource> {

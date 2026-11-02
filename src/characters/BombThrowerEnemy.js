@@ -692,6 +692,8 @@ export class BombThrowerEnemy {
       this._die();
       return true;
     }
+    // A hit that doesn't knock them down (not mid-throw — see playReaction)
+    this._glbCharacter?.playReaction(glbCharacterConfig.smallHitClip);
     return false;
   }
 

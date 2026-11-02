@@ -3,6 +3,7 @@
 
 import { FOLLOW_LINES, SHOUT_FIGHT, SHOUT_HELP, SHOUT_HURT, SHOUT_LAW, SHOUT_MURDER, SHOUT_THIEF, characterForRole, firstName, relationOf, shout } from './townPeople.js';
 import * as THREE from 'three';
+import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 import {
   BAIL, BRIBE, BRIBE_ODDS, DEAD_BODY_S, ENGAGE_DIST, FINE_PER_STAR, FRIEND_ATTITUDE, HEAT_DECAY_S,
   JAIL_S, KO_COIN_SHARE, LAW_SIGHT, LOCK_SLIP_S, WAKE_HOUR, WITNESS_DIST, _v, dist2, heightScale,
@@ -105,6 +106,7 @@ export function installTownLaw(T, ctx) {
       return;
     }
     T.clearTalk(n);
+    n.body?.character.playReaction(glbCharacterConfig.smallHitClip); // (a small hit — not knocked down)
     // Hitting an outlaw (a bandit, a mugger) is no crime — the town's grateful
     if (outlaw) T.heroic(n);
     else crime('assault', n);
