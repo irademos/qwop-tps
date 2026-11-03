@@ -5154,8 +5154,8 @@ async function initCore(runtimeContext) {
   // A sword swing steps the player forward (into a blocked swing / a missed one) — in Town only
   // while walked along or fighting someone within TOWN_SWING_STEP_RANGE
   const TOWN_SWING_STEP_RANGE = 6;    // m
-  const _swingStepAllowed = () => !town?.isActive() || performance.now() - _townAutoWalkAt < 250
-    || town.threats(TOWN_SWING_STEP_RANGE).length > 0;
+  const _swingStepAllowed = () => !story?.isActive() && (!town?.isActive() || performance.now() - _townAutoWalkAt < 250
+    || town.threats(TOWN_SWING_STEP_RANGE).length > 0);
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
   let _psWinShown = false;
@@ -6898,6 +6898,8 @@ async function initCore(runtimeContext) {
       else _equipByPlayer(FISHING_ROD_ITEM_ID);
       playerControls?.refreshActionButtons?.();
     } else if (action === 'sword') {
+      // Story: the sword (from the sacred tree) ↔ hands
+      if (story?.isActive()) { story.toggleSword(); return; }
       // Town: 🗡 Sword out ↔ ✋ Hands (nothing in hand); something grabbed: drop it
       if (!_townLoadout || isOarAllowed()) return; // (in the canoe the oar stays in hand)
       if (town?.holding()) { town.dropHeld(); return; }
@@ -6950,10 +6952,10 @@ async function initCore(runtimeContext) {
       };
     }
     if (story?.isActive()) {
-      // Story: the rod once found (and the oar in the canoe) — nothing from Showdown
+      // Story: the rod once found, the sword from the sacred tree (and the oar in the canoe) — nothing from Showdown
       return {
         bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false, hasWand: false,
-        ammo: 0, hasSword: false, hasRod: isRodAllowed(), canUnequip: false,
+        ammo: 0, hasSword: !!story.hasSword(), hasRod: isRodAllowed(), canUnequip: !!story.hasSword() && !story.inCanoe(),
         equipped: _heldWeaponId() ?? 'none', highlight: null
       };
     }
@@ -7566,9 +7568,9 @@ async function initCore(runtimeContext) {
     // Magic wand: owned (Showdown / the tutorial) or picked up in a Multiplayer battle
     isWandAllowed: () => isWandAllowed(),
     // Town: nothing in hand is allowed (✋ Hands), and the sword has to be bought
-    // (Story: no sword either — the rod once found)
+    // (Story: the rod once found, the sword once the sacred tree gives it)
     isUnarmedAllowed: () => !!_townLoadout || !!story?.isActive(),
-    ownsSword: () => (story?.isActive() ? false : !_townLoadout || _townLoadout.hasSword),
+    ownsSword: () => (story?.isActive() ? story.hasSword() : !_townLoadout || _townLoadout.hasSword),
     isStoryMode: () => !!story?.isActive(),
     putWeaponsAway: () => {
       if (!_townLoadout && !story?.isActive()) return;
@@ -9700,18 +9702,28 @@ async function initCore(runtimeContext) {
     refreshPhone: () => _phoneSwordStatusNow?.(),
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
     isTouch: () => !!playerControls?.isTouchLayout?.(),
-    // 'rod' | 'oar' in hand, or null: nothing
+    // 'rod' | 'oar' | 'sword' in hand, or null: nothing
     hold: (kind) => {
       if (kind === 'rod') _equipByPlayer(FISHING_ROD_ITEM_ID);
       else if (kind === 'oar') _equipByPlayer(OAR_ITEM_ID);
+      else if (kind === 'sword') _equipByPlayer(FOAM_SWORD_ITEM_ID);
       else _putWeaponsAway();
       _refreshGearUI();
       _phoneSwordStatusNow?.();
     },
     // Washed up: lying on the beach (the death clip, held on its last frame) / back up
     // (no stand-up clip yet — he just stands)
-    // What's in hand: 'rod' | 'oar' | null (the game's weapon buttons / the phone change it too)
-    heldKind: () => (isRodEquipped() ? 'rod' : isOarEquipped() ? 'oar' : null),
+    // What's in hand: 'rod' | 'oar' | 'sword' | null (the game's weapon buttons / the phone change it too)
+    heldKind: () => (isRodEquipped() ? 'rod' : isOarEquipped() ? 'oar'
+      : _heldWeaponId() === FOAM_SWORD_ITEM_ID ? 'sword' : null),
+    // Sound effects: 'chop' (a log cut, the canoe mended) / 'unsheath' (the sword handed over)
+    playSfx: (kind, at = null) => {
+      if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.3, { cooldownKey: 'story-chop', cooldownMs: 200, at });
+      else if (kind === 'unsheath') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.5);
+    },
+    // The player's voice (text to speech) — as Town's: by name and character
+    getPlayerName: () => playerName,
+    playerVoiceKind: () => (playerModel?.userData?.qwopRig?.characterUrl === glbCharacterConfig.villageGirlUrl ? 'female' : 'male'),
     refreshButtons: () => { _refreshGearUI(); _phoneSwordStatusNow?.(); },
     showBanner: (title, sub, ms) => _showWorldBanner(title, sub, ms),
     lieDown: () => playerModel?.userData?.qwopRig?.glbCharacter?.playDeath?.(),
@@ -10391,6 +10403,12 @@ async function initCore(runtimeContext) {
           ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
           : new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
         if (town.trySwordHit(_tipWorld, _townSwingDir)) _swingHitOccurred = true;
+      }
+      // Story: a swing through a driftwood log cuts it (wood for the canoe)
+      if (!_wandOut && !playerDead && story?.isActive() && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld
+        && _tipWorld.distanceTo(_psw.prevTipWorld) > (window.phoneSwordSwingCfg?.minSweepDist ?? 0.015)
+        && (window._pswDebugSpeed ?? 0) >= (window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000)) {
+        if (story.trySwordHit(_tipWorld)) _swingHitOccurred = true;
       }
       // Hidden stage chest: a sword swipe through it opens it (a random prize)
       if (!_wandOut && !playerDead && stageChests.trySwordHit(_playerBladePoints, _playerMovingFast)) {

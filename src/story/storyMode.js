@@ -1,38 +1,40 @@
-// Story mode — a one-player story on Tree Island (MAPS.islandTown.islands `treeIsland`). Saved as
-// it goes (signed in — guests save nothing): the step, what the player has, where they are.
-//
-// Chapter 1, "Washed Up":
-//   1. Cut scene: black, a sound (STORY_SOUNDS.intro — add the file), then a fade in on the
-//      village boy lying on the beach of Tree Island; he gets up (no stand-up clip yet — he just
-//      stands), walks to a rock by the shore and stands on it (no sitting clip yet), takes out a
-//      flute (items/flute.js) and plays (STORY_SOUNDS.flute). The Crow (crow.js) flies in.
-//   2. The Crow: "Give me your flute." → Give the flute (game over: back to the start) /
-//      Throw a rock (a side quest — later) / Ask for more information (it wants a fish first).
-//   3. A fish: an old fishing rod lies up the beach, a canoe is pulled up on the shore. Fish
-//      (Town's fishing — townFishing.js on a small stand-in state `F`, as the sea start does),
-//      from the shore or the canoe, anywhere on the water.
-//   4. Bring the Crow the fish → "To be continued…".
-// The Crow is a recurring character: bring it fish for information and hints (later chapters).
-//
-// The layout is found on the island at run time (findLayout): the rock nearest its shore, the
-// beach between them, the rod up the beach to one side, the canoe moored off it.
+// Story mode — the engine: a one-player story on Tree Island (MAPS.islandTown.islands
+// `treeIsland`), saved as it goes (signed in — guests save nothing). It runs a chapter's data
+// (chapter1.js: the talks, choices, steps, quest tracker, acts, notes) — no story text lives
+// here. Pieces:
+//   storyLayout.js  — where everything goes, found on the island at run time
+//   storyProps.js   — the stone, the rod leaning in the canoe, the canoe's hole, driftwood logs…
+//   crow.js         — the Crow (a recurring character)
+//   treeCreature.js — the sacred tree: a tree creature hiding as a tree
+// This file: the cut scene, the talk (Town's subtitle talk box + text to speech), the actions a
+// talk can run (ACTIONS), the acts (buttons), fishing (Town's townFishing.js on a stand-in
+// state `F`, as the sea start does), the canoe (holed until mended with wood), the sword (from
+// the sacred tree — cuts the logs), saving / resuming.
 // UI: Town's (townMode.js / townJobs.js) — the top chip, the feed, the acts (bottom centre),
-// the goods pill (the catch), the quest tracker, the talk as a subtitle read out with text to
-// speech — and the game's own weapon buttons (Rod / Hands; Oar / Rod in the canoe).
+// the goods pill (fish / wood), the quest tracker, the talk as a subtitle read out — and the
+// game's own weapon buttons (Rod / Sword / Hands; Oar / Rod in the canoe).
 
 import * as THREE from 'three';
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { createCanoeBoat } from '../town/canoeBoat.js';
 import { installTownFishing } from '../town/townFishing.js';
 import { BAG_MAX, CANOE_BOARD_DIST, CANOE_SHORE_DIST, dist2, el } from '../town/townConfig.js';
-import { createFishingRodModel } from '../items/fishingRod.js';
 import { createFluteModel, disposeFluteModel, FLUTE_HAND_AT, FLUTE_LENGTH } from '../items/flute.js';
-import { makeTextSprite } from '../village/villageMode.js';
 import { createCrow } from './crow.js';
+import { createTreeCreature } from './treeCreature.js';
+import { findStoryLayout, SEAT_RADIUS, SEAT_TOP } from './storyLayout.js';
+import {
+  makeSeatStone, makeLeaningRod, makeCanoeDamage, makeLog, splitLog, updateSplit, makeNote,
+  pulseGlint, removeProp, LOG_LENGTH,
+} from './storyProps.js';
+import {
+  CHAPTER, STEPS, stepAtLeast, WOOD_NEEDED, CROW, TREE, VOICES, TALKS, NOTES, ACTS, BANNERS,
+  FIX_CANOE_THEN, quest,
+} from './chapter1.js';
 import { createJobTalk, createQuestTracker } from '../town/townJobs.js';
 import { createSpeech } from '../audio/speech.js';
 
-export const STORY_SAVE_VERSION = 1;
+export const STORY_SAVE_VERSION = 2;
 // Sounds (add the files; a missing one is just silent)
 export const STORY_SOUNDS = {
   intro: '/assets/audio/story/intro.mp3',   // over the black at the start (waves, the wreck…)
@@ -40,7 +42,6 @@ export const STORY_SOUNDS = {
   caw: '/assets/audio/story/crow_caw.mp3',  // the Crow
 };
 
-const ISLAND_KEY = 'treeIsland';
 const BLACK_S = 4;            // s of black before the fade in
 const FADE_IN_S = 3;
 const LIE_S = 2.5;            // lying there once it's faded in
@@ -52,39 +53,33 @@ const PLAY_BEFORE_CROW_S = 6; // playing before the Crow comes…
 const BACK_SHOT_AT_S = 2.2;   // …cutting to a shot from behind him this far in (the Crow comes in on it)
 const NOTE_EVERY_S = 0.6;     // ♪ off the flute
 const NOTE_LIFE_S = 1.8;
-const SEAT_RADIUS = 0.45;     // m: the stone he sits on (stands on, for now)…
-const SEAT_TOP = 0.32;        // …and how high its top is over the sand
-const CROW_FROM_DIST = 30;    // m out over the sea it comes from…
-const CROW_FROM_UP = 10;      // …and this high
+const CROW_FROM_UP = 10;      // m up over the sea the Crow comes from
 const TALK_DIST = 2.8;        // m from the Crow: Talk
-const ROD_PICK_DIST = 2;      // m from the rod: Pick it up
+const TREE_TALK_DIST = 3.2;   // m from the sacred tree: Talk (once the Crow's told of it)
+const TREE_REVEAL_HOLD_S = 4; // s it keeps its arms down after its last line
+const ROD_PICK_DIST = CANOE_BOARD_DIST + 0.5; // m from the canoe's middle: Take the rod
+const LOG_ACT_DIST = 1.9;     // m from a log's middle: its act / the "too big" note
+const LOG_HIT_DIST = 0.5;     // m from the sword's tip to the log's axis: a swing cuts it
 const CUT_FOV = 50;
 const SAVE_EVERY_S = 10;
 const ACT_CHECK_S = 0.2;
 const NOTE_MS = 5000;
 const GAME_OVER_S = 3.5;
 const FADE_OUT_S = 1.5;
+const BROKEN_SINK = 0.09;     // m the holed canoe sits lower in the water…
+const BROKEN_LIST = 0.1;      // …and rad it lists over
 
-const CROW = 'Crow';
-const LINES = {
-  arrive: [[CROW, 'Caw! What a pretty tune.'], [CROW, "That's a fine flute, boy. Give me your flute."]],
-  give: [[CROW, 'Caw! A wise choice. Much obliged!']],
-  info: [
-    [CROW, "Information? Caw! Nothing's free on this island."],
-    [CROW, "Bring me a fish first. Then we'll talk."],
-    [CROW, "There's an old fishing rod up the beach, and a canoe on the shore. The fish are out in the water."],
-  ],
-  noFish: [[CROW, 'No fish, no talk. Caw!'], [CROW, 'The rod is up the beach. The canoe is on the shore.']],
-  gotFish: [[CROW, 'A fish! Caw! For me? Oh, you shouldn\'t have.'], [CROW, "A deal's a deal. Now listen closely, boy…"]],
-  done: [[CROW, 'Caw! More next time, boy.']],
+const fresh = () => ({
+  v: STORY_SAVE_VERSION, at: 0, step: 'intro', hasRod: false, hasSword: false, fish: 0, wood: 0,
+  logsCut: [], canoeFixed: false, pos: null, canoe: null, inCanoe: false,
+});
+// (an older save: chapter 1 used to end at the fish — 'done' then is the sacred tree now)
+const migrate = (saved) => {
+  if (!saved?.step || !STEPS.includes(saved.step)) return null;
+  if (saved.v === 1) return { ...fresh(), ...saved, v: STORY_SAVE_VERSION, step: saved.step === 'done' ? 'tree' : saved.step };
+  if (saved.v === STORY_SAVE_VERSION) return { ...fresh(), ...saved };
+  return null;
 };
-const CHOICES = [
-  { key: 'give', label: 'Give the flute' },
-  { key: 'rock', label: 'Throw a rock' },
-  { key: 'info', label: 'Ask for more information' },
-];
-
-const fresh = () => ({ v: STORY_SAVE_VERSION, at: 0, step: 'intro', hasRod: false, fish: 0, pos: null, canoe: null, inCanoe: false });
 
 // ctx: the game (bootstrapGameApp.js — storyCtx)
 export function createStoryMode(ctx) {
@@ -92,23 +87,34 @@ export function createStoryMode(ctx) {
   let ready = false;           // the save read, the island laid out
   let token = 0;               // a newer enter / exit wins over a load still going
   let S = fresh();             // the saved state
-  let L = null;                // the layout on the island (findLayout)
+  let L = null;                // the layout on the island (storyLayout.js)
   let simT = 0;
   let cut = null;              // the cut scene: { phase, t, … }
   let boat = null;
   let aboard = false;
   let unregisterFloor = null;
-  let held = null;             // 'rod' | 'oar' | null
+  let held = null;             // 'rod' | 'oar' | 'sword' | null
   let flute = null;            // the flute model (in the player's hands / the Crow's beak)
   let fluteHeld = false;
-  let rodProp = null;          // the rod lying on the beach
+  let rodProp = null;          // the rod leaning in the canoe
+  let holeProp = null;         // the canoe's hole (until it's mended)
+  let logs = [];               // { i, x, z, yaw, prop } — the driftwood logs not yet cut
+  const splits = [];           // logs being cut apart
   let ending = null;           // game over: { t }
   let saveAt = 0;
   let actAt = 0;
   let landSpot = null;         // in the canoe: dry ground to step onto
+  let treeRevealUntil = 0;
+  const told = new Set();      // one-off notes shown this visit (the log's too big, swing at it…)
   const notes = [];            // ♪ sprites
   let noteAt = 0;
   const crow = createCrow({ scene: ctx.scene });
+  const tree = createTreeCreature({ scene: ctx.scene });
+
+  // What the chapter's data sees (chapter1.js talks / quest)
+  const view = () => ({
+    step: S.step, fish: F.goods.fish, wood: S.wood, hasRod: S.hasRod, hasSword: S.hasSword, canoeFixed: S.canoeFixed,
+  });
 
   // ── Sounds ──
   let introSound = null;
@@ -136,76 +142,96 @@ export function createStoryMode(ctx) {
     ctx.save(S);
     saveAt = simT + SAVE_EVERY_S;
   };
-  const setStep = (step) => { S.step = step; save(); };
+  const setStep = (step) => { S.step = step; renderGoods(); save(); };
   const onHidden = () => { if (document.visibilityState === 'hidden') save(); };
 
   // ── HUD: Town's (townMode.js) — the top chip, the feed, the acts, the goods pill, the quest
-  // tracker and the talk as a subtitle (townJobs.js); the game's own weapon buttons for Rod /
-  // Hands (Oar / Rod in the canoe — controls.js refreshActionButtons) ──
+  // tracker and the talk as a subtitle (townJobs.js); the game's own weapon buttons ──
   const hud = el('div', 'town-hud story-hud');
   hud.id = 'story-hud';
   const top = el('div', 'town-top ui-panel');
-  top.append(el('span', 'town-top-clock', 'Tree Island'));
+  top.append(el('span', 'town-top-clock', CHAPTER.place));
   const feed = el('div', 'town-feed');
   const actsEl = el('div', 'town-acts hidden');
   const goodsEl = el('div', 'town-goods hidden');
   const fishEl = el('span', 'town-good');
-  goodsEl.append(fishEl);
+  const woodEl = el('span', 'town-good');
+  goodsEl.append(fishEl, woodEl);
   const fade = el('div', 'story-fade');
   hud.append(top, feed, goodsEl, actsEl, fade);
   const tracker = createQuestTracker(hud);
 
   // The feed: a line under the health bar's spot, gone after NOTE_MS
   const note = (text) => {
+    if (!text) return;
     const line = el('div', 'town-feed-line', text);
     feed.prepend(line);
     while (feed.children.length > 3) feed.lastChild.remove();
     setTimeout(() => line.classList.add('town-feed-out'), NOTE_MS);
     setTimeout(() => line.remove(), NOTE_MS + 800);
   };
+  const noteOnce = (key, text = NOTES[key]) => { if (told.has(key)) return; told.add(key); note(text); };
   const setFade = (k) => {
     fade.style.opacity = String(THREE.MathUtils.clamp(k, 0, 1));
     fade.classList.toggle('hidden', k <= 0.001);
   };
 
-  // ── Voices: Town's text to speech (speech.js) — the Crow gruff, from where it stands ──
+  // ── Voices: Town's text to speech (speech.js) — each speaker their own voice (VOICES), from
+  // where they stand; the player's replies in the player's voice ──
   const speech = createSpeech();
+  const speakerAt = (who) => {
+    if (who === CROW && crow.isVisible()) return crow.position();
+    if (who === TREE && tree.isPlaced()) return tree.position().clone().setY(tree.position().y + tree.height() * 0.8);
+    return null;
+  };
   const speakTalk = (text, { who, reply = false, interrupt = false, stop = false } = {}) => {
     if (stop) { speech.stop(); return; }
     if (reply) {
-      speech.say(text, { key: 'player:story', kind: 'kid', priority: 'talk', interrupt });
+      speech.say(text, { key: `player:${ctx.getPlayerName?.() ?? 'story'}`, kind: ctx.playerVoiceKind?.() ?? 'male', priority: 'talk', interrupt });
       return;
     }
+    const v = VOICES[who] ?? { kind: 'male' };
     speech.say(text, {
-      key: who ?? CROW, kind: 'gruff', at: crow.isVisible() ? crow.position() : null,
+      key: who, kind: v.kind, family: v.family ?? null, at: speakerAt(who),
       priority: 'talk', interrupt, falloff: { ref: 3, rolloff: 1, max: 30 },
     });
   };
 
-  // ── Talk: Town's subtitle talk box, one line at a time; the last can end in choices ──
+  // ── Talk: Town's subtitle talk box, one line at a time; the last can end in choices. The
+  // talks themselves are the chapter's (TALKS); what they do when they end, ACTIONS ──
   const talkBox = createJobTalk(hud, { speak: speakTalk });
-  let talk = null; // { lines, i, choices, onDone }
-  const endTalk = (choice = null) => {
-    const done = talk?.onDone;
+  let talk = null; // { lines, i, choices, then }
+  const endTalk = (actions = null) => {
     talk = null;
     talkBox.close();
-    done?.(choice);
+    run(actions);
   };
   const showLine = () => {
     const [who, text] = talk.lines[talk.i];
     const last = talk.i >= talk.lines.length - 1;
+    const then = talk.then;
     const choices = !last
       ? [{ label: 'Go on', primary: true, act: true, onClick: () => { talk.i += 1; showLine(); } }]
       : talk.choices
-        ? talk.choices.map((c, i) => ({ label: c.label, primary: i === 0, onClick: () => endTalk(c.key) }))
-        : [{ label: 'Okay', primary: true, act: true, onClick: () => endTalk() }];
+        ? talk.choices.map((c, i) => ({ label: c.label, primary: i === 0, onClick: () => endTalk([...(then ?? []), ...(c.then ?? [])]) }))
+        : [{ label: 'Okay', primary: true, act: true, onClick: () => endTalk(then) }];
+    talk.who = who;
     if (who === CROW) { crow.flutter(0.9); playCaw(); }
+    if (who === TREE) { tree.reveal(true); tree.lookAt(ctx.getPlayerModel().position); treeRevealUntil = simT + TREE_REVEAL_HOLD_S; }
     talkBox.open({ who, text, choices });
   };
-  const say = (lines, { choices = null, onDone = null } = {}) => {
-    talk = { lines, i: 0, choices, onDone };
+  const say = (def) => {
+    if (!def?.lines?.length) { run(def?.then); return; }
+    talk = { lines: def.lines, i: 0, choices: def.choices ?? null, then: def.then ?? null };
     showLine();
     refreshActs();
+  };
+  // A character's talk: theirs for the step now (or `key`)
+  const runTalk = (who, key = S.step) => {
+    const def = TALKS[who]?.[key];
+    if (!def) return;
+    if (who === 'crow') crow.lookAt(ctx.getPlayerModel().position);
+    say(typeof def === 'function' ? def(view()) : def);
   };
   const talkAdvance = () => { talkBox.pressFirst(); };
   let cawAt = 0;
@@ -215,106 +241,52 @@ export function createStoryMode(ctx) {
     ctx.playSound(STORY_SOUNDS.caw, { volume: 0.7 });
   };
 
+  // ── Actions: what a talk / choice does (chapter1.js `then`) ──
+  const ACTIONS = {
+    giveFlute: () => giveFlute(),
+    takeFish: () => { F.goods.fish = Math.max(0, F.goods.fish - 1); renderGoods(); },
+    putFluteAway: () => {
+      holdFlute(false);
+      fluteSound = stopSound(fluteSound);
+      endCut();
+    },
+    giveSword: () => {
+      S.hasSword = true;
+      ctx.playSfx?.('unsheath');
+      ctx.refreshButtons();
+      pick('sword');
+    },
+    endChapter: () => {
+      ctx.showBanner(...BANNERS.end, 6000);
+      lobbyOfferUntil = simT + 30;
+      actAt = 0;
+    },
+  };
+  function run(actions) {
+    for (const a of actions ?? []) {
+      const [kind, arg, arg2] = a.split(':');
+      if (kind === 'step') setStep(arg);
+      else if (kind === 'note') note(NOTES[arg]);
+      else if (kind === 'talk') runTalk(arg, arg2);
+      else if (ACTIONS[kind]) ACTIONS[kind]();
+      else console.warn('[story] unknown action', a);
+    }
+    actAt = 0;
+  }
+
   // ── The layout on the island ──
   const waterY = (x, z) => ctx.getWaterY(x, z) ?? 0;
   const dry = (x, z) => ctx.waterDepth(x, z) <= 0.02;
-  // From (x, z): the nearest water (≥ 5 cm), looking round in `n` directions out to `max` m
-  const nearestWater = (x, z, max = 60, n = 48) => {
-    let best = null;
-    for (let k = 0; k < n; k++) {
-      const a = (k / n) * Math.PI * 2;
-      const dx = Math.sin(a);
-      const dz = Math.cos(a);
-      for (let d = 0.75; d <= max; d += 0.75) {
-        if (best && d >= best.d) break;
-        if (ctx.waterDepth(x + dx * d, z + dz * d) > 0.05) { best = { d, dx, dz }; break; }
-      }
-    }
-    return best;
-  };
-  const findLayout = (island) => {
-    const r = island.radius + 30;
-    const objs = ctx.getMapObjects({ minX: island.at.x - r, maxX: island.at.x + r, minZ: island.at.z - r, maxZ: island.at.z + r });
-    // The rock nearest the shore, with a little beach in front of it
-    let rock = null;
-    for (const o of objs) {
-      if (!/rock/i.test(o.file) || !dry(o.x, o.z)) continue;
-      const w = nearestWater(o.x, o.z, 40);
-      if (!w || w.d < o.radius + 3) continue;
-      if (!rock || w.d - o.radius < rock.w.d - rock.o.radius) rock = { o, w };
-    }
-    let centre;
-    let rockR;
-    let w;
-    if (rock) {
-      centre = { x: rock.o.x, z: rock.o.z };
-      rockR = rock.o.radius;
-      w = rock.w;
-    } else {
-      // (no rock: a spot a few m in from the island's nearest shore)
-      const c = nearestWater(island.at.x, island.at.z, island.radius + 40, 72);
-      if (!c) return null;
-      const d = Math.max(0, c.d - 8);
-      centre = { x: island.at.x + c.dx * d, z: island.at.z + c.dz * d };
-      rockR = 0.5;
-      w = nearestWater(centre.x, centre.z, 40) ?? { d: 8, dx: c.dx, dz: c.dz };
-    }
-    const dir = { x: w.dx, z: w.dz };          // rock → sea
-    const tan = { x: -dir.z, z: dir.x };       // along the shore
-    const at = (d, s = 0) => ({ x: centre.x + dir.x * d + tan.x * s, z: centre.z + dir.z * d + tan.z * s });
-    // The beach: just short of the water
-    let washD = w.d - 0.8;
-    while (washD > rockR + 1 && !dry(at(washD).x, at(washD).z)) washD -= 0.4;
-    const wash = at(washD);
-    const seaYaw = Math.atan2(dir.x, dir.z);
-    // The rock he sits on: a stone up the beach from where he washed up, a little to one side
-    // (the island's own rocks are boulders — this one is ours, SEAT_*)
-    let seat = null;
-    for (const [d, sd] of [[washD - 4.5, 2.5], [washD - 4.5, -2.5], [washD - 3.5, 0], [washD - 2.5, 1.5]]) {
-      const p = at(Math.max(rockR + SEAT_RADIUS + 0.5, d), sd);
-      if (dry(p.x, p.z) && dry(p.x + dir.x * 1.2, p.z + dir.z * 1.2)) { seat = p; break; }
-    }
-    seat ??= at(Math.max(rockR + 1, washD - 3));
-    const seatD = (seat.x - centre.x) * dir.x + (seat.z - centre.z) * dir.z;
-    const seatS = (seat.x - centre.x) * tan.x + (seat.z - centre.z) * tan.z;
-    // The Crow lands on the beach beside it, a little toward the sea
-    let crowSpot = null;
-    for (const [d, sd] of [[0.5, 1.4], [0.5, -1.4], [0, 1.6], [0, -1.6], [1.2, 0]]) {
-      const p = at(Math.min(seatD + d, washD - 0.3), seatS + sd);
-      if (dry(p.x, p.z)) { crowSpot = p; break; }
-    }
-    crowSpot ??= at(seatD - 1.2, seatS);
-    // The rod: up the beach to one side
-    let rodSpot = null;
-    for (const s of [rockR + 3, -(rockR + 3), rockR + 5, -(rockR + 5), rockR + 2]) {
-      for (const d of [washD * 0.6, washD * 0.4, 0]) {
-        const p = at(d, s);
-        if (dry(p.x, p.z) && dry(p.x + 0.6, p.z) && dry(p.x - 0.6, p.z)) { rodSpot = p; break; }
-      }
-      if (rodSpot) break;
-    }
-    rodSpot ??= at(washD * 0.5, rockR + 2);
-    // The canoe: off the beach along the shore, the other side of the rock from the rod
-    const side = rodSpot && (rodSpot.x - centre.x) * tan.x + (rodSpot.z - centre.z) * tan.z > 0 ? -1 : 1;
-    const probe = createCanoeBoat({ waterY, waterDepth: ctx.waterDepth });
-    const yaw = Math.atan2(tan.x, tan.z);
-    let mooring = null;
-    for (let d = w.d + 1.5; d <= w.d + 25 && !mooring; d += 0.5) {
-      for (const s of [6, 8, 4, 10, 2, 13, 0]) {
-        const p = at(d, s * side);
-        if (probe.fits(p.x, p.z, yaw)) { mooring = { ...p, yaw }; break; }
-      }
-    }
-    probe.dispose();
-    return {
-      rock: { ...centre, radius: rockR },
-      seat,
-      wash, seaYaw, dir, crowSpot, rodSpot,
-      mooring: mooring ?? { ...at(w.d + 3, 6 * side), yaw },
-      crowFrom: at(w.d + CROW_FROM_DIST, -12),
-    };
-  };
   const groundAt = (p) => new THREE.Vector3(p.x, ctx.getGroundY(p.x, p.z), p.z);
+  const layout = (island) => {
+    const probe = createCanoeBoat({ waterY, waterDepth: ctx.waterDepth });
+    try {
+      return findStoryLayout(island, {
+        getMapObjects: ctx.getMapObjects, waterDepth: ctx.waterDepth, getGroundY: ctx.getGroundY,
+        canoeFits: (x, z, yaw) => probe.fits(x, z, yaw),
+      });
+    } finally { probe.dispose(); }
+  };
 
   // ── The flute: held sideways like a flute — the embouchure at his lips, out to his right
   // (the player group's −X; +X is his left), a little forward and down, holes up, both hands
@@ -372,7 +344,7 @@ export function createStoryMode(ctx) {
       flute.quaternion.copy(_fluteBase).multiply(_fluteBob);
       if (simT >= noteAt) {
         noteAt = simT + NOTE_EVERY_S * (0.7 + Math.random() * 0.6);
-        const s = makeTextSprite(Math.random() < 0.5 ? '♪' : '♫', { height: 0.16, bg: 'rgba(0,0,0,0)', border: 'rgba(0,0,0,0)', color: '#fff6d8' });
+        const s = makeNote();
         const tip = new THREE.Vector3(0, 0, FLUTE_LENGTH);
         flute.localToWorld(tip);
         s.position.copy(tip);
@@ -401,7 +373,7 @@ export function createStoryMode(ctx) {
     notes.length = 0;
   };
 
-  // ── The stone he sits on: a low rounded rock, its top is ground (a height override) ──
+  // ── The stone he stands on: its top is ground (a height override) ──
   let seatProp = null;
   let seatY = 0;
   let unregisterSeat = null;
@@ -409,88 +381,111 @@ export function createStoryMode(ctx) {
   const placeSeat = () => {
     removeSeat();
     seatY = ctx.getGroundY(L.seat.x, L.seat.z);
-    const geo = new THREE.DodecahedronGeometry(1, 1);
-    // (lumpy: each vertex pushed in / out a little, the same for shared corners)
-    const pos = geo.attributes.position;
-    const v = new THREE.Vector3();
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos, i);
-      const n = Math.sin(v.x * 5.1 + v.z * 3.7) * 0.5 + Math.cos(v.y * 4.3 - v.x * 2.9) * 0.5;
-      v.multiplyScalar(1 + n * 0.08);
-      pos.setXYZ(i, v.x, v.y, v.z);
-    }
-    geo.computeVertexNormals();
-    seatProp = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x8d8a80, roughness: 0.95, flatShading: true }));
-    seatProp.name = 'story-seat';
-    seatProp.scale.set(SEAT_RADIUS, SEAT_TOP * 1.4, SEAT_RADIUS * 0.85);
+    seatProp = makeSeatStone();
     seatProp.position.set(L.seat.x, seatY + SEAT_TOP * 0.3, L.seat.z);
-    seatProp.rotation.y = 0.7;
-    seatProp.castShadow = true;
-    seatProp.receiveShadow = true;
     ctx.scene.add(seatProp);
     unregisterSeat = registerTerrainHeightOverride(seatFloor);
   };
   const removeSeat = () => {
     unregisterSeat?.();
     unregisterSeat = null;
-    if (!seatProp) return;
-    seatProp.parent?.remove(seatProp);
-    seatProp.geometry.dispose();
-    seatProp.material.dispose();
-    seatProp = null;
+    seatProp = removeProp(seatProp);
   };
 
-  // ── The rod on the beach ──
+  // ── The rod, leaning in the canoe (in its group: it bobs with it) ──
   const placeRod = () => {
-    removeRod();
-    // (it's there once the Crow has told him about it)
-    if (S.hasRod || !L || (S.step !== 'fish' && S.step !== 'done')) return;
-    rodProp = new THREE.Group();
-    rodProp.name = 'story-rod';
-    // (lying flat on the sand: the model runs along +Z from its grip)
-    const rod = createFishingRodModel();
-    rod.rotation.set(-0.04, 0.6, 0);
-    rodProp.add(rod);
-    const g = groundAt(L.rodSpot);
-    rodProp.position.set(g.x, g.y + 0.03, g.z);
-    rodProp.add(makeGlint());
-    ctx.scene.add(rodProp);
+    rodProp = removeProp(rodProp);
+    if (S.hasRod || !boat) return;
+    rodProp = makeLeaningRod();
+    boat.group.add(rodProp);
   };
-  const removeRod = () => {
-    if (!rodProp) return;
-    rodProp.parent?.remove(rodProp);
-    rodProp.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
-    rodProp = null;
-  };
-  let glintTex = null;
-  const makeGlint = () => {
-    if (!glintTex) {
-      const c = document.createElement('canvas');
-      c.width = c.height = 64;
-      const g = c.getContext('2d');
-      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-      grad.addColorStop(0, 'rgba(255,250,220,1)');
-      grad.addColorStop(0.3, 'rgba(255,240,180,0.5)');
-      grad.addColorStop(1, 'rgba(255,240,180,0)');
-      g.fillStyle = grad;
-      g.fillRect(0, 0, 64, 64);
-      glintTex = new THREE.CanvasTexture(c);
-      glintTex.colorSpace = THREE.SRGBColorSpace;
-    }
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: glintTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
-    s.name = 'glint';
-    s.position.y = 0.15;
-    return s;
-  };
-  const pickUpRod = () => {
+  const takeRod = () => {
     if (S.hasRod) return;
     S.hasRod = true;
-    removeRod();
-    note('You found an old fishing rod.');
+    rodProp = removeProp(rodProp);
+    note(NOTES.gotRod);
     ctx.refreshButtons();
     pick('rod');
-    renderCatch();
+    renderGoods();
     save();
+  };
+
+  // ── The canoe's hole: it sits low and lists until it's mended (WOOD_NEEDED wood) ──
+  const placeDamage = () => {
+    holeProp = removeProp(holeProp);
+    if (S.canoeFixed || !boat) return;
+    holeProp = makeCanoeDamage();
+    boat.group.add(holeProp);
+  };
+  const mendCanoe = () => {
+    if (S.canoeFixed) return;
+    if (S.wood < WOOD_NEEDED) {
+      note(NOTES.canoeBroken);
+      if (!S.hasSword) noteOnce('logTooBig');
+      return;
+    }
+    S.wood -= WOOD_NEEDED;
+    S.canoeFixed = true;
+    holeProp = removeProp(holeProp);
+    ctx.playSfx?.('chop', groundAt(boat));
+    renderGoods();
+    run(FIX_CANOE_THEN);
+    save();
+  };
+
+  // ── The driftwood logs: the sword cuts each into wood ──
+  const placeLogs = () => {
+    clearLogs();
+    L.logs.forEach((p, i) => {
+      if (S.logsCut.includes(i)) return;
+      const prop = makeLog();
+      const g = groundAt(p);
+      prop.position.set(g.x, g.y - 0.03, g.z);
+      prop.rotation.y = p.yaw;
+      ctx.scene.add(prop);
+      logs.push({ i, x: p.x, z: p.z, yaw: p.yaw, prop });
+    });
+  };
+  const clearLogs = () => {
+    for (const l of logs) removeProp(l.prop);
+    logs = [];
+  };
+  const cutLog = (log) => {
+    if (!logs.includes(log)) return;
+    logs = logs.filter((l) => l !== log);
+    S.logsCut.push(log.i);
+    S.wood += 1;
+    splits.push(splitLog(log.prop, ctx.scene));
+    ctx.playSfx?.('chop', log.prop.position);
+    removeProp(log.prop);
+    note(NOTES.gotWood(S.wood));
+    renderGoods();
+    save();
+    actAt = 0;
+  };
+  // A sword swing (the game's phone-sword loop, a fast enough swing): through a log → cut
+  const _a = new THREE.Vector3();
+  const _b = new THREE.Vector3();
+  const _seg = new THREE.Line3();
+  const _closest = new THREE.Vector3();
+  const trySwordHit = (tip) => {
+    if (!active || !S.hasSword || held !== 'sword' || cut || talk) return false;
+    for (const l of logs) {
+      const r = l.prop.userData.radius ?? 0.17;
+      const y = l.prop.position.y + r;
+      const dx = Math.sin(l.yaw) * LOG_LENGTH / 2;
+      const dz = Math.cos(l.yaw) * LOG_LENGTH / 2;
+      _seg.set(_a.set(l.prop.position.x - dx, y, l.prop.position.z - dz), _b.set(l.prop.position.x + dx, y, l.prop.position.z + dz));
+      _seg.closestPointToPoint(tip, true, _closest);
+      if (_closest.distanceTo(tip) < LOG_HIT_DIST + r) { cutLog(l); return true; }
+    }
+    return false;
+  };
+
+  // ── The sacred tree (the tree creature hiding as one) ──
+  const placeTree = () => {
+    const g = groundAt(L.tree);
+    tree.placeAt(g, Math.atan2(L.wash.x - L.tree.x, L.wash.z - L.tree.z));
   };
 
   // ── Fishing: Town's (townFishing.js) on a stand-in for the town's state, as the sea start ──
@@ -508,14 +503,14 @@ export function createStoryMode(ctx) {
     playerPos: () => ctx.getPlayerModel().position,
     feedLine: (text) => note(text),
     bagRoom: () => Math.max(0, BAG_MAX - F.goods.fish),
-    bagFullNote: () => note(`You can't carry any more fish (${BAG_MAX}).`),
+    bagFullNote: () => note(NOTES.bagFull(BAG_MAX)),
     gain: (g, n = 1) => {
       const got = Math.min(n, F.bagRoom());
       if (got < n) F.bagFullNote();
       F.goods[g] = (F.goods[g] ?? 0) + got;
-      renderCatch();
+      renderGoods();
       if (got > 0 && g === 'fish') {
-        if (S.step === 'fish') note('A fish! Take it to the Crow.');
+        if (S.step === 'fish') note(NOTES.fishCaught);
         save();
       }
       return got;
@@ -526,18 +521,15 @@ export function createStoryMode(ctx) {
     marketPanel: { isOpen: () => false },
     jobTalk: { isOpen: () => false },
   };
-  // The goods pill (Town's): the catch, once there's a rod or a fish
-  const renderCatch = () => {
+  // The goods pill (Town's): the catch once there's a rod or a fish, the wood once there's some;
+  // and the quest tracker (the chapter's `quest`)
+  const renderGoods = () => {
     fishEl.textContent = `🐟 ${F.goods.fish}`;
-    goodsEl.classList.toggle('hidden', !F.goods.fish && !S.hasRod);
-    renderTracker();
-  };
-  // The quest tracker (Town's): what the Crow wants
-  const renderTracker = () => {
-    if (S.step !== 'fish') { tracker.render([]); return; }
-    tracker.render([F.goods.fish > 0
-      ? { icon: '❓', title: 'A fish for the Crow', progress: 'Take it to the Crow' }
-      : { icon: '📍', title: 'A fish for the Crow', progress: S.hasRod ? 'Catch a fish' : 'Find the rod up the beach' }]);
+    fishEl.classList.toggle('hidden', !F.goods.fish && !S.hasRod);
+    woodEl.textContent = `🪵 ${S.wood}`;
+    woodEl.classList.toggle('hidden', !S.wood);
+    goodsEl.classList.toggle('hidden', !F.goods.fish && !S.hasRod && !S.wood);
+    tracker.render(quest(view()));
   };
   installTownFishing(F, {
     scene: ctx.scene,
@@ -558,7 +550,7 @@ export function createStoryMode(ctx) {
     F.hideFishingHud();
   };
 
-  // ── What's in hand: the rod, the oar (in the canoe), or nothing ──
+  // ── What's in hand: the rod, the sword, the oar (in the canoe), or nothing ──
   const faceFor = (kind) => {
     const s = boat.standPoint();
     let yaw = boat.yaw;
@@ -581,7 +573,7 @@ export function createStoryMode(ctx) {
     if (kind !== 'rod' && F.fishing) stopFishing();
     held = kind;
     if (aboard) {
-      if (!kind) { ctx.hold('oar'); held = ctx.heldKind(); }
+      if (!kind || kind === 'sword') { ctx.hold('oar'); held = ctx.heldKind(); }
       faceFor(held);
     }
     actAt = 0;
@@ -590,6 +582,7 @@ export function createStoryMode(ctx) {
   const pick = (kind) => {
     if (!active || cut || ending) return;
     if (kind === 'rod' && !S.hasRod) return;
+    if (kind === 'sword' && (!S.hasSword || aboard)) return;
     if (aboard && !kind) kind = 'oar';
     if (!aboard && kind === 'oar') return;
     ctx.hold(kind);
@@ -611,15 +604,19 @@ export function createStoryMode(ctx) {
     if (!boat.fits(boat.x, boat.z, boat.yaw)) Object.assign(boat, { x: L.mooring.x, z: L.mooring.z, yaw: L.mooring.yaw });
     boat.place(0);
     ctx.scene.add(boat.group);
+    placeRod();
+    placeDamage();
   };
   const disposeBoat = () => {
     if (!boat) return;
+    rodProp = removeProp(rodProp);
+    holeProp = removeProp(holeProp);
     boat.group.parent?.remove(boat.group);
     boat.dispose();
     boat = null;
   };
   const board = () => {
-    if (!boat || aboard) return;
+    if (!boat || aboard || !S.canoeFixed) return;
     if (F.fishing) stopFishing();
     aboard = true;
     landSpot = null;
@@ -674,27 +671,47 @@ export function createStoryMode(ctx) {
     // (fishing without a gyro: Cast / Pull — Town's)
     if (held === 'rod') out.push(...F.fishingActs(true).map((a) => ({ key: a.key, label: a.label, run: a.onClick })));
     if (aboard) {
-      if (landSpot) out.push({ key: 'out', label: 'Get out', run: () => leaveBoat() });
+      if (landSpot) out.push({ key: 'out', label: ACTS.out, run: () => leaveBoat() });
     } else {
-      // (the nearest of what's in reach)
+      // (the nearest of what's in reach — the canoe's: its rod and mending it / getting in)
       const near = [];
       const within = (x, z, r) => { const d = dist2(p.x, p.z, x, z); return d < r ? d : null; };
-      if (crow.isLanded() && (S.step === 'crow' || S.step === 'fish' || S.step === 'done')) {
+      if (crow.isLanded() && stepAtLeast(S.step, 'crow')) {
         const d = within(crow.position().x, crow.position().z, TALK_DIST);
-        if (d != null) near.push({ d, key: 'crow', label: 'Talk to the Crow', run: talkToCrow });
+        if (d != null) near.push({ d, key: 'crow', label: ACTS.crow, run: () => runTalk('crow') });
       }
-      if (!S.hasRod && rodProp) {
-        const d = within(rodProp.position.x, rodProp.position.z, ROD_PICK_DIST);
-        if (d != null) near.push({ d, key: 'rod', label: 'Pick up the rod', run: pickUpRod });
+      if (tree.isPlaced() && stepAtLeast(S.step, 'tree')) {
+        const d = within(tree.position().x, tree.position().z, TREE_TALK_DIST);
+        if (d != null) near.push({ d, key: 'tree', label: ACTS.tree, run: () => runTalk('tree') });
       }
       if (boat && !F.fishing) {
+        if (!S.hasRod && stepAtLeast(S.step, 'fish')) {
+          const d = within(boat.x, boat.z, ROD_PICK_DIST);
+          if (d != null) near.push({ d: d - 0.01, key: 'rod', label: ACTS.rod, run: takeRod });
+        }
         const d = within(boat.x, boat.z, CANOE_BOARD_DIST);
-        if (d != null) near.push({ d, key: 'canoe', label: 'Get in the canoe', run: board });
+        if (d != null) {
+          if (S.canoeFixed) near.push({ d, key: 'canoe', label: ACTS.canoe, run: board });
+          else if (stepAtLeast(S.step, 'fish')) near.push({ d, key: 'fix', label: ACTS.fix, run: mendCanoe });
+        }
+      }
+      // (a log: no sword — too big to carry; with it, swing at it (a gyro) or Cut the log)
+      let log = null;
+      for (const l of logs) {
+        const d = within(l.x, l.z, LOG_ACT_DIST);
+        if (d != null && (!log || d < log.d)) log = { d, l };
+      }
+      if (log) {
+        if (!S.hasSword) noteOnce('logTooBig');
+        else {
+          if (held === 'sword' && ctx.hasGyro()) noteOnce('logSwing');
+          near.push({ d: log.d, key: 'chop', label: ACTS.chop, run: () => { if (held !== 'sword') pick('sword'); cutLog(log.l); } });
+        }
       }
       near.sort((a, b) => a.d - b.d);
-      if (near[0]) out.push(near[0]);
+      out.push(...near.slice(0, 2));
     }
-    if (simT < lobbyOfferUntil) out.push({ key: 'lobby', label: 'Back to Lobby', run: () => ctx.onLobby() });
+    if (simT < lobbyOfferUntil) out.push({ key: 'lobby', label: ACTS.lobby, run: () => ctx.onLobby() });
     return out.slice(0, 3);
   };
   const refreshActs = () => {
@@ -725,70 +742,31 @@ export function createStoryMode(ctx) {
     crow.faceNow(L.seat);
     crow.lookAt(ctx.getPlayerModel().position);
   };
-  const crowChoices = () => say(LINES.arrive.slice(1), { choices: CHOICES, onDone: onChoice });
-  const talkToCrow = () => {
-    crow.lookAt(ctx.getPlayerModel().position);
-    if (S.step === 'crow') crowChoices();
-    else if (S.step === 'fish') {
-      if (F.goods.fish > 0) {
-        say(LINES.gotFish, {
-          onDone: () => {
-            F.goods.fish -= 1;
-            setStep('done');
-            renderCatch();
-            toBeContinued();
-          },
-        });
-      } else say(LINES.noFish);
-    } else if (S.step === 'done') say(LINES.done, { onDone: toBeContinued });
-  };
-  const onChoice = (key) => {
-    if (key === 'give') giveFlute();
-    else if (key === 'rock') {
-      note('Throwing a rock at the Crow — that side quest is coming later.');
-      crowChoices();
-    } else if (key === 'info') {
-      say(LINES.info, {
-        onDone: () => {
-          holdFlute(false);
-          fluteSound = stopSound(fluteSound);
-          endCut();
-          setStep('fish');
-          placeRod();
-          renderCatch();
-          note('Find the rod up the beach and catch the Crow a fish.');
-        },
-      });
-    }
-  };
-  const toBeContinued = () => {
-    ctx.showBanner('To be continued…', 'Chapter 1 — Washed Up', 6000);
-    lobbyOfferUntil = simT + 30;
-    actAt = 0;
-  };
   // Give the flute: the Crow takes it and flies off — game over, back to the very start
   const giveFlute = () => {
-    say(LINES.give, {
-      onDone: () => {
-        fluteSound = stopSound(fluteSound);
-        const pm = ctx.getPlayerModel();
-        if (flute?.parent === pm) pm.remove(flute);
-        pm.userData.handPose = null;
-        fluteHeld = false;
-        if (flute) crow.carry(flute);
-        crow.lookAt(null);
-        crow.flyAway(groundAt(L.crowFrom).setY(waterY(L.crowFrom.x, L.crowFrom.z) + CROW_FROM_UP + 10));
-        ending = { t: 0 };
-        actAt = 0;
-      },
+    say({
+      ...TALKS.crow.give,
+      then: ['flyOffWithFlute'],
     });
+  };
+  ACTIONS.flyOffWithFlute = () => {
+    fluteSound = stopSound(fluteSound);
+    const pm = ctx.getPlayerModel();
+    if (flute?.parent === pm) pm.remove(flute);
+    pm.userData.handPose = null;
+    fluteHeld = false;
+    if (flute) crow.carry(flute);
+    crow.lookAt(null);
+    crow.flyAway(groundAt(L.crowFrom).setY(waterY(L.crowFrom.x, L.crowFrom.z) + CROW_FROM_UP + 10));
+    ending = { t: 0 };
+    actAt = 0;
   };
   const updateEnding = (dt) => {
     if (!ending) return;
     ending.t += dt;
     if (ending.t > 2.2 && !ending.shown) {
       ending.shown = true;
-      ctx.showBanner('GAME OVER', 'The Crow flew off with your flute.', GAME_OVER_S * 1000);
+      ctx.showBanner(...BANNERS.gameOver, GAME_OVER_S * 1000);
     }
     const outAt = 2.2 + GAME_OVER_S;
     if (ending.t > outAt) setFade((ending.t - outAt) / FADE_OUT_S);
@@ -934,7 +912,7 @@ export function createStoryMode(ctx) {
             cut.phase = 'talk';
             fluteSound = stopSound(fluteSound);
             setStep('crow');
-            say(LINES.arrive, { choices: CHOICES, onDone: onChoice });
+            runTalk('crow', 'arrive');
           });
           playCaw();
         }
@@ -954,22 +932,25 @@ export function createStoryMode(ctx) {
   };
 
   // ── Lifecycle ──
+  const placeWorld = () => {
+    setupBoat();
+    placeLogs();
+    placeTree();
+  };
   const restart = () => {
     S = fresh();
     F.goods.fish = 0;
-    renderCatch();
-    removeRod();
-    setupBoat();
+    renderGoods();
+    placeWorld();
     save();
     startCut();
   };
   // Put the player back where the save left them
   const resume = () => {
     F.goods.fish = S.fish || 0;
-    renderCatch();
-    placeRod();
+    renderGoods();
     placeCrow();
-    if (S.inCanoe && boat) {
+    if (S.inCanoe && boat && S.canoeFixed) {
       board();
       return;
     }
@@ -981,8 +962,9 @@ export function createStoryMode(ctx) {
       holdFlute(true);
       cut = { phase: 'talk', t: 0 };
       lockPlayer(true);
-      crowChoices();
-    } else if (S.hasRod) pick('rod');
+      runTalk('crow');
+    } else if (S.hasSword) pick('sword');
+    else if (S.hasRod) pick('rod');
   };
 
   const enter = async () => {
@@ -991,30 +973,33 @@ export function createStoryMode(ctx) {
     const my = ++token;
     simT = 0;
     S = fresh();
+    told.clear();
     document.body.classList.add('story-mode');
     document.body.append(hud);
     setFade(1);
     actsKey = '\u0000';
-    renderCatch();
+    renderGoods();
     lockPlayer(true);
     window.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onHidden);
-    const [island, saved] = await Promise.all([ctx.getIsland(ISLAND_KEY), ctx.canSave() ? ctx.load().catch(() => null) : null, crow.load()]);
+    const [island, saved] = await Promise.all([
+      ctx.getIsland(CHAPTER.island), ctx.canSave() ? ctx.load().catch(() => null) : null, crow.load(), tree.load(),
+    ]);
     if (my !== token || !active) return;
     if (!island) {
-      note('Tree Island failed to load.');
+      note(NOTES.noIsland);
       setFade(0);
       return;
     }
-    L = findLayout(island.def);
+    L = layout(island.def);
     if (!L) {
-      note("Couldn't find the shore of Tree Island.");
+      note(NOTES.noShore);
       setFade(0);
       return;
     }
-    if (saved?.v === STORY_SAVE_VERSION && saved.step) S = { ...fresh(), ...saved };
+    S = migrate(saved) ?? fresh();
     ready = true;
-    setupBoat();
+    placeWorld();
     placeSeat();
     lockPlayer(false);
     if (S.step === 'intro') startCut();
@@ -1046,8 +1031,10 @@ export function createStoryMode(ctx) {
     ctx.hold(null);
     held = null;
     crow.hide();
+    tree.hide();
     clearNotes();
-    removeRod();
+    clearLogs();
+    while (splits.length) { const sp = splits.pop(); sp.t = 99; updateSplit(sp, 0); }
     removeSeat();
     disposeBoat();
     feed.replaceChildren();
@@ -1064,12 +1051,13 @@ export function createStoryMode(ctx) {
     dt = Math.min(dt, 0.1);
     simT += dt;
     crow.update(dt);
+    // (the sacred tree lowers its arms to talk, then hides again)
+    tree.reveal((talk && talk.who === TREE) || simT < treeRevealUntil);
+    tree.update(dt);
     updateFlute(dt);
     updateEnding(dt);
-    if (rodProp) {
-      const g = rodProp.getObjectByName('glint');
-      if (g) { const k = 0.5 + 0.5 * Math.sin(simT * 2.4); g.material.opacity = 0.25 + k * 0.6; g.scale.setScalar(0.25 + k * 0.2); }
-    }
+    for (let i = splits.length - 1; i >= 0; i--) if (updateSplit(splits[i], dt)) splits.splice(i, 1);
+    if (rodProp) pulseGlint(rodProp, simT);
     if (boat) {
       const yawBefore = boat.yaw;
       if (aboard && held === 'oar') boat.paddle(dt, ctx.getOarModel(), ctx.getSteer(), ctx.getOarStroke());
@@ -1078,6 +1066,11 @@ export function createStoryMode(ctx) {
         if (aboard && held === 'rod') boat.settle(dt);
       }
       boat.move(dt, simT);
+      if (!S.canoeFixed) {
+        // (holed: low in the water, listing)
+        boat.group.position.y -= BROKEN_SINK;
+        boat.group.rotation.z += BROKEN_LIST;
+      }
       if (aboard) {
         const s = boat.standPoint();
         ctx.carryPlayer(s.x, boat.floorY(), s.z, boat.yaw - yawBefore);
@@ -1108,7 +1101,9 @@ export function createStoryMode(ctx) {
     update,
     isActive: () => active,
     hasRod: () => active && S.hasRod,
+    hasSword: () => active && S.hasSword,
     inCanoe: () => active && aboard,
+    trySwordHit,
     // The phone's Block bar as an interact button (null: nothing to do)
     interactLabel: () => {
       if (!active) return null;
@@ -1125,7 +1120,28 @@ export function createStoryMode(ctx) {
       if (!active || !S.hasRod) return;
       pick(held === 'rod' ? (aboard ? 'oar' : null) : 'rod');
     },
+    // The phone's 🗡/✋: the sword ↔ hands (not in the canoe)
+    toggleSword: () => {
+      if (!active || !S.hasSword || aboard) return;
+      pick(held === 'sword' ? null : 'sword');
+    },
     fishingHud: () => (active ? F.fishingHud() : null),
-    debug: () => ({ S, L, F, boat, cut, crow, aboard, held, skipCut: () => { if (cut && cut.phase !== 'talk') { cut.t = 999; } } }),
+    debug: () => ({
+      S, L, F, boat, cut, crow, tree, aboard, held, logs, acts,
+      skipCut: () => { if (cut && cut.phase !== 'talk') { cut.t = 999; } },
+      // (jump ahead: set the step and what goes with it)
+      give: ({ rod, sword, fish, wood } = {}) => {
+        if (rod) S.hasRod = true;
+        if (sword) S.hasSword = true;
+        if (fish) F.goods.fish += fish;
+        if (wood) S.wood += wood;
+        if (rod) rodProp = removeProp(rodProp);
+        ctx.refreshButtons();
+        renderGoods();
+      },
+      setStep,
+      runTalk,
+      teleport: (x, z, yaw = 0) => ctx.teleport(x, z, yaw),
+    }),
   };
 }
