@@ -34,7 +34,7 @@
 - **Rendering:** Three.js v0.176 (+ `three-mesh-bvh` for map raycasts)
 - **Physics:** Rapier3D (`@dimforge/rapier3d-compat`)
 - **Multiplayer:** Multiplayer mode only (Showdown is single player). Firebase (`peers` = lobby list, `rooms` = lobby / private duel rooms / `mm-<mode>` matchmaking queue / `party-<hostId>` / `match-<matchId>`, shop stock) + PeerJS WebRTC; messages: `presence`, `projectile`, `duel`, `match`
-- **World:** `public/mappacks/island_town.mappack` (via `src/map/MapLoader.ts`) for every mode but Classic (scaled ×1.4 via `MAPS.islandTown.scale` — map coordinates in code are scaled world units); Classic uses the static GLB map (`public/glb_map/map.glb`)
+- **World:** `public/mappacks/island_town.mappack` (via `src/map/MapLoader.ts`) for every mode but Classic (scaled ×1.4 via `MAPS.islandTown.scale` — map coordinates in code are scaled world units); Classic uses the static GLB map (`public/glb_map/map.glb`); other islands share the island town's world out on its sea (`MAPS.islandTown.islands` — Tree Island, `public/mappacks/tree_island.mappack`: loaded from Town's canoe, each island's land drawn only near it, a 📍 pin over it while paddling — `_updateIslands` in `bootstrapGameApp.js`)
 - **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth); the app opens as a guest (unless a stored PIN auto-logs in) — out on the sea in a canoe pointed at the fishing spot, rod in hand facing over its side (the sea start, `src/town/seaStart.js`: mode `sea`, before the mappack is in; the phone QR prompt shows as usual; ⬅ Lobby → the start screen, Sign In → the login form, fishing works anywhere on the water from the canoe, as in Town (Town's fishing on a stand-in state — the catch comes ashore into Town), paddle to the fishing spot → 🛶 Get out → Town); "Sign In" on the start screen reloads to the login form (`sq:showLogin` sessionStorage flag); guest = random name, `profileNameKey` null, nothing saved (guard profile writes on `profileNameKey`)
 - **Build:** Vite 6, deployed on Vercel
 
@@ -175,6 +175,7 @@ src/
 
 ## What NOT to Do
 
+- Don't debug big dark-blue / grey triangles across the sky in headless Chromium screenshots: it's the SwiftShader renderer drawing the skybox, not the game (see CLAUDE.md → Headless browser testing, which also has the build / get-into-Town recipe).
 - Don't bypass `appContext` with `window.*` globals in new code
 - Don't import heavy modules at top level — use the facade pattern (`src/features/`)
 - Don't modify `public/service-worker.js` cache list without bumping the cache version

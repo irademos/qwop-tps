@@ -61,7 +61,7 @@ import { createFishingRodModel, ROD_HOLD_PITCH } from '../items/fishingRod.js';
 import { createLantern } from '../items/lantern.js';
 import { loadBowAssets, createBowMesh, createArrowMesh, bowArrowTipWorld } from '../items/bowModel.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
-import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk } from '../village/villageMode.js';
+import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk, makeTextSprite } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
@@ -1912,6 +1912,12 @@ async function initCore(runtimeContext) {
   //                   water like any wall, masts / yards / sails above it ignored; `deck`
   //                   (model units, the bow toward −X) = where a voyage keeps everyone aboard
   //                   — one with a deck can sail (open roam's ⛵ Explore the Seas, _voyage*)
+  //   islands (mappacks with a sea): other islands out on this map's sea, in the same world —
+  //                   mappacks loaded on the way there (see "Islands out at sea" below), at
+  //                   `at` (world, the pack's centre), turned by `yaw` (rad, three.js rotation.y
+  //                   about `at`), the map's own `scale`; `radius` = how far
+  //                   its land reaches from `at` (m); `noGround` as the map's. `home` = this
+  //                   map's own island the same way (its name on the pin, where its land is)
   const MAPS = {
     islandTown: {
       kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree|pirate_ship/i, scale: 1.4,
@@ -1934,6 +1940,14 @@ async function initCore(runtimeContext) {
         face: { x: -Math.SQRT1_2, z: -Math.SQRT1_2 },
         styleReference: { lum: 0.322, lumStd: 0.151, sat: 0.234 },
       },
+      home: { name: 'Brindlewick', at: { x: 0, z: 0 }, radius: 150 },
+      // Tree Island: south-west, out past the fishing spot (≈ 260 m of sea from its shore),
+      // turned so its river's east mouth (pack ≈ (87.5, 20.3)) faces the town's piers
+      // (the docks ≈ (−74, −99)) — the canoe paddles straight across into the river
+      islands: [{
+        key: 'treeIsland', name: 'Tree Island', url: '/mappacks/tree_island.mappack',
+        at: { x: -360, z: -360 }, yaw: -0.513, radius: 135, noGround: /tree/i,
+      }],
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
@@ -2014,19 +2028,7 @@ async function initCore(runtimeContext) {
       group.updateMatrixWorld(true);
       // Solid meshes (bullets / bombs stop at them) and the ones characters stand on.
       // Instanced grass / scatter is neither; water stops bullets but isn't stood on.
-      const meshes = [];
-      const groundMeshes = [];
-      group.traverse(obj => {
-        if (!obj.isMesh || obj.isInstancedMesh) return;
-        // Placed copies of one model share its geometry: build that BVH once, not per copy
-        if (!obj.geometry.boundsTree) obj.geometry.computeBoundsTree();
-        meshes.push(obj);
-        if (MAP_NOT_GROUND.has(obj.name)) return;
-        let o = obj;
-        while (o && !o.userData.mapObject) o = o.parent;
-        const file = o?.userData.mapObject?.modelFile ?? '';
-        if (!(def.noGround && def.noGround.test(file))) groundMeshes.push(obj);
-      });
+      const { meshes, groundMeshes } = _collectMapMeshes(group, def.noGround);
       // Floating props with a deck to stand on (_floatingGroundHeight): their meshes and where
       // they are (world box, a little bigger: the swell moves them)
       const floatingGround = floating.filter((f) => Number.isFinite(f.deckMaxY)).map((f) => {
@@ -2044,12 +2046,41 @@ async function initCore(runtimeContext) {
       } : null;
       // (the one that sails: a voyage moves its holder — _voyage*)
       const ship = floatingGround.find((f) => f.deck) ?? null;
-      return { group, meshes, groundMeshes, floor, water, paths, animate, floatingGround, ship };
+      // Islands out on its sea (MAPS `islands`, loaded later — _updateIslands): their water
+      // where their terrain is, this map's everywhere else
+      const islands = [];
+      const ownWater = water;
+      if (ownWater && def.islands?.length) {
+        water = (x, z) => {
+          for (const isl of islands) if (isl.covers(x, z)) return isl.water(x, z);
+          return ownWater(x, z);
+        };
+      }
+      return { group, meshes, groundMeshes, floor, water, paths, animate, floatingGround, ship, islands, islandLoads: new Map() };
     })();
     _loadedMaps.set(key, promise);
     promise.catch(() => _loadedMaps.delete(key)); // let a later switch retry
     return promise;
   };
+
+  // A map's solid meshes (bullets / bombs stop at them) and the ones characters stand on.
+  // Instanced grass / scatter is neither; water stops bullets but isn't stood on.
+  function _collectMapMeshes(group, noGround) {
+    const meshes = [];
+    const groundMeshes = [];
+    group.traverse(obj => {
+      if (!obj.isMesh || obj.isInstancedMesh) return;
+      // Placed copies of one model share its geometry: build that BVH once, not per copy
+      if (!obj.geometry.boundsTree) obj.geometry.computeBoundsTree();
+      meshes.push(obj);
+      if (MAP_NOT_GROUND.has(obj.name)) return;
+      let o = obj;
+      while (o && !o.userData.mapObject) o = o.parent;
+      const file = o?.userData.mapObject?.modelFile ?? '';
+      if (!(noGround && noGround.test(file))) groundMeshes.push(obj);
+    });
+    return { meshes, groundMeshes };
+  }
 
   // A def.floating prop, its origin on the sea surface (pack units, inside the map group):
   // holder (place, yaw, size) > bob (the swell — animate) > model
@@ -2181,17 +2212,32 @@ async function initCore(runtimeContext) {
     _activeMap = loaded;
     _activeMapKey = key;
     scene.add(loaded.group);
-    _groundMeshes = loaded.groundMeshes;
-    _glbHeightCache.clear();
     setTerrainFloor(loaded.floor);
     _syncPhysicsGround();
-    // (the trees' trunks are solid: measured once per map, with its ground in place)
-    loaded.trunks ??= _measureMapTrunks(loaded);
-    setMapObstacles(loaded.trunks);
-    _syncTrunkColliders();
+    _refreshMapLayers();
     setSpawnCenter(MAPS[key].spawn);
-    registerMapMeshes(loaded.meshes); // bullets stop at buildings / walls (src/items/projectiles.js)
     return true;
+  };
+  // The active map's ground / walls / trunks / bullet meshes — with the islands of it loaded
+  // so far (an island coming in calls it again)
+  function _refreshMapLayers() {
+    const m = _activeMap;
+    if (!m) return;
+    const isles = m.islands ?? [];
+    _groundMeshes = isles.length ? [m.groundMeshes, ...isles.map((i) => i.groundMeshes)].flat() : m.groundMeshes;
+    _glbHeightCache.clear();
+    // (the trees' trunks are solid: measured once per map / island, with its ground in place)
+    m.trunks ??= _measureMapTrunks(m.group);
+    for (const isl of isles) isl.trunks ??= _measureMapTrunks(isl.group);
+    setMapObstacles(_mapTrunks());
+    _syncTrunkColliders();
+    // (bullets stop at buildings / walls — src/items/projectiles.js)
+    registerMapMeshes(isles.length ? [m.meshes, ...isles.map((i) => i.meshes)].flat() : m.meshes);
+  }
+  const _mapTrunks = () => {
+    const isles = _activeMap?.islands ?? [];
+    const own = _activeMap?.trunks ?? [];
+    return isles.length ? [own, ...isles.map((i) => i.trunks ?? [])].flat() : own;
   };
   // Flat Rapier ground (created after the first map load, below); moved to the map's floor
   let _physicsGroundRb = null;
@@ -2209,13 +2255,19 @@ async function initCore(runtimeContext) {
   // copies in the model's own frame: ~160 trees, 14 models on the island — tens of ms at map
   // load, a grid lookup a frame.
   const TREE_TRUNK_RE = /tree/i;
-  function _measureMapTrunks(loaded) {
+  function _measureMapTrunks(root) {
     const out = [];
     const byFile = new Map(); // modelFile → { local: trunk middle in the model's frame, r: its radius there, h: height there }
     const v = new THREE.Vector3();
     const sc = new THREE.Vector3();
-    loaded.group.updateMatrixWorld(true);
-    loaded.group.traverse((o) => {
+    root.updateMatrixWorld(true);
+    // (an island inside the map's group is measured on its own)
+    const visit = (o) => {
+      if (o !== root && o.userData?.island) return;
+      measure(o);
+      o.children.forEach(visit);
+    };
+    const measure = (o) => {
       const file = o.userData?.mapObject?.modelFile;
       if (!file || !TREE_TRUNK_RE.test(file) || !o.visible) return;
       const base = o.getWorldPosition(new THREE.Vector3());
@@ -2234,7 +2286,8 @@ async function initCore(runtimeContext) {
       v.copy(m.local).applyMatrix4(o.matrixWorld);
       const r = THREE.MathUtils.clamp(m.r * s, 0.12, 0.5);
       out.push({ x: v.x, z: v.z, r, y0: gy - 1.5, y1: Math.max(gy + 2, base.y + m.h * Math.abs(sc.y)) });
-    });
+    };
+    visit(root);
     return out;
   }
   // One fixed Rapier body holding a cylinder per trunk of the active map (from below the map's
@@ -2243,8 +2296,8 @@ async function initCore(runtimeContext) {
   function _syncTrunkColliders() {
     if (!rapierWorld) return;
     if (_trunkRb) { removeRigidBodySafely(rapierWorld, _trunkRb); _trunkRb = null; }
-    const trunks = _activeMap?.trunks;
-    if (!trunks?.length) return;
+    const trunks = _mapTrunks();
+    if (!trunks.length) return;
     _trunkRb = rapierWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     const floor = _activeMap.floor ?? 0;
     for (const t of trunks) {
@@ -2261,6 +2314,136 @@ async function initCore(runtimeContext) {
   // doesn't wait on the mappack. Until then the spawn centre is set and the ground is the floor.
   setSpawnCenter(MAPS[DEFAULT_MAP].spawn);
   const _defaultMapReady = _setActiveMap(DEFAULT_MAP);
+
+  // ── Islands out at sea ────────────────────────────────────────────────────
+  // A map's `islands` (MAPS) share its world: each is its own mappack, put out on the map's sea
+  // at `at` inside the map's group (so it goes with the map — Classic takes both away), its own
+  // ocean left out (`sea: false` — the map's sea reaches past it, one seabed apron round it).
+  // One is loaded the first time the player is in Town's canoe within ISLAND_LOAD_EDGE of it
+  // (or already on it), then joins the ground / walls / trunks / bullet meshes / water
+  // (_refreshMapLayers, the map's `water` composite). Nothing is switched or teleported: the
+  // player paddles from one to the other. Drawing is what's streamed: an island's land (its
+  // terrain, grass, objects — not the ocean / seabed) is drawn only within ISLAND_DRAW_EDGE of
+  // its shore; its meshes stay loaded (height raycasts don't check `visible`, Town keeps running
+  // on the home island). While paddling, a pin floats over every island the player isn't at.
+  const ISLAND_LOAD_EDGE = 360;    // m from an island's land (`radius`) its pack starts loading, from the canoe
+  const ISLAND_DRAW_EDGE = 300;    // m from an island's land it is drawn within…
+  const ISLAND_DRAW_HYST = 40;     // …and hidden past this much further (no flicker at the line)
+  const ISLAND_PIN_Y = 34;         // m over the sea the pins float
+  const ISLAND_PIN_SCREEN = 0.045; // pin height per m away (about the same size on screen)
+  const ISLAND_PIN_MIN_H = 3;      // m
+  const ISLAND_PIN_HIDE_EDGE = 25; // m: no pin for the island the player's at (within this of its land)
+  async function _loadIsland(mapKey, loaded, def) {
+    const s = MAPS[mapKey].scale ?? 1;
+    const { MapLoader, sampleMapWaterLevel } = await import('../map/MapLoader.ts');
+    const group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/', sea: false });
+    group.name = `island:${def.key}`;
+    group.userData.island = def.key;
+    // (inside the map's group, which is scaled by `s`: pack units there)
+    group.position.set(def.at.x / s, 0, def.at.z / s);
+    const yaw = def.yaw ?? 0;
+    group.rotation.y = yaw;
+    const objects = group.getObjectByName('objects');
+    if (objects) stylizeObject(objects);
+    group.traverse((obj) => { if (obj.isMesh) { obj.receiveShadow = true; obj.castShadow = false; } });
+    loaded.group.add(group);
+    loaded.group.updateMatrixWorld(true);
+    const { meshes, groundMeshes } = _collectMapMeshes(group, def.noGround);
+    const info = group.userData.water;
+    // (world → the pack's own units: back round `yaw`, un-scaled)
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    const lx = (x, z) => ((x - def.at.x) * cy - (z - def.at.z) * sy) / s;
+    const lz = (x, z) => ((x - def.at.x) * sy + (z - def.at.z) * cy) / s;
+    const water = info
+      ? (x, z) => {
+        const level = sampleMapWaterLevel(info, lx(x, z), lz(x, z));
+        return level == null ? null : level * s;
+      }
+      : () => null;
+    // (its terrain's square, world: there its own water data answers)
+    const covers = info
+      ? (x, z) => Math.abs(lx(x, z) - info.centerX) <= info.worldWidth / 2
+        && Math.abs(lz(x, z) - info.centerZ) <= info.worldDepth / 2
+      : () => false;
+    return { def, group, meshes, groundMeshes, water, covers, trunks: null, land: _landParts(group), drawn: true };
+  }
+  // What of a map / island isn't drawn while the player's far away: everything but its ocean and
+  // seabed (and the islands inside it — each has its own)
+  function _landParts(group) {
+    const parts = [];
+    for (const c of group.children) {
+      if (c.userData.island) continue;
+      const terrainRoot = c.children.some((cc) => cc.name === 'terrain' || cc.name === 'sea' || cc.name === 'seabed');
+      if (terrainRoot) c.children.forEach((cc) => { if (cc.name !== 'sea' && cc.name !== 'seabed') parts.push(cc); });
+      else parts.push(c);
+    }
+    return parts;
+  }
+  const _islandEdge = (place, p) => Math.hypot(p.x - place.at.x, p.z - place.at.z) - place.radius;
+  const _drawLand = (state, edge) => {
+    const want = state.drawn ? edge < ISLAND_DRAW_EDGE + ISLAND_DRAW_HYST : edge < ISLAND_DRAW_EDGE;
+    if (want === state.drawn) return;
+    state.drawn = want;
+    for (const part of state.land) part.visible = want;
+  };
+  const _islandPins = new Map(); // place name → sprite (in the scene)
+  const _islandPin = (place) => {
+    let pin = _islandPins.get(place.name);
+    if (!pin) {
+      pin = makeTextSprite(`📍 ${place.name}`, { height: 1 });
+      pin.material.depthTest = false;   // (over the trees / the other island)
+      pin.renderOrder = 20;
+      pin.userData.aspect = pin.scale.x / pin.scale.y;
+      pin.visible = false;
+      scene.add(pin);
+      _islandPins.set(place.name, pin);
+    }
+    return pin;
+  };
+  function _updateIslands() {
+    const m = _activeMap;
+    const def = MAPS[_activeMapKey];
+    const p = playerModel?.position;
+    const shown = new Set();
+    if (m?.islandLoads && def?.islands?.length && p) {
+      const inCanoe = !!town?.inCanoe?.();
+      // Loading: from the canoe heading out (or standing on one — e.g. the map came back from Classic)
+      for (const idef of def.islands) {
+        if (m.islandLoads.has(idef.key)) continue;
+        const edge = _islandEdge(idef, p);
+        if (!(inCanoe && edge < ISLAND_LOAD_EDGE) && edge > 0) continue;
+        const key = _activeMapKey;
+        const job = _loadIsland(key, m, idef).then((isl) => {
+          m.islands.push(isl);
+          if (_activeMap === m) _refreshMapLayers();
+          console.info(`[map] ${idef.name} is in`);
+        }).catch((err) => console.warn(`[map] ${idef.name} failed to load:`, err));
+        m.islandLoads.set(idef.key, job);
+      }
+      // Drawing: each island's land (the home one's too) only near it
+      if (def.home) {
+        m.homeLand ??= { land: _landParts(m.group), drawn: true };
+        _drawLand(m.homeLand, _islandEdge(def.home, p));
+      }
+      for (const isl of m.islands) _drawLand(isl, _islandEdge(isl.def, p));
+      // Pins: in the canoe, over each island the player isn't at
+      if (inCanoe && !town.isIndoors()) {
+        const seaY = (m.floor ?? 0) + SEA_WADE_DEPTH;
+        for (const place of [def.home, ...def.islands]) {
+          if (!place || _islandEdge(place, p) < ISLAND_PIN_HIDE_EDGE) continue;
+          const pin = _islandPin(place);
+          const dist = Math.hypot(p.x - place.at.x, p.z - place.at.z);
+          const h = Math.max(ISLAND_PIN_MIN_H, dist * ISLAND_PIN_SCREEN);
+          pin.position.set(place.at.x, seaY + ISLAND_PIN_Y, place.at.z);
+          pin.scale.set(h * pin.userData.aspect, h, 1);
+          pin.visible = true;
+          shown.add(place.name);
+        }
+      }
+    }
+    for (const [name, pin] of _islandPins) if (!shown.has(name)) pin.visible = false;
+  }
 
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -10894,6 +11077,7 @@ async function initCore(runtimeContext) {
     seaStart?.update(frameDelta);
     // Ships on the sea bob on the swell
     _activeMap?.animate?.(performance.now() / 1000);
+    _updateIslands();
     // Showdown death: the carriers + the fixed camera
     deathCarry?.update(frameDelta);
     // Shadows: the sun's shadow box follows the player (snapped to whole shadow-map texels so
