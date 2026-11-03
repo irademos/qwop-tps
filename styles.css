@@ -5054,10 +5054,17 @@ body.story-cut #joystick-container,
 body.story-cut #jump-button,
 body.story-cut #gyro-button,
 body.story-cut #settings-button,
-body.story-cut .story-hud > :not(.story-fade):not(.town-talk) { visibility: hidden; }
+body.story-cut .story-hud > :not(.story-fade):not(.story-flash):not(.town-talk) { visibility: hidden; }
 .story-fade {
   position: absolute;
   inset: 0;
   background: #000;
+  pointer-events: none;
+}
+/* The cut scene's lightning: a white flash over the screen (storyMode.js setFlash) */
+.story-flash {
+  position: absolute;
+  inset: 0;
+  background: #eef3ff;
   pointer-events: none;
 }

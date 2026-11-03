@@ -26,12 +26,15 @@ import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { createCanoeBoat } from '../town/canoeBoat.js';
 import { installTownFishing } from '../town/townFishing.js';
 import { installTownTrees } from '../town/townTrees.js';
-import { BAG_MAX, CANOE_BOARD_DIST, CANOE_SHORE_DIST, STUMP_RE, TREE_RE, dist2, el } from '../town/townConfig.js';
+import {
+  BAG_MAX, CANOE_BOARD_DIST, CANOE_SHORE_DIST, NIGHT_FROM_H, NIGHT_TO_H, STUMP_RE, TREE_RE, TWILIGHT_H, dist2, el,
+} from '../town/townConfig.js';
 import { createFluteModel, disposeFluteModel, FLUTE_HAND_AT, FLUTE_LENGTH } from '../items/flute.js';
 import { createCrow } from './crow.js';
 import { createTreeCreature } from './treeCreature.js';
+import { createFrogMom } from './frogMom.js';
 import { findStoryLayout, SEAT_RADIUS, SEAT_TOP } from './storyLayout.js';
-import { makeSeatStone, makeLeaningRod, makeCanoeDamage, makeNote, pulseGlint, removeProp } from './storyProps.js';
+import { fitSeatStone, makeSeatStone, makeLeaningRod, makeCanoeDamage, makeNote, pulseGlint, removeProp } from './storyProps.js';
 import {
   CHAPTER, STEPS, stepAtLeast, WOOD_NEEDED, CROW, TREE, VOICES, TALKS, NOTES, ACTS, BANNERS,
   FIX_CANOE_THEN, quest,
@@ -45,17 +48,30 @@ export const STORY_SOUNDS = {
   intro: '/assets/audio/story/intro.mp3',   // over the black at the start (waves, the wreck…)
   flute: '/assets/audio/story/flute.mp3',   // the boy's flute tune on the rock
   caw: '/assets/audio/story/crow_caw.mp3',  // the Crow
+  thunder: '/assets/audio/story/thunder.mp3', // the lightning over the beach at the start
 };
 
-const BLACK_S = 4;            // s of black before the fade in
-const FADE_IN_S = 3;
-const LIE_S = 2.5;            // lying there once it's faded in
-const GET_UP_S = 1.2;         // standing, before he walks
-const WALK_SPEED = 1.1;       // m/s to the rock
-const WALK_MAX_S = 25;
-const FLUTE_OUT_S = 1;        // on the rock, before the flute comes out
-const PLAY_BEFORE_CROW_S = 6; // playing before the Crow comes…
-const BACK_SHOT_AT_S = 2.2;   // …cutting to a shot from behind him this far in (the Crow comes in on it)
+// The cut scene: black (night) → a lightning flash shows him washed up on the beach → black →
+// a fade in at sunrise on him sitting on the stone playing the flute, from behind → the Crow
+const BLACK_S = 2.5;          // s of black before the lightning
+const FLASH_S = 1.6;          // the lightning (two flashes and a fading glow)
+const THUNDER_AT_S = 0.45;    // the thunder, this far into it
+const DARK_S = 2.2;           // black again (he's put on the stone meanwhile)
+const FADE_IN_S = 3.5;        // the fade in on him playing, from behind
+const PLAY_BEFORE_CROW_S = 6; // playing before the Crow comes (in on the same shot)
+const FLASH_COLOR = 0xd8e4ff;
+const FLASH_LIGHT = 3.2;      // the lightning's light at its brightest
+const FLASH_SCREEN = 0.28;    // the white over the screen at its brightest
+// The sky: night for the lightning, then a sunrise (Town's sun — setSunHour) that goes on rising
+// to MORNING_H once the scene's over
+const NIGHT_H = 2;
+const DAWN_H = 6;             // the hour it fades in at (Town's twilight: dim, warm)…
+const SUNRISE_RATE = 0.07;    // …the sun's hours a second while it plays…
+const MORNING_H = 9;          // …up to here, then held
+// Sitting on the stone (the Sitting clip — glbCharacterConfig.sitClip — the arms on the flute)
+const HIPS_OVER_SEAT = 0.07;  // m the hips bone sits over the stone's top
+const SIT_HIPS_GUESS = 0.38;  // m: the hips over the feet before the clip's been measured
+const HEAD_STAND = { x: 0.02, y: 0.93, z: 0 }; // the Head bone standing (idle), × his height (player frame — measured on the village boy)
 const NOTE_EVERY_S = 0.6;     // ♪ off the flute
 const NOTE_LIFE_S = 1.8;
 const CROW_FROM_UP = 10;      // m up over the sea the Crow comes from
@@ -114,6 +130,7 @@ export function createStoryMode(ctx) {
   let noteAt = 0;
   const crow = createCrow({ scene: ctx.scene });
   const tree = createTreeCreature({ scene: ctx.scene });
+  const frogMom = createFrogMom({ scene: ctx.scene });
 
   // What the chapter's data sees (chapter1.js talks / quest)
   const view = () => ({
@@ -313,6 +330,30 @@ export function createStoryMode(ctx) {
     return THREE.MathUtils.clamp(top, 0.4, 2.5);
   };
   let fluteH = 0.8;
+  const _flutePos = new THREE.Vector3();   // where it's held standing (the player group's frame)…
+  const _handLBase = new THREE.Vector3();
+  const _handRBase = new THREE.Vector3();
+  const _headOff = new THREE.Vector3();    // …moved with the head while he sits (followHead)
+  const _headV = new THREE.Vector3();
+  // Sitting, the head's lower and further forward than standing: the flute (and the hands on it)
+  // go with it — the Head bone now less where it is standing (HEAD_STAND × the height)
+  const followHead = (dt) => {
+    const pm = ctx.getPlayerModel();
+    const head = glbOf()?.fluffy?.getBone?.('Head');
+    let want = null;
+    if (sitting && head && glbOf()._action?.started) {
+      pm.updateMatrixWorld(true);
+      pm.worldToLocal(head.getWorldPosition(_headV));
+      if (Number.isFinite(_headV.y)) want = _headV.sub(_v3a.set(HEAD_STAND.x, HEAD_STAND.y, HEAD_STAND.z).multiplyScalar(fluteH));
+    }
+    if (want) _headOff.lerp(want, sitting.headSet ? 1 - Math.exp(-10 * dt) : 1);
+    else _headOff.multiplyScalar(Math.exp(-10 * dt));
+    if (sitting && want) sitting.headSet = true;
+    flute.position.copy(_flutePos).add(_headOff);
+    _handL.copy(_handLBase).add(_headOff);
+    _handR.copy(_handRBase).add(_headOff);
+  };
+  const _v3a = new THREE.Vector3();
   const holdFlute = (on) => {
     const pm = ctx.getPlayerModel();
     if (!pm) return;
@@ -327,13 +368,17 @@ export function createStoryMode(ctx) {
       const yAxis = zAxis.clone().cross(xAxis).normalize();
       _fluteBase.setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
       flute.quaternion.copy(_fluteBase);
-      flute.position.set(-fluteH * 0.02, fluteH * 0.82, fluteH * 0.1);
+      _flutePos.set(-fluteH * 0.02, fluteH * 0.82, fluteH * 0.1);
+      flute.position.copy(_flutePos);
       pm.add(flute);
       // Hands under the tube on the holes: the near one (the anatomical left — the game 'right'
       // hand) by the lips, the far one (the game 'left' hand) further out
-      const at = (d) => zAxis.clone().multiplyScalar(d * k).add(flute.position).addScaledVector(yAxis, -0.03 * k);
-      _handR.copy(at(FLUTE_HAND_AT[0]));
-      _handL.copy(at(FLUTE_HAND_AT[1]));
+      const at = (d) => zAxis.clone().multiplyScalar(d * k).add(_flutePos).addScaledVector(yAxis, -0.03 * k);
+      _handRBase.copy(at(FLUTE_HAND_AT[0]));
+      _handLBase.copy(at(FLUTE_HAND_AT[1]));
+      _handR.copy(_handRBase);
+      _handL.copy(_handLBase);
+      _headOff.set(0, 0, 0);
       pm.userData.handPose = { left: _handL, right: _handR };
     } else {
       if (flute?.parent === pm) pm.remove(flute);
@@ -344,6 +389,7 @@ export function createStoryMode(ctx) {
   // The tune: the flute bobs a little, ♪ float off it
   const updateFlute = (dt) => {
     if (fluteHeld && flute) {
+      followHead(dt);
       // (a little sway with the tune)
       _fluteBob.setFromAxisAngle(_fluteZ, Math.sin(simT * 2.3) * 0.05);
       flute.quaternion.copy(_fluteBase).multiply(_fluteBob);
@@ -382,12 +428,13 @@ export function createStoryMode(ctx) {
   let seatProp = null;
   let seatY = 0;
   let unregisterSeat = null;
-  const seatFloor = (x, z) => (seatProp && dist2(x, z, L.seat.x, L.seat.z) < SEAT_RADIUS * 0.8 ? seatY + SEAT_TOP : undefined);
+  const seatTopY = () => seatY + SEAT_TOP;
+  const seatFloor = (x, z) => (seatProp && dist2(x, z, L.seat.x, L.seat.z) < SEAT_RADIUS * 0.8 ? seatTopY() : undefined);
   const placeSeat = () => {
     removeSeat();
     seatY = ctx.getGroundY(L.seat.x, L.seat.z);
     seatProp = makeSeatStone();
-    seatProp.position.set(L.seat.x, seatY + SEAT_TOP * 0.3, L.seat.z);
+    fitSeatStone(seatProp, seatY, seatTopY(), L.seat.x, L.seat.z);
     ctx.scene.add(seatProp);
     unregisterSeat = registerTerrainHeightOverride(seatFloor);
   };
@@ -470,6 +517,8 @@ export function createStoryMode(ctx) {
   const placeTree = () => {
     const g = groundAt(L.tree);
     tree.placeAt(g, Math.atan2(L.wash.x - L.tree.x, L.wash.z - L.tree.z));
+    // (the frog mom, sitting on her stone along the way)
+    if (L.frogMom) frogMom.placeAt(groundAt(L.frogMom), L.frogMom.yaw);
   };
 
   // ── Fishing: Town's (townFishing.js) on a stand-in for the town's state, as the sea start ──
@@ -755,6 +804,121 @@ export function createStoryMode(ctx) {
     }
   };
 
+  // ── The sky: Town's sun (setSunHour) — night for the lightning, then the sunrise ──
+  let skyH = null;
+  let skyNight = null;
+  const nightLevelAt = (h) => {
+    if (h >= NIGHT_FROM_H || h < NIGHT_TO_H) return 1;
+    const k = Math.min(1, Math.min(h - NIGHT_TO_H, NIGHT_FROM_H - h) / TWILIGHT_H);
+    return 1 - k * k * (3 - 2 * k);
+  };
+  const setSky = (h) => {
+    skyH = h;
+    const night = h >= NIGHT_FROM_H || h < NIGHT_TO_H;
+    if (night !== skyNight) { skyNight = night; ctx.setTimeOfDay(night ? 'night' : 'day'); }
+    ctx.setSunHour(h, nightLevelAt(h));
+  };
+  const clearSky = () => {
+    if (skyH == null && skyNight == null) return;
+    skyH = null;
+    skyNight = null;
+    ctx.setSunHour(null);
+    ctx.setTimeOfDay('day');
+  };
+  // (the sun goes on rising from the fade in until MORNING_H)
+  const updateSky = (dt) => {
+    if (skyH == null || skyNight || skyH >= MORNING_H) return;
+    if (cut && cut.phase !== 'fade' && cut.phase !== 'play' && cut.phase !== 'crow' && cut.phase !== 'talk') return;
+    setSky(Math.min(MORNING_H, skyH + SUNRISE_RATE * dt));
+  };
+
+  // ── The lightning: a cold light over the beach + a white flash over the screen ──
+  let flashLight = null;
+  const flashEl = el('div', 'story-flash hidden');
+  hud.append(flashEl);
+  const addFlashLight = () => {
+    if (flashLight) return;
+    // (added under the black, dark: the scene's shaders recompile then, not on the flash)
+    flashLight = new THREE.DirectionalLight(FLASH_COLOR, 0);
+    flashLight.castShadow = false;
+    ctx.scene.add(flashLight, flashLight.target);
+  };
+  const removeFlashLight = () => {
+    if (!flashLight) return;
+    flashLight.parent?.remove(flashLight);
+    flashLight.target.parent?.remove(flashLight.target);
+    flashLight.dispose?.();
+    flashLight = null;
+    flashEl.classList.add('hidden');
+  };
+  // 0 … 1: a first strike, a flicker, a second one and the glow dying away
+  const flashEnv = (t) => {
+    const pulse = (c, w, a) => a * Math.exp(-(((t - c) / w) ** 2));
+    const tail = t > 0.42 ? 0.45 * Math.exp(-(t - 0.42) * 3.2) : 0;
+    return Math.min(1, pulse(0.06, 0.05, 1) + pulse(0.2, 0.03, 0.35) + pulse(0.36, 0.07, 0.95) + tail);
+  };
+  const setFlash = (k) => {
+    if (flashLight) {
+      const p = ctx.getPlayerModel().position;
+      // (from out over the sea, high, a little to one side)
+      flashLight.position.set(p.x + L.dir.x * 25 - L.dir.z * 10, p.y + 40, p.z + L.dir.z * 25 + L.dir.x * 10);
+      flashLight.target.position.copy(p);
+      flashLight.intensity = FLASH_LIGHT * k;
+    }
+    flashEl.style.opacity = String(FLASH_SCREEN * k);
+    flashEl.classList.toggle('hidden', k <= 0.002);
+    setFade(1 - Math.min(1, k * 1.8));
+  };
+
+  // ── Sitting on the stone: the Sitting clip with the arms on the flute, the hips on its top ──
+  let sitting = null;          // { ride: the controls' ride { y, yaw }, hips: player-local | null }
+  const _hipsV = new THREE.Vector3();
+  const glbOf = () => ctx.getPlayerModel()?.userData?.qwopRig?.glbCharacter ?? null;
+  const sitDown = () => {
+    const c = ctx.getControls();
+    if (!c) return;
+    ctx.teleport(L.seat.x, L.seat.z, L.seaYaw);
+    sitting = { ride: { y: seatTopY() + HIPS_OVER_SEAT - SIT_HIPS_GUESS, yaw: L.seaYaw }, hips: null };
+    c.ride = sitting.ride;
+    ctx.sit(true);
+  };
+  const standUpFromSeat = () => {
+    if (!sitting) return;
+    const c = ctx.getControls();
+    if (c?.ride === sitting.ride) c.ride = null;
+    sitting = null;
+    ctx.sit(false);
+    // (on his feet just in front of the stone, toward the sea)
+    ctx.teleport(L.seat.x + L.dir.x * (SEAT_RADIUS + 0.35), L.seat.z + L.dir.z * (SEAT_RADIUS + 0.35), L.seaYaw);
+  };
+  // Each frame: the hips (the clip's last frame, in the player's own space) over the stone's
+  // middle, on its top
+  const updateSit = () => {
+    if (!sitting) return;
+    const c = ctx.getControls();
+    const pm = ctx.getPlayerModel();
+    if (!c || !pm) return;
+    const g = glbOf();
+    const bone = g?.fluffy?.getBone?.('Hips');
+    if (bone && g._action?.pose && g._action.started) {
+      pm.updateMatrixWorld(true);
+      pm.worldToLocal(bone.getWorldPosition(_hipsV));
+      if (Number.isFinite(_hipsV.y)) {
+        if (!sitting.hips) sitting.hips = _hipsV.clone();
+        else sitting.hips.lerp(_hipsV, 0.3);
+      }
+    }
+    const yaw = sitting.ride.yaw;
+    c.yaw = yaw;
+    if (!sitting.hips) return;
+    const h = sitting.hips;
+    const sin = Math.sin(yaw);
+    const cos = Math.cos(yaw);
+    c.playerX = L.seat.x - (h.x * cos + h.z * sin);
+    c.playerZ = L.seat.z - (-h.x * sin + h.z * cos);
+    sitting.ride.y = seatTopY() + HIPS_OVER_SEAT - h.y;
+  };
+
   // ── The cut scene ──
   const lockPlayer = (on) => ctx.holdStill(on);
   const startCut = () => {
@@ -762,12 +926,15 @@ export function createStoryMode(ctx) {
     held = null;
     ctx.hold(null);
     holdFlute(false);
+    standUpFromSeat();
     crow.hide();
     crow.carry(null);
     if (cut?.fov) { ctx.camera.fov = cut.fov; ctx.camera.updateProjectionMatrix(); }
     cut = { phase: 'black', t: 0 };
     lockPlayer(true);
     setFade(1);
+    setSky(NIGHT_H);
+    addFlashLight();
     // Washed up on the beach, lying there (the death clip's last frame), facing up the beach
     const yaw = L.seaYaw + Math.PI;
     ctx.teleport(L.wash.x, L.wash.z, yaw);
@@ -778,6 +945,8 @@ export function createStoryMode(ctx) {
   const endCut = () => {
     if (cut?.fov) { ctx.camera.fov = cut.fov; ctx.camera.updateProjectionMatrix(); }
     cut = null;
+    removeFlashLight();
+    standUpFromSeat();
     lockPlayer(false);
     setFade(0);
     actAt = 0;
@@ -792,33 +961,32 @@ export function createStoryMode(ctx) {
     let pos;
     let look;
     let shot = 'side';
-    if (cut.phase === 'black' || cut.phase === 'fade' || cut.phase === 'lie' || cut.phase === 'up') {
-      // Low over the sand, from the side, the sea behind him
+    if (cut.phase === 'black' || cut.phase === 'flash') {
+      // Lying on the sand: low, from the side, the sea behind him
       pos = _camPos.set(p.x + side.x * 2.6 + d.x * 1.0, p.y + 1.1, p.z + side.z * 2.6 + d.z * 1.0);
       look = _camLook.set(p.x, p.y + 0.3, p.z);
     } else if (cut.phase === 'talk' && crow.isLanded()) {
       // Him on the stone and the Crow beside it, from the sea
+      shot = 'talk';
       const c = crow.position();
       look = _camLook.set((p.x + c.x) / 2, p.y + 0.35, (p.z + c.z) / 2);
       pos = _camPos.set(look.x + d.x * 4.4 + side.x * 0.8, p.y + 1.3, look.z + d.z * 4.4 + side.z * 0.8);
-    } else if ((cut.phase === 'play' && cut.t >= BACK_SHOT_AT_S) || cut.phase === 'crow') {
-      // From behind him, a little to one side and low, looking past him out to sea (a cut, not
-      // a pan); the Crow comes in over the water toward him
-      shot = 'back';
-      const cx = p.x - d.x * 2.3 + side.x * 0.7;
-      const cz = p.z - d.z * 2.3 + side.z * 0.7;
-      // (the beach rises behind him: kept clear of the ground there)
-      const cy = Math.max(p.y + 0.95, ctx.getGroundY(cx, cz) + 0.7);
-      pos = _camPos.set(cx, cy, cz);
-      look = _camLook.set(p.x + d.x * 3, p.y + 0.75 - (cy - p.y - 0.95) * 0.5, p.z + d.z * 3);
     } else {
-      // From the sea side, a little off, him and the stone in view
-      pos = _camPos.set(p.x + d.x * 4.2 + side.x * 2.4, p.y + 1.7, p.z + d.z * 4.2 + side.z * 2.4);
-      look = _camLook.set(p.x + d.x * 0.6, p.y + 0.6, p.z + d.z * 0.6);
-      if (crow.isVisible() && cut.phase === 'crow' && crow.position().distanceTo(p) < 14) look.lerp(crow.position(), 0.25);
+      // On the stone playing, from behind him, a little to one side and low, looking past him
+      // out to sea and the sunrise; the Crow comes in over the water toward him
+      shot = 'back';
+      const sx = sitting ? L.seat.x : p.x;
+      const sz = sitting ? L.seat.z : p.z;
+      const cx = sx - d.x * 2.5 + side.x * 0.75;
+      const cz = sz - d.z * 2.5 + side.z * 0.75;
+      // (the beach rises behind him: kept clear of the ground there)
+      const cy = Math.max(p.y + 1.05, ctx.getGroundY(cx, cz) + 0.7);
+      pos = _camPos.set(cx, cy, cz);
+      look = _camLook.set(sx + d.x * 3, p.y + 0.8 - (cy - p.y - 1.05) * 0.5, sz + d.z * 3);
+      if (crow.isVisible() && cut.phase === 'crow' && crow.position().distanceTo(p) < 10) look.lerp(crow.position(), 0.2);
     }
     // (a new shot cuts straight to it)
-    if (cut.shot && cut.shot !== shot && (shot === 'back' || cut.shot === 'back')) snap = true;
+    if (cut.shot && cut.shot !== shot) snap = true;
     cut.shot = shot;
     const k = snap ? 1 : 1 - Math.exp(-2.5 * dt);
     if (!cut.camPos) {
@@ -840,45 +1008,42 @@ export function createStoryMode(ctx) {
     switch (cut.phase) {
       case 'black':
         setFade(1);
-        if (cut.t >= BLACK_S) { cut.phase = 'fade'; cut.t = 0; }
+        if (cut.t >= BLACK_S) { cut.phase = 'flash'; cut.t = 0; }
+        break;
+      case 'flash':
+        // Lightning: him washed up on the shore, for a moment
+        setFlash(flashEnv(cut.t));
+        if (cut.t >= THUNDER_AT_S && !cut.thunder) {
+          cut.thunder = true;
+          ctx.playSound(STORY_SOUNDS.thunder, { volume: 1 });
+        }
+        if (cut.t >= FLASH_S) {
+          setFlash(0);
+          cut.phase = 'dark';
+          cut.t = 0;
+        }
+        break;
+      case 'dark':
+        setFade(1);
+        if (!cut.moved) {
+          // (under the black: the morning, him on the stone with the flute)
+          cut.moved = true;
+          removeFlashLight();
+          setFade(1);
+          ctx.standUp();
+          sitDown();
+          holdFlute(true);
+          setSky(DAWN_H);
+        }
+        if (cut.t >= DARK_S) {
+          fluteSound = ctx.playSound(STORY_SOUNDS.flute, { volume: 0.8, loop: true });
+          cut.phase = 'fade';
+          cut.t = 0;
+        }
         break;
       case 'fade':
         setFade(1 - cut.t / FADE_IN_S);
-        if (cut.t >= FADE_IN_S) { setFade(0); cut.phase = 'lie'; cut.t = 0; }
-        break;
-      case 'lie':
-        if (cut.t >= LIE_S) { ctx.standUp(); cut.phase = 'up'; cut.t = 0; }
-        break;
-      case 'up':
-        if (cut.t >= GET_UP_S) { cut.phase = 'walk'; cut.t = 0; }
-        break;
-      case 'walk': {
-        // To the stone, then up onto it
-        const p = ctx.getPlayerModel().position;
-        const dx = L.seat.x - p.x;
-        const dz = L.seat.z - p.z;
-        const dist = Math.hypot(dx, dz);
-        const step = WALK_SPEED * dt;
-        if (dist <= step + 0.05 || cut.t > WALK_MAX_S) {
-          ctx.teleport(L.seat.x, L.seat.z, L.seaYaw);
-          cut.phase = 'stand';
-          cut.t = 0;
-        } else if (c) {
-          const yaw = Math.atan2(dx, dz);
-          c.playerX = p.x + (dx / dist) * step;
-          c.playerZ = p.z + (dz / dist) * step;
-          c.yaw = yaw;
-        }
-        break;
-      }
-      case 'stand':
-        if (c) c.yaw = L.seaYaw;
-        if (cut.t >= FLUTE_OUT_S) {
-          holdFlute(true);
-          fluteSound = ctx.playSound(STORY_SOUNDS.flute, { volume: 0.8, loop: true });
-          cut.phase = 'play';
-          cut.t = 0;
-        }
+        if (cut.t >= FADE_IN_S) { setFade(0); cut.phase = 'play'; cut.t = 0; }
         break;
       case 'play':
         if (cut.t >= PLAY_BEFORE_CROW_S) {
@@ -894,14 +1059,6 @@ export function createStoryMode(ctx) {
             runTalk('crow', 'arrive');
           });
           playCaw();
-        }
-        break;
-      case 'talk':
-        // (turned to the Crow)
-        if (c && crow.isLanded()) {
-          const p = ctx.getPlayerModel().position;
-          const want = Math.atan2(crow.position().x - p.x, crow.position().z - p.z);
-          c.yaw += Math.atan2(Math.sin(want - c.yaw), Math.cos(want - c.yaw)) * Math.min(1, dt * 4);
         }
         break;
       default:
@@ -939,7 +1096,7 @@ export function createStoryMode(ctx) {
     ctx.teleport(pos.x, pos.z, pos.yaw);
     if (S.step === 'crow') {
       // (back on the rock with the flute, the Crow waiting)
-      ctx.teleport(L.seat.x, L.seat.z, L.seaYaw);
+      sitDown();
       holdFlute(true);
       cut = { phase: 'talk', t: 0 };
       lockPlayer(true);
@@ -964,7 +1121,7 @@ export function createStoryMode(ctx) {
     window.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onHidden);
     const [island, saved] = await Promise.all([
-      ctx.getIsland(CHAPTER.island), ctx.canSave() ? ctx.load().catch(() => null) : null, crow.load(), tree.load(),
+      ctx.getIsland(CHAPTER.island), ctx.canSave() ? ctx.load().catch(() => null) : null, crow.load(), tree.load(), frogMom.load(),
     ]);
     if (my !== token || !active) return;
     if (!island) {
@@ -987,6 +1144,7 @@ export function createStoryMode(ctx) {
     if (S.step === 'intro') startCut();
     else {
       setFade(0);
+      setSky(MORNING_H);
       resume();
     }
   };
@@ -1005,15 +1163,19 @@ export function createStoryMode(ctx) {
     fluteSound = stopSound(fluteSound);
     holdFlute(false);
     if (flute) { crow.carry(null); flute.parent?.remove(flute); disposeFluteModel(flute); flute = null; }
-    if (cut?.phase === 'lie' || cut?.phase === 'black' || cut?.phase === 'fade') ctx.standUp();
+    if (cut?.phase === 'black' || cut?.phase === 'flash' || (cut?.phase === 'dark' && !cut.moved)) ctx.standUp();
     if (cut?.fov) { ctx.camera.fov = cut.fov; ctx.camera.updateProjectionMatrix(); }
     cut = null;
+    removeFlashLight();
+    standUpFromSeat();
+    clearSky();
     ending = null;
     lockPlayer(false);
     ctx.hold(null);
     held = null;
     crow.hide();
     tree.hide();
+    frogMom.hide();
     clearNotes();
     clearTrees();
     removeSeat();
@@ -1035,6 +1197,9 @@ export function createStoryMode(ctx) {
     // (the sacred tree lowers its arms to talk, then hides again)
     tree.reveal((talk && talk.who === TREE) || simT < treeRevealUntil);
     tree.update(dt);
+    frogMom.update(dt);
+    updateSit();
+    updateSky(dt);
     updateFlute(dt);
     updateEnding(dt);
     if (treesGroup) F.updateTrees(dt);
@@ -1108,7 +1273,7 @@ export function createStoryMode(ctx) {
     },
     fishingHud: () => (active ? F.fishingHud() : null),
     debug: () => ({
-      S, L, F, boat, cut, crow, tree, aboard, held, acts,
+      S, L, F, boat, cut, crow, tree, frogMom, aboard, held, acts, sitting, skyH, setSky, glb: glbOf, fluteH,
       skipCut: () => { if (cut && cut.phase !== 'talk') { cut.t = 999; } },
       // (jump ahead: set the step and what goes with it)
       give: ({ rod, sword, fish, wood } = {}) => {

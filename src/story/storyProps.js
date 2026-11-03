@@ -14,6 +14,18 @@ const disposeTree = (o) => o?.traverse((m) => {
 export const removeProp = (o) => { if (!o) return null; o.parent?.remove(o); disposeTree(o); return null; };
 
 // ── The stone: a low lumpy rock (its top is ground — storyMode.js) ──
+// Sizes a seat stone (makeSeatStone) so its top is at `topY`, its bottom a little in the ground
+// at `groundY`, standing at x / z (all in its parent's frame) — someone sitting on it (Story)
+export function fitSeatStone(mesh, groundY, topY, x, z) {
+  const geo = mesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const h = Math.max(0.12, topY - groundY) + 0.08;
+  const sy = h / (bb.max.y - bb.min.y);
+  mesh.scale.y = sy;
+  mesh.position.set(x, topY - bb.max.y * sy, z);
+}
+
 export function makeSeatStone() {
   const geo = new THREE.DodecahedronGeometry(1, 1);
   // (lumpy: each vertex pushed in / out a little, the same for shared corners)

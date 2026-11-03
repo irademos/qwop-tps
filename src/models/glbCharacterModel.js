@@ -37,7 +37,8 @@
  * blockedClip); it never cuts off a playAction() / playPose() / death.
  *
  * Poses: playPose(url) loops a clip over the whole body (arm IK suspended) until endPose()
- * (sitting on Town's broom — sitClip).
+ * (sitting on Town's broom — sitClip); playPose(url, { armIK: true }) keeps the IK arms on it
+ * (Story: sitting on the rock, the flute held up).
  *
  * Mii characters (isMiiCharacterUrl) have no arm bones: solveArm() leaves the floating
  * hands where the game put them, getPalmWorldPosition() returns a point beside the body,
@@ -69,6 +70,7 @@ export const glbCharacterConfig = {
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
   treeCreatureUrl: '/models/glb_characters/tree_creature.glb', // Multiplayer roster / Showdown unlock
   mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Classic only
+  frogMomUrl: '/models/glb_characters/frog_mom.glb',       // Story: sitting on Tree Island (src/story/frogMom.js)
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
@@ -438,6 +440,12 @@ export class GLBCharacter {
     if (left === this._ikHands.left && right === this._ikHands.right) return;
     this._ikHands = { left, right };
     if (this._action?.reaction && !this._dead) { this._setArmIK(this._armIK); return; } // (the clip plays on)
+    if (this._action?.armIK && !this._dead) {
+      // (a pose with the arms on the IK: the clip again, leaving the IK arms to it)
+      this._setArmIK(this._armIK);
+      this._playPoseClip(this._action, 0.15);
+      return;
+    }
     if (this._dead || this._action) return; // applied by revive() / _endAction()
     this._setArmIK(this._armIK);
     this._gaitClip = null;
@@ -487,13 +495,21 @@ export class GLBCharacter {
    * Loops `url` over the whole body (arm IK suspended) until endPose() — a held pose such as
    * sitting. Same clip again: no-op. Ignored while dead; playAction() / playDeath() replace it.
    */
-  playPose(url, { fade = 0.25 } = {}) {
-    if (this._dead || this._action?.pose === url) return;
-    const action = { started: false, pose: url };
+  playPose(url, { fade = 0.25, armIK = false } = {}) {
+    if (this._dead || (this._action?.pose === url && !!this._action.armIK === !!armIK)) return;
+    // (armIK: the arms the IK drives stay on it — sitting with a flute held up — Story)
+    const action = { started: false, pose: url, armIK: !!armIK && this._armIK };
     this._action = action;
     this._gaitClip = null;
-    this._setArmIK(false);
-    this.fluffy.play(url, { inPlace: true, fade, loop: true })
+    this._setArmIK(action.armIK);
+    this._playPoseClip(action, fade);
+  }
+
+  _playPoseClip(action, fade) {
+    this.fluffy.play(action.pose, {
+      inPlace: true, fade, loop: true,
+      excludeBones: action.armIK ? this._ikShoulders() : [],
+    })
       .then(() => { if (this._action === action) action.started = true; })
       .catch((e) => {
         console.warn('[GLBCharacter] pose clip load failed:', e);
@@ -586,7 +602,7 @@ export class GLBCharacter {
   solveArm(hand, targetObject, { writeBack = true } = {}) {
     const arm = this.arms[hand];
     if (!arm || !targetObject) return;
-    if (this._dead || (this._action && !this._action.reaction) || !this._armIK || !this._ikHands[hand]) {
+    if (this._dead || (this._action && !this._action.reaction && !this._action.armIK) || !this._armIK || !this._ikHands[hand]) {
       // A clip owns the arm: just keep the floating hand (and anything held) on the palm
       if (writeBack && targetObject.parent) {
         targetObject.position.copy(targetObject.parent.worldToLocal(this.getPalmWorldPosition(hand, _v)));
