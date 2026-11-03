@@ -5028,3 +5028,36 @@ body.sea-start.sea-steer > #joystick-container { display: block !important; }
 @media (max-width: 520px) {
   body.sea-start.sea-steer .sea-tools { left: auto; right: calc(12px + env(safe-area-inset-right, 0px)); transform: none; flex-direction: column; }
 }
+
+/* ── Story mode (src/story/storyMode.js): one player, on Tree Island ─────────────
+   Town's UI (.town-hud on #story-hud: the top chip, the feed, the acts, the goods pill, the quest
+   tracker, the talk subtitle) and the game's own controls (joystick, jump, the weapon buttons —
+   Rod / Hands, Oar / Rod in the canoe). What's Showdown's is hidden; in a cut scene
+   (body.story-cut) the controls and Town's HUD are too, under the black (.story-fade). */
+body.story-mode #player-info,
+body.story-mode #xp-bar,
+body.story-mode #health-display,
+body.story-mode #shield-health-display,
+body.story-mode #ammo-display,
+body.story-mode #coin-popup,
+body.story-mode #ps-kill-counter,
+body.story-mode #combo-meter,
+body.story-mode #ps-bubble-btn,
+body.story-mode #ps-bomb-btn,
+body.story-mode #ps-bow-btn,
+body.story-mode #ps-broom-btn,
+body.story-mode #ps-boost-btn,
+body.story-mode #bow-crosshair { display: none !important; }
+body.story-mode .town-feed { top: calc(64px + env(safe-area-inset-top, 0px)); }
+body.story-cut #action-buttons,
+body.story-cut #joystick-container,
+body.story-cut #jump-button,
+body.story-cut #gyro-button,
+body.story-cut #settings-button,
+body.story-cut .story-hud > :not(.story-fade):not(.town-talk) { visibility: hidden; }
+.story-fade {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+}

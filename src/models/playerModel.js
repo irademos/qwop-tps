@@ -73,7 +73,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const gyroLive = !!gyroQ && performance.now() - (playerGroup.userData.gyroArmTime || 0) < GYRO_ARM_MAX_AGE_MS;
     const armed = !!playerGroup.userData.foamSwordMode;
     const lantern = !!playerGroup.userData.lanternHeld;
-    rig.glbCharacter?.setArmIKHands(armed || options.climbing
+    // A held two-hand pose (userData.handPose = { left, right }, group-local points — Story's
+    // flute): both arms on the IK, the hands there (nothing in hand)
+    const handPose = !armed && !options.climbing ? playerGroup.userData.handPose : null;
+    rig.glbCharacter?.setArmIKHands(armed || options.climbing || handPose
       ? { left: true, right: true }
       : { left: gyroLive, right: lantern });
     if (lantern) {
@@ -96,6 +99,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         }
       }
       playerGroup.userData.foamSwordSupport = null;
+    } else if (handPose) {
+      for (const side of ['left', 'right']) {
+        if (handPose[side]) rig.floatingHands[side].position.lerp(handPose[side], 1 - Math.exp(-14 * dt));
+      }
     } else if (gyroLive) {
       _gyroArmDir.set(0, 0, 1).applyQuaternion(gyroQ);
       _fsHandTarget.set(
