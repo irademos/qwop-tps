@@ -71,7 +71,7 @@ const MORNING_H = 9;          // …up to here, then held
 // Sitting on the stone (the Sitting clip — glbCharacterConfig.sitClip — the arms on the flute)
 const HIPS_OVER_SEAT = 0.07;  // m the hips bone sits over the stone's top
 const SIT_HIPS_GUESS = 0.38;  // m: the hips over the feet before the clip's been measured
-const HEAD_STAND = { x: 0, y: 0.75, z: 0 }; // the Head bone standing (idle), × his height (player frame)
+const HEAD_STAND = { x: 0.02, y: 0.93, z: 0 }; // the Head bone standing (idle), × his height (player frame — measured on the village boy)
 const NOTE_EVERY_S = 0.6;     // ♪ off the flute
 const NOTE_LIFE_S = 1.8;
 const CROW_FROM_UP = 10;      // m up over the sea the Crow comes from

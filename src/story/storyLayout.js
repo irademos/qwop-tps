@@ -11,7 +11,7 @@
 //   frogMom   — the frog mom, sitting off to one side of the way up to it (or null)
 // ctx: { getMapObjects(bounds), waterDepth(x, z), getGroundY(x, z), canoeFits(x, z, yaw) }
 export const SEAT_RADIUS = 0.45;  // m: the stone he stands on…
-export const SEAT_TOP = 0.32;     // …and how high its top is over the sand
+export const SEAT_TOP = 0.24;     // …and how high its top is over the sand (sitting on it, his feet just off it)
 const CROW_FROM_DIST = 30;        // m out over the sea it flies in from
 const OPEN_SEA_REACH = 45;        // m of water straight out from the beach…
 const OPEN_SEA_SPREAD = 14;       // …and to either side of it a little way out (a river is narrower)
