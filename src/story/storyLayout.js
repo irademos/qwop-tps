@@ -6,12 +6,9 @@
 //   seat      — the stone he climbs onto (ours — the island's rocks are boulders)
 //   crowSpot  — where the Crow lands, beside the stone; crowFrom — where it flies in from
 //   mooring   — the (holed) canoe, off the beach to one side
-//   logs      — driftwood logs along the beach (cut with the sword for wood)
 //   tree      — the sacred tree (a tree creature hiding as one): inland, straight up the beach,
 //               among the island's trees
 // ctx: { getMapObjects(bounds), waterDepth(x, z), getGroundY(x, z), canoeFits(x, z, yaw) }
-import { LOG_COUNT } from './chapter1.js';
-
 export const SEAT_RADIUS = 0.45;  // m: the stone he stands on…
 export const SEAT_TOP = 0.32;     // …and how high its top is over the sand
 const CROW_FROM_DIST = 30;        // m out over the sea it flies in from
@@ -120,23 +117,6 @@ export function findStoryLayout(island, ctx) {
     }
   }
   mooring ??= { ...at(w.d + 3, 6 * side), yaw };
-  // Driftwood logs along the beach, either side, a little up from the water
-  const logs = [];
-  const tryLog = (d, s) => {
-    const p = at(d, s);
-    if (!dryAt(p) || logs.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < 3)) return false;
-    if (Math.hypot(p.x - seat.x, p.z - seat.z) < 2.5) return false;
-    // (lying along the shore, turned a little each)
-    const ends = [-1, 1].map((k) => ({ x: p.x + tan.x * k, z: p.z + tan.z * k }));
-    if (!ends.every(dryAt)) return false;
-    logs.push({ ...p, yaw: yaw + (logs.length - 1) * 0.5 });
-    return true;
-  };
-  for (const s of [-7 * side, 9 * side, -12 * side, 14 * side, -17 * side, 5 * side, 18 * side, -22 * side, 22 * side]) {
-    if (logs.length >= LOG_COUNT) break;
-    for (const d of [washD - 1.5, washD - 3, washD - 0.6, washD - 5]) if (tryLog(d, s)) break;
-  }
-  for (let s = -25; logs.length < LOG_COUNT && s <= 25; s += 2.5) tryLog(washD - 2, s);
   // The sacred tree: inland, straight up the beach, by one of the island's trees with others
   // round it — the creature stands beside it
   const inland = { x: -dir.x, z: -dir.z };
@@ -180,7 +160,7 @@ export function findStoryLayout(island, ctx) {
   tree ??= at(Math.max(rockR + 2, washD - 15));
   return {
     rock: { ...centre, radius: rockR },
-    seat, wash, seaYaw, dir, crowSpot, mooring, logs,
+    seat, wash, seaYaw, dir, crowSpot, mooring,
     tree: { ...tree, yaw: seaYaw },
     crowFrom: at(w.d + CROW_FROM_DIST, -12),
   };

@@ -1,5 +1,5 @@
 // Story mode's props: the stone he stands on, the rod leaning in the canoe, the canoe's hole,
-// the driftwood logs, a glint to catch the eye, the ♪ off the flute. Models only — storyMode.js
+// a glint to catch the eye, the ♪ off the flute. Models only — storyMode.js
 // decides when they're there.
 import * as THREE from 'three';
 import { createFishingRodModel } from '../items/fishingRod.js';
@@ -109,74 +109,6 @@ export function makeCanoeDamage() {
     g.add(sp);
   }
   return g;
-}
-
-// ── A driftwood log: a weathered trunk lying on the sand with a couple of stubs. Its origin
-// on the ground, along its local Z ──
-export const LOG_LENGTH = 1.9;
-export function makeLog() {
-  const g = new THREE.Group();
-  g.name = 'story-log';
-  const bark = new THREE.MeshStandardMaterial({ color: 0x9a8a72, roughness: 1, flatShading: true });
-  const end = new THREE.MeshStandardMaterial({ color: 0xcdb48c, roughness: 1, flatShading: true });
-  const r = 0.17;
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.85, r, LOG_LENGTH, 8, 1), [bark, end, end]);
-  body.rotation.x = Math.PI / 2;
-  body.position.y = r * 0.85;
-  body.castShadow = true;
-  body.receiveShadow = true;
-  g.add(body);
-  for (const [z, a] of [[0.35, 0.6], [-0.5, -0.9]]) {
-    const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.32, 5), bark);
-    stub.position.set(Math.sin(a) * r, r + Math.cos(a) * r * 0.6, z);
-    stub.rotation.z = -a;
-    stub.castShadow = true;
-    g.add(stub);
-  }
-  g.userData.radius = r;
-  return g;
-}
-// The log cut through: two halves falling apart, a few chips — the pieces fly / fade (updateCut)
-export function splitLog(log, scene) {
-  const pieces = [];
-  const r = log.userData.radius ?? 0.17;
-  const wood = new THREE.MeshStandardMaterial({ color: 0xcdb48c, roughness: 1, flatShading: true, transparent: true });
-  for (const s of [-1, 1]) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.9, r * 0.9, LOG_LENGTH / 2, 7), wood);
-    m.rotation.x = Math.PI / 2;
-    const p = new THREE.Group();
-    p.add(m);
-    p.position.copy(log.localToWorld(new THREE.Vector3(0, r * 0.85, s * LOG_LENGTH / 4)));
-    p.quaternion.copy(log.quaternion);
-    p.userData.v = log.localToWorld(new THREE.Vector3(s * 0.3, 0, s * 1.2)).sub(log.position).setY(1.4);
-    p.userData.spin = s * 3;
-    scene.add(p);
-    pieces.push(p);
-  }
-  for (let i = 0; i < 7; i++) {
-    const c = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.07), wood);
-    c.position.copy(log.position).setY(log.position.y + r);
-    c.userData.v = new THREE.Vector3((Math.random() - 0.5) * 3, 1.5 + Math.random() * 2, (Math.random() - 0.5) * 3);
-    c.userData.spin = (Math.random() - 0.5) * 12;
-    scene.add(c);
-    pieces.push(c);
-  }
-  return { pieces, t: 0, groundY: log.position.y, material: wood };
-}
-// (true when it's over)
-export function updateSplit(sp, dt) {
-  sp.t += dt;
-  for (const p of sp.pieces) {
-    p.userData.v.y -= 9.8 * dt;
-    p.position.addScaledVector(p.userData.v, dt);
-    if (p.position.y < sp.groundY + 0.03) { p.position.y = sp.groundY + 0.03; p.userData.v.multiplyScalar(0.3); p.userData.spin *= 0.5; }
-    p.rotation.y += p.userData.spin * dt;
-  }
-  sp.material.opacity = Math.max(0, 1 - Math.max(0, sp.t - 1) / 0.8);
-  if (sp.t < 1.8) return false;
-  for (const p of sp.pieces) { p.parent?.remove(p); p.traverse((m) => m.geometry?.dispose?.()); }
-  sp.material.dispose();
-  return true;
 }
 
 // ── ♪ off the flute ──

@@ -9,6 +9,8 @@
 // wrapper, its origin at the bottom of the model): posed where they stand (tilted / sunk /
 // scaled) and put back as they were on leaving Town (resetTrees). Shared town: a felling and a
 // split log go to everyone (`tree` op, the host passes it on); each game plays the rest itself.
+// Story mode reuses all of this on Tree Island's trees (storyMode.js — a stand-in `F` for `T`);
+// chopTipNear / chopNear chop without a swing (a Chop button when there's no gyro).
 import * as THREE from 'three';
 import { measureTrunk as measureTrunkOf } from '../environment/treeTrunks.js';
 import {
@@ -475,5 +477,34 @@ export function installTownTrees(T, ctx) {
     return true;
   };
 
-  Object.assign(T, { buildTrees, handleTreeNet, resetTrees, tryChop, updateTrees });
+  // ── Chopping without a swing (no gyro — a Chop button): the log or tree in reach in front of
+  // the player, as a point on it for tryChop (null: nothing in reach). chopNear() chops it. ──
+  const chopTipNear = () => {
+    if (!group) return null;
+    const p = T.playerPos();
+    let best = null;
+    for (const t of trees) {
+      for (const log of t.logs) {
+        const d = dist2(log.x, log.z, p.x, p.z);
+        if (d < 2.2 && (!best || d < best.d)) best = { d, tip: new THREE.Vector3(log.x, log.y, log.z) };
+      }
+      if (!t.object || (t.state !== 'standing' && t.state !== 'growing')) continue;
+      const d = dist2(t.bx, t.bz, p.x, p.z);
+      if (d > 3 || (best && d >= best.d)) continue;
+      measureTrunk(t);
+      // (the bark on the player's side, at chest height)
+      const dx = p.x - t.cx;
+      const dz = p.z - t.cz;
+      const l = Math.hypot(dx, dz) || 1;
+      if (l - t.r > 1.6) continue;
+      best = { d, tip: new THREE.Vector3(t.cx + (dx / l) * t.r, t.gy + 1, t.cz + (dz / l) * t.r) };
+    }
+    return best?.tip ?? null;
+  };
+  const chopNear = () => {
+    const tip = chopTipNear();
+    return tip ? tryChop(tip) : false;
+  };
+
+  Object.assign(T, { buildTrees, handleTreeNet, resetTrees, tryChop, updateTrees, chopTipNear, chopNear });
 }

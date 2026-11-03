@@ -3,13 +3,20 @@
 // (chapter1.js: the talks, choices, steps, quest tracker, acts, notes) — no story text lives
 // here. Pieces:
 //   storyLayout.js  — where everything goes, found on the island at run time
-//   storyProps.js   — the stone, the rod leaning in the canoe, the canoe's hole, driftwood logs…
+//   storyProps.js   — the stone, the rod leaning in the canoe, the canoe's hole…
 //   crow.js         — the Crow (a recurring character)
 //   treeCreature.js — the sacred tree: a tree creature hiding as a tree
 // This file: the cut scene, the talk (Town's subtitle talk box + text to speech), the actions a
-// talk can run (ACTIONS), the acts (buttons), fishing (Town's townFishing.js on a stand-in
-// state `F`, as the sea start does), the canoe (holed until mended with wood), the sword (from
-// the sacred tree — cuts the logs), saving / resuming.
+// talk can run (ACTIONS), the acts (buttons), the canoe (holed until mended with wood), the sword
+// (from the sacred tree), saving / resuming.
+//
+// REUSE TOWN MODE: Story builds on Town's systems wherever it can instead of writing its own —
+// they're installed on a small stand-in for Town's state `T` (`F` below: the bits of T a module
+// reads — simT, playerPos, goods / gain / bagRoom, feedLine, groundAt, net…), as the sea start
+// does. So far: fishing (townFishing.js), chopping trees for wood (townTrees.js — chopTipNear /
+// chopNear for the Chop button), the canoe (canoeBoat.js), the talk box + quest tracker
+// (townJobs.js), the HUD's classes (town-*), text to speech (speech.js). Something new for Story
+// that Town could use too goes in Town's module (made T-agnostic), not here.
 // UI: Town's (townMode.js / townJobs.js) — the top chip, the feed, the acts (bottom centre),
 // the goods pill (fish / wood), the quest tracker, the talk as a subtitle read out — and the
 // game's own weapon buttons (Rod / Sword / Hands; Oar / Rod in the canoe).
@@ -18,15 +25,13 @@ import * as THREE from 'three';
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { createCanoeBoat } from '../town/canoeBoat.js';
 import { installTownFishing } from '../town/townFishing.js';
-import { BAG_MAX, CANOE_BOARD_DIST, CANOE_SHORE_DIST, dist2, el } from '../town/townConfig.js';
+import { installTownTrees } from '../town/townTrees.js';
+import { BAG_MAX, CANOE_BOARD_DIST, CANOE_SHORE_DIST, STUMP_RE, TREE_RE, dist2, el } from '../town/townConfig.js';
 import { createFluteModel, disposeFluteModel, FLUTE_HAND_AT, FLUTE_LENGTH } from '../items/flute.js';
 import { createCrow } from './crow.js';
 import { createTreeCreature } from './treeCreature.js';
 import { findStoryLayout, SEAT_RADIUS, SEAT_TOP } from './storyLayout.js';
-import {
-  makeSeatStone, makeLeaningRod, makeCanoeDamage, makeLog, splitLog, updateSplit, makeNote,
-  pulseGlint, removeProp, LOG_LENGTH,
-} from './storyProps.js';
+import { makeSeatStone, makeLeaningRod, makeCanoeDamage, makeNote, pulseGlint, removeProp } from './storyProps.js';
 import {
   CHAPTER, STEPS, stepAtLeast, WOOD_NEEDED, CROW, TREE, VOICES, TALKS, NOTES, ACTS, BANNERS,
   FIX_CANOE_THEN, quest,
@@ -58,8 +63,7 @@ const TALK_DIST = 2.8;        // m from the Crow: Talk
 const TREE_TALK_DIST = 3.2;   // m from the sacred tree: Talk (once the Crow's told of it)
 const TREE_REVEAL_HOLD_S = 4; // s it keeps its arms down after its last line
 const ROD_PICK_DIST = CANOE_BOARD_DIST + 0.5; // m from the canoe's middle: Take the rod
-const LOG_ACT_DIST = 1.9;     // m from a log's middle: its act / the "too big" note
-const LOG_HIT_DIST = 0.5;     // m from the sword's tip to the log's axis: a swing cuts it
+const SACRED_GROVE_R = 7;     // m round the sacred tree: its friends — not choppable
 const CUT_FOV = 50;
 const SAVE_EVERY_S = 10;
 const ACT_CHECK_S = 0.2;
@@ -71,7 +75,7 @@ const BROKEN_LIST = 0.1;      // …and rad it lists over
 
 const fresh = () => ({
   v: STORY_SAVE_VERSION, at: 0, step: 'intro', hasRod: false, hasSword: false, fish: 0, wood: 0,
-  logsCut: [], canoeFixed: false, pos: null, canoe: null, inCanoe: false,
+  canoeFixed: false, pos: null, canoe: null, inCanoe: false,
 });
 // (an older save: chapter 1 used to end at the fish — 'done' then is the sacred tree now)
 const migrate = (saved) => {
@@ -88,6 +92,7 @@ export function createStoryMode(ctx) {
   let token = 0;               // a newer enter / exit wins over a load still going
   let S = fresh();             // the saved state
   let L = null;                // the layout on the island (storyLayout.js)
+  let islandDef = null;        // the island (MAPS.islandTown.islands entry)
   let simT = 0;
   let cut = null;              // the cut scene: { phase, t, … }
   let boat = null;
@@ -98,8 +103,7 @@ export function createStoryMode(ctx) {
   let fluteHeld = false;
   let rodProp = null;          // the rod leaning in the canoe
   let holeProp = null;         // the canoe's hole (until it's mended)
-  let logs = [];               // { i, x, z, yaw, prop } — the driftwood logs not yet cut
-  const splits = [];           // logs being cut apart
+  let treesGroup = null;       // Town's chopping (townTrees.js) on the island's trees
   let ending = null;           // game over: { t }
   let saveAt = 0;
   let actAt = 0;
@@ -113,7 +117,7 @@ export function createStoryMode(ctx) {
 
   // What the chapter's data sees (chapter1.js talks / quest)
   const view = () => ({
-    step: S.step, fish: F.goods.fish, wood: S.wood, hasRod: S.hasRod, hasSword: S.hasSword, canoeFixed: S.canoeFixed,
+    step: S.step, fish: F.goods.fish, wood: F.goods.wood, hasRod: S.hasRod, hasSword: S.hasSword, canoeFixed: S.canoeFixed,
   });
 
   // ── Sounds ──
@@ -130,6 +134,7 @@ export function createStoryMode(ctx) {
       v: STORY_SAVE_VERSION,
       at: Date.now(),
       fish: F.goods.fish,
+      wood: F.goods.wood,
       pos: !cut && !aboard && p ? { x: +p.x.toFixed(2), z: +p.z.toFixed(2), yaw: +yaw.toFixed(3) } : S.pos,
       canoe: boat ? { x: +boat.x.toFixed(2), z: +boat.z.toFixed(2), yaw: +boat.yaw.toFixed(3) } : S.canoe,
       inCanoe: aboard,
@@ -419,12 +424,11 @@ export function createStoryMode(ctx) {
   };
   const mendCanoe = () => {
     if (S.canoeFixed) return;
-    if (S.wood < WOOD_NEEDED) {
+    if (F.goods.wood < WOOD_NEEDED) {
       note(NOTES.canoeBroken);
-      if (!S.hasSword) noteOnce('logTooBig');
       return;
     }
-    S.wood -= WOOD_NEEDED;
+    F.goods.wood -= WOOD_NEEDED;
     S.canoeFixed = true;
     holeProp = removeProp(holeProp);
     ctx.playSfx?.('chop', groundAt(boat));
@@ -433,53 +437,33 @@ export function createStoryMode(ctx) {
     save();
   };
 
-  // ── The driftwood logs: the sword cuts each into wood ──
-  const placeLogs = () => {
-    clearLogs();
-    L.logs.forEach((p, i) => {
-      if (S.logsCut.includes(i)) return;
-      const prop = makeLog();
-      const g = groundAt(p);
-      prop.position.set(g.x, g.y - 0.03, g.z);
-      prop.rotation.y = p.yaw;
-      ctx.scene.add(prop);
-      logs.push({ i, x: p.x, z: p.z, yaw: p.yaw, prop });
-    });
+  // ── Chopping trees: Town's (townTrees.js) on the island's trees — not the sacred tree's
+  // friends round it. A sword swing (the game's phone-sword loop) or the Chop button ──
+  const buildTrees = () => {
+    clearTrees();
+    const r = (islandDef?.radius ?? 135) + 30;
+    const at = islandDef?.at ?? { x: L.wash.x, z: L.wash.z };
+    const objs = ctx.getMapObjects({ minX: at.x - r, maxX: at.x + r, minZ: at.z - r, maxZ: at.z + r });
+    const list = objs
+      .filter((o) => TREE_RE.test(o.file) && !STUMP_RE.test(o.file) && dist2(o.x, o.z, L.tree.x, L.tree.z) > SACRED_GROVE_R)
+      .map((o) => ({ x: o.x, z: o.z, id: o.id, object: o.object }));
+    const stump = objs.find((o) => STUMP_RE.test(o.file))
+      ?? ctx.getMapObjects({ minX: -1e5, maxX: 1e5, minZ: -1e5, maxZ: 1e5 }).find((o) => STUMP_RE.test(o.file));
+    treesGroup = new THREE.Group();
+    treesGroup.name = 'story-trees';
+    ctx.scene.add(treesGroup);
+    F.buildTrees(treesGroup, list, stump?.object ?? null);
   };
-  const clearLogs = () => {
-    for (const l of logs) removeProp(l.prop);
-    logs = [];
+  const clearTrees = () => {
+    if (!treesGroup) return;
+    F.resetTrees();
+    treesGroup.parent?.remove(treesGroup);
+    treesGroup = null;
   };
-  const cutLog = (log) => {
-    if (!logs.includes(log)) return;
-    logs = logs.filter((l) => l !== log);
-    S.logsCut.push(log.i);
-    S.wood += 1;
-    splits.push(splitLog(log.prop, ctx.scene));
-    ctx.playSfx?.('chop', log.prop.position);
-    removeProp(log.prop);
-    note(NOTES.gotWood(S.wood));
-    renderGoods();
-    save();
-    actAt = 0;
-  };
-  // A sword swing (the game's phone-sword loop, a fast enough swing): through a log → cut
-  const _a = new THREE.Vector3();
-  const _b = new THREE.Vector3();
-  const _seg = new THREE.Line3();
-  const _closest = new THREE.Vector3();
+  const canChop = () => S.hasSword && !cut && !talk && !aboard;
   const trySwordHit = (tip) => {
-    if (!active || !S.hasSword || held !== 'sword' || cut || talk) return false;
-    for (const l of logs) {
-      const r = l.prop.userData.radius ?? 0.17;
-      const y = l.prop.position.y + r;
-      const dx = Math.sin(l.yaw) * LOG_LENGTH / 2;
-      const dz = Math.cos(l.yaw) * LOG_LENGTH / 2;
-      _seg.set(_a.set(l.prop.position.x - dx, y, l.prop.position.z - dz), _b.set(l.prop.position.x + dx, y, l.prop.position.z + dz));
-      _seg.closestPointToPoint(tip, true, _closest);
-      if (_closest.distanceTo(tip) < LOG_HIT_DIST + r) { cutLog(l); return true; }
-    }
-    return false;
+    if (!active || !treesGroup || held !== 'sword' || !canChop()) return false;
+    return F.tryChop(tip);
   };
 
   // ── The sacred tree (the tree creature hiding as one) ──
@@ -496,23 +480,25 @@ export function createStoryMode(ctx) {
     fishing: null,
     sequence: null,
     jail: null,
-    goods: { fish: 0 },
+    goods: { fish: 0, wood: 0 },
+    ready: true,
+    net: null,
+    netMode: 'off',
+    groundAt: (x, z, fallback = 0) => { const y = ctx.getGroundY(x, z); return Number.isFinite(y) ? y : fallback; },
     fishAnywhere: () => active && held === 'rod' && !cut,
     fishWater: (x, z) => isWater(x, z),
     layout: { places: { fishSpot: null }, nav: { indexAt: (x, z) => ({ x, z }), isWater: (p) => isWater(p.x, p.z) } },
     playerPos: () => ctx.getPlayerModel().position,
     feedLine: (text) => note(text),
-    bagRoom: () => Math.max(0, BAG_MAX - F.goods.fish),
+    bagRoom: () => Math.max(0, BAG_MAX - F.goods.fish - F.goods.wood),
     bagFullNote: () => note(NOTES.bagFull(BAG_MAX)),
     gain: (g, n = 1) => {
       const got = Math.min(n, F.bagRoom());
       if (got < n) F.bagFullNote();
       F.goods[g] = (F.goods[g] ?? 0) + got;
       renderGoods();
-      if (got > 0 && g === 'fish') {
-        if (S.step === 'fish') note(NOTES.fishCaught);
-        save();
-      }
+      if (got > 0 && g === 'fish' && S.step === 'fish') note(NOTES.fishCaught);
+      if (got > 0) save();
       return got;
     },
     introNote: () => {},
@@ -526,9 +512,9 @@ export function createStoryMode(ctx) {
   const renderGoods = () => {
     fishEl.textContent = `🐟 ${F.goods.fish}`;
     fishEl.classList.toggle('hidden', !F.goods.fish && !S.hasRod);
-    woodEl.textContent = `🪵 ${S.wood}`;
-    woodEl.classList.toggle('hidden', !S.wood);
-    goodsEl.classList.toggle('hidden', !F.goods.fish && !S.hasRod && !S.wood);
+    woodEl.textContent = `🪵 ${F.goods.wood}`;
+    woodEl.classList.toggle('hidden', !F.goods.wood);
+    goodsEl.classList.toggle('hidden', !F.goods.fish && !S.hasRod && !F.goods.wood);
     tracker.render(quest(view()));
   };
   installTownFishing(F, {
@@ -544,6 +530,7 @@ export function createStoryMode(ctx) {
     isPhoneConnected: ctx.isPhoneConnected,
     refreshPhone: ctx.refreshPhone,
   });
+  installTownTrees(F, { playSfx: (kind, at) => ctx.playSfx?.(kind, at), getWaterY: ctx.getWaterY });
   const stopFishing = () => {
     F.fishing = null;
     F.stopFishingRig();
@@ -695,18 +682,10 @@ export function createStoryMode(ctx) {
           else if (stepAtLeast(S.step, 'fish')) near.push({ d, key: 'fix', label: ACTS.fix, run: mendCanoe });
         }
       }
-      // (a log: no sword — too big to carry; with it, swing at it (a gyro) or Cut the log)
-      let log = null;
-      for (const l of logs) {
-        const d = within(l.x, l.z, LOG_ACT_DIST);
-        if (d != null && (!log || d < log.d)) log = { d, l };
-      }
-      if (log) {
-        if (!S.hasSword) noteOnce('logTooBig');
-        else {
-          if (held === 'sword' && ctx.hasGyro()) noteOnce('logSwing');
-          near.push({ d: log.d, key: 'chop', label: ACTS.chop, run: () => { if (held !== 'sword') pick('sword'); cutLog(log.l); } });
-        }
+      // (a tree / log in reach, the sword given: Chop — Town's chopping; with a gyro, swing at it)
+      if (canChop() && treesGroup && F.chopTipNear()) {
+        if (ctx.hasGyro()) noteOnce('chopSwing');
+        near.push({ d: 1.5, key: 'chop', label: ACTS.chop, run: () => { if (held !== 'sword') pick('sword'); F.chopNear(); } });
       }
       near.sort((a, b) => a.d - b.d);
       out.push(...near.slice(0, 2));
@@ -934,12 +913,13 @@ export function createStoryMode(ctx) {
   // ── Lifecycle ──
   const placeWorld = () => {
     setupBoat();
-    placeLogs();
+    buildTrees();
     placeTree();
   };
   const restart = () => {
     S = fresh();
     F.goods.fish = 0;
+    F.goods.wood = 0;
     renderGoods();
     placeWorld();
     save();
@@ -948,6 +928,7 @@ export function createStoryMode(ctx) {
   // Put the player back where the save left them
   const resume = () => {
     F.goods.fish = S.fish || 0;
+    F.goods.wood = S.wood || 0;
     renderGoods();
     placeCrow();
     if (S.inCanoe && boat && S.canoeFixed) {
@@ -991,7 +972,8 @@ export function createStoryMode(ctx) {
       setFade(0);
       return;
     }
-    L = layout(island.def);
+    islandDef = island.def;
+    L = layout(islandDef);
     if (!L) {
       note(NOTES.noShore);
       setFade(0);
@@ -1033,8 +1015,7 @@ export function createStoryMode(ctx) {
     crow.hide();
     tree.hide();
     clearNotes();
-    clearLogs();
-    while (splits.length) { const sp = splits.pop(); sp.t = 99; updateSplit(sp, 0); }
+    clearTrees();
     removeSeat();
     disposeBoat();
     feed.replaceChildren();
@@ -1056,7 +1037,7 @@ export function createStoryMode(ctx) {
     tree.update(dt);
     updateFlute(dt);
     updateEnding(dt);
-    for (let i = splits.length - 1; i >= 0; i--) if (updateSplit(splits[i], dt)) splits.splice(i, 1);
+    if (treesGroup) F.updateTrees(dt);
     if (rodProp) pulseGlint(rodProp, simT);
     if (boat) {
       const yawBefore = boat.yaw;
@@ -1127,14 +1108,14 @@ export function createStoryMode(ctx) {
     },
     fishingHud: () => (active ? F.fishingHud() : null),
     debug: () => ({
-      S, L, F, boat, cut, crow, tree, aboard, held, logs, acts,
+      S, L, F, boat, cut, crow, tree, aboard, held, acts,
       skipCut: () => { if (cut && cut.phase !== 'talk') { cut.t = 999; } },
       // (jump ahead: set the step and what goes with it)
       give: ({ rod, sword, fish, wood } = {}) => {
         if (rod) S.hasRod = true;
         if (sword) S.hasSword = true;
         if (fish) F.goods.fish += fish;
-        if (wood) S.wood += wood;
+        if (wood) F.goods.wood += wood;
         if (rod) rodProp = removeProp(rodProp);
         ctx.refreshButtons();
         renderGoods();

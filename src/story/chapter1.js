@@ -10,7 +10,7 @@
 //           holed — WOOD_NEEDED wood mends it), fish from the shore
 //   tree  → the fish to the Crow: it tells of the sacred tree somewhere on the island that can help
 //   wood  → the sacred tree (a tree creature, arms up, leaves all over — hiding as a tree) gives the
-//           player a sword: cut the driftwood logs on the beach for wood
+//           player a sword: chop down trees for wood (Town's chopping — townTrees.js)
 //   done  → the canoe mended → "To be continued…"
 //
 // Talks: talks[who][key] is { lines, choices?, then? } or a function of the state view
@@ -28,8 +28,7 @@ export const CHAPTER = { id: 1, title: 'Washed Up', place: 'Tree Island', island
 export const STEPS = ['intro', 'crow', 'fish', 'tree', 'wood', 'done'];
 export const stepAtLeast = (step, than) => STEPS.indexOf(step) >= STEPS.indexOf(than);
 
-export const WOOD_NEEDED = 3;   // to mend the canoe
-export const LOG_COUNT = 3;     // driftwood logs on the beach, one wood each
+export const WOOD_NEEDED = 3;   // to mend the canoe (a felled tree's logs: one wood each)
 
 export const CROW = 'Crow';
 export const TREE = 'Sacred Tree';
@@ -83,7 +82,7 @@ export const TALKS = {
     wood: (v) => ({
       lines: v.wood >= WOOD_NEEDED
         ? [[CROW, "That's wood enough. Mend that canoe of yours. Caw!"]]
-        : [[CROW, 'A sword! The old tree likes you. Caw!'], [CROW, 'There are dead logs washed up along the beach. Cut them up and mend that canoe.']],
+        : [[CROW, 'A sword! The old tree likes you. Caw!'], [CROW, 'Plenty of trees on Tree Island. Chop one down, split the logs and mend that canoe.']],
     }),
     done: { lines: [[CROW, 'Caw! A canoe that floats. Where will you go, boy? More next time.']], then: ['endChapter'] },
   },
@@ -95,14 +94,15 @@ export const TALKS = {
         [TREE, 'Few do. I am the tree the Crow spoke of. They call me sacred. Mostly I am tired.'],
         [TREE, 'Washed up with a flute and nothing more, I see. This island is not kind to the empty-handed.'],
         [TREE, 'Take this. It was left here long ago, by another who washed up on these shores.'],
-        [TREE, 'Cut the dead logs on the beach with it. Three pieces of wood will mend that canoe.'],
+        [TREE, 'Fell a tree or two with it and split the logs. Three pieces of wood will mend that canoe.'],
+        [TREE, 'Not me, mind. Nor my friends here.'],
       ],
       choices: [{ label: 'Thank you', then: ['giveSword', 'step:wood', 'note:gotSword'] }],
     },
     wood: (v) => ({
       lines: v.wood >= WOOD_NEEDED
         ? [[TREE, 'Enough wood, little one. Go and mend your canoe.']]
-        : [[TREE, `The logs on the beach, little one. ${WOOD_NEEDED} pieces of wood.`], [TREE, 'Now let an old tree rest.']],
+        : [[TREE, `Fell a tree — not one of us — and split the logs. ${WOOD_NEEDED} pieces of wood.`], [TREE, 'Now let an old tree rest.']],
     }),
     done: { lines: [[TREE, 'Hrrm. The sea is wide, little one. Go carefully.']] },
   },
@@ -117,9 +117,7 @@ export const NOTES = {
   findTree: 'Find the sacred tree: up the beach, into the trees.',
   gotSword: 'The sacred tree gave you a sword.',
   canoeBroken: `The canoe is holed through. It needs ${WOOD_NEEDED} wood to mend.`,
-  logTooBig: "A dead log. Too big to carry — you'd need something to cut it with.",
-  logSwing: 'Swing your sword at the log to cut it.',
-  gotWood: (n) => `+1 wood (${n}/${WOOD_NEEDED})`,
+  chopSwing: 'Swing your sword at a tree to chop it down, then at its logs.',
   canoeFixed: 'You mended the canoe.',
   bagFull: (max) => `You can't carry any more fish (${max}).`,
   noIsland: 'Tree Island failed to load.',
@@ -134,7 +132,7 @@ export const ACTS = {
   fix: 'Mend the canoe',
   canoe: 'Get in the canoe',
   out: 'Get out',
-  chop: 'Cut the log',
+  chop: 'Chop',
   lobby: 'Back to Lobby',
 };
 
@@ -158,7 +156,7 @@ export const quest = (v) => {
   } else if (v.step === 'wood') {
     out.push(v.wood >= WOOD_NEEDED
       ? { icon: '📍', title: 'Mend the canoe', progress: 'Take the wood to the canoe' }
-      : { icon: '📍', title: 'Mend the canoe', progress: `Cut logs on the beach (${v.wood}/${WOOD_NEEDED} wood)` });
+      : { icon: '📍', title: 'Mend the canoe', progress: `Chop a tree for wood (${v.wood}/${WOOD_NEEDED})` });
   }
   return out;
 };

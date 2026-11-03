@@ -9310,6 +9310,15 @@ async function initCore(runtimeContext) {
     clearTimeout(_psWinHideTimer);
     _psWinHideTimer = setTimeout(() => _psWinOverlay.classList.add('hidden'), ms);
   };
+  // Town's sound effects (also Story's — it reuses Town's chopping, fishing…)
+  const _townSfx = (kind, at = null) => {
+    if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: at ? 'town-hit' : 'psw-hit', cooldownMs: 200, at });
+    else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 300, at });
+    else if (kind === 'fell') { // (a tree hitting the ground: a low boom under a thump)
+      audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.12, { cooldownKey: 'town-fell', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
+      audioManager?.playSFX('SFX/Footsteps/Dirt/Dirt Walk 1.ogg', 0.9, { cooldownKey: 'town-fell-thud', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
+    } else if (kind === 'unsheath') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.5);
+  };
   town = createTownMode({
     net: townNet,
     scene,
@@ -9438,14 +9447,7 @@ async function initCore(runtimeContext) {
     },
     spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
     // (`at`: where it happened — quieter further off, audioManager's distance falloff; none = the player's own)
-    playSfx: (kind, at = null) => { // (no coin sound: the coin pop-up shows)
-      if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: at ? 'town-hit' : 'psw-hit', cooldownMs: 200, at });
-      else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 300, at });
-      else if (kind === 'fell') { // (a tree hitting the ground: a low boom under a thump)
-        audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.12, { cooldownKey: 'town-fell', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
-        audioManager?.playSFX('SFX/Footsteps/Dirt/Dirt Walk 1.ogg', 0.9, { cooldownKey: 'town-fell-thud', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
-      }
-    },
+    playSfx: (kind, at = null) => _townSfx(kind, at), // (no coin sound: the coin pop-up shows)
     dropCoins: (pos, n) => {
       for (let i = 0; i < n; i++) {
         spawnCoinPickup(pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0, (Math.random() - 0.5) * 1.2)));
@@ -9716,11 +9718,8 @@ async function initCore(runtimeContext) {
     // What's in hand: 'rod' | 'oar' | 'sword' | null (the game's weapon buttons / the phone change it too)
     heldKind: () => (isRodEquipped() ? 'rod' : isOarEquipped() ? 'oar'
       : _heldWeaponId() === FOAM_SWORD_ITEM_ID ? 'sword' : null),
-    // Sound effects: 'chop' (a log cut, the canoe mended) / 'unsheath' (the sword handed over)
-    playSfx: (kind, at = null) => {
-      if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.3, { cooldownKey: 'story-chop', cooldownMs: 200, at });
-      else if (kind === 'unsheath') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.5);
-    },
+    // Sound effects: Town's ('chop' / 'fell' — Town's tree chopping —, 'unsheath' the sword handed over)
+    playSfx: (kind, at = null) => _townSfx(kind, at),
     // The player's voice (text to speech) — as Town's: by name and character
     getPlayerName: () => playerName,
     playerVoiceKind: () => (playerModel?.userData?.qwopRig?.characterUrl === glbCharacterConfig.villageGirlUrl ? 'female' : 'male'),
@@ -10404,7 +10403,7 @@ async function initCore(runtimeContext) {
           : new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
         if (town.trySwordHit(_tipWorld, _townSwingDir)) _swingHitOccurred = true;
       }
-      // Story: a swing through a driftwood log cuts it (wood for the canoe)
+      // Story: a swing at a tree / log chops it (Town's townTrees.js — wood for the canoe)
       if (!_wandOut && !playerDead && story?.isActive() && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld
         && _tipWorld.distanceTo(_psw.prevTipWorld) > (window.phoneSwordSwingCfg?.minSweepDist ?? 0.015)
         && (window._pswDebugSpeed ?? 0) >= (window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000)) {
