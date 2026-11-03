@@ -1914,7 +1914,8 @@ async function initCore(runtimeContext) {
   //                   — one with a deck can sail (open roam's ⛵ Explore the Seas, _voyage*)
   //   islands (mappacks with a sea): other islands out on this map's sea, in the same world —
   //                   mappacks loaded on the way there (see "Islands out at sea" below), at
-  //                   `at` (world, the pack's centre), the map's own `scale`; `radius` = how far
+  //                   `at` (world, the pack's centre), turned by `yaw` (rad, three.js rotation.y
+  //                   about `at`), the map's own `scale`; `radius` = how far
   //                   its land reaches from `at` (m); `noGround` as the map's. `home` = this
   //                   map's own island the same way (its name on the pin, where its land is)
   const MAPS = {
@@ -1940,10 +1941,12 @@ async function initCore(runtimeContext) {
         styleReference: { lum: 0.322, lumStd: 0.151, sat: 0.234 },
       },
       home: { name: 'Brindlewick', at: { x: 0, z: 0 }, radius: 150 },
-      // Tree Island: south-west, out past the fishing spot (≈ 260 m of sea from its shore)
+      // Tree Island: south-west, out past the fishing spot (≈ 260 m of sea from its shore),
+      // turned so its river's east mouth (pack ≈ (87.5, 20.3)) faces the town's piers
+      // (the docks ≈ (−74, −99)) — the canoe paddles straight across into the river
       islands: [{
         key: 'treeIsland', name: 'Tree Island', url: '/mappacks/tree_island.mappack',
-        at: { x: -360, z: -360 }, radius: 135, noGround: /tree/i,
+        at: { x: -360, z: -360 }, yaw: -0.513, radius: 135, noGround: /tree/i,
       }],
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
@@ -2338,6 +2341,8 @@ async function initCore(runtimeContext) {
     group.userData.island = def.key;
     // (inside the map's group, which is scaled by `s`: pack units there)
     group.position.set(def.at.x / s, 0, def.at.z / s);
+    const yaw = def.yaw ?? 0;
+    group.rotation.y = yaw;
     const objects = group.getObjectByName('objects');
     if (objects) stylizeObject(objects);
     group.traverse((obj) => { if (obj.isMesh) { obj.receiveShadow = true; obj.castShadow = false; } });
@@ -2345,17 +2350,21 @@ async function initCore(runtimeContext) {
     loaded.group.updateMatrixWorld(true);
     const { meshes, groundMeshes } = _collectMapMeshes(group, def.noGround);
     const info = group.userData.water;
-    const local = (v, c) => (v - c) / s;
+    // (world → the pack's own units: back round `yaw`, un-scaled)
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    const lx = (x, z) => ((x - def.at.x) * cy - (z - def.at.z) * sy) / s;
+    const lz = (x, z) => ((x - def.at.x) * sy + (z - def.at.z) * cy) / s;
     const water = info
       ? (x, z) => {
-        const level = sampleMapWaterLevel(info, local(x, def.at.x), local(z, def.at.z));
+        const level = sampleMapWaterLevel(info, lx(x, z), lz(x, z));
         return level == null ? null : level * s;
       }
       : () => null;
     // (its terrain's square, world: there its own water data answers)
     const covers = info
-      ? (x, z) => Math.abs(local(x, def.at.x) - info.centerX) <= info.worldWidth / 2
-        && Math.abs(local(z, def.at.z) - info.centerZ) <= info.worldDepth / 2
+      ? (x, z) => Math.abs(lx(x, z) - info.centerX) <= info.worldWidth / 2
+        && Math.abs(lz(x, z) - info.centerZ) <= info.worldDepth / 2
       : () => false;
     return { def, group, meshes, groundMeshes, water, covers, trunks: null, land: _landParts(group), drawn: true };
   }
