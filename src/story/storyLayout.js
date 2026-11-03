@@ -8,6 +8,7 @@
 //   mooring   — the (holed) canoe, off the beach to one side
 //   tree      — the sacred tree (a tree creature hiding as one): inland, straight up the beach,
 //               among the island's trees
+//   frogMom   — the frog mom, sitting off to one side of the way up to it (or null)
 // ctx: { getMapObjects(bounds), waterDepth(x, z), getGroundY(x, z), canoeFits(x, z, yaw) }
 export const SEAT_RADIUS = 0.45;  // m: the stone he stands on…
 export const SEAT_TOP = 0.32;     // …and how high its top is over the sand
@@ -158,10 +159,26 @@ export function findStoryLayout(island, ctx) {
     }
   }
   tree ??= at(Math.max(rockR + 2, washD - 15));
+  // The frog mom: sitting off to one side of the way up to the sacred tree, a little under
+  // halfway there, facing the way (frogMom.js)
+  let frogMom = null;
+  const near = trees.filter((q) => Math.hypot(q.x - wash.x, q.z - wash.z) < TREE_IN_MAX + 20);
+  for (const f of [0.45, 0.35, 0.55, 0.25, 0.65]) {
+    const m = { x: wash.x + (tree.x - wash.x) * f, z: wash.z + (tree.z - wash.z) * f };
+    for (const s of [5, -5, 7, -7, 3.5, -3.5, 9, -9]) {
+      const p = { x: m.x + tan.x * s, z: m.z + tan.z * s };
+      if (free(p, near) && dry(p.x - tan.x * 0.6, p.z - tan.z * 0.6) && dry(p.x + tan.x * 0.6, p.z + tan.z * 0.6)) {
+        frogMom = { ...p, yaw: Math.atan2(m.x - p.x, m.z - p.z) };
+        break;
+      }
+    }
+    if (frogMom) break;
+  }
   return {
     rock: { ...centre, radius: rockR },
     seat, wash, seaYaw, dir, crowSpot, mooring,
     tree: { ...tree, yaw: seaYaw },
+    frogMom,
     crowFrom: at(w.d + CROW_FROM_DIST, -12),
   };
 }

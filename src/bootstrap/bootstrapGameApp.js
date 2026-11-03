@@ -8047,8 +8047,8 @@ async function initCore(runtimeContext) {
   };
 
   const updateRoadLightsNearPlayer = () => {
-    // (none in Town: the player's lantern lights the way there)
-    if (!scene || !playerModel?.position || !isNightDisplayMode() || town?.isActive()) {
+    // (none in Town: the player's lantern lights the way there; none in Story — its night is the cut scene's)
+    if (!scene || !playerModel?.position || !isNightDisplayMode() || town?.isActive() || story?.isActive()) {
       clearRoadLightPool();
       return;
     }
@@ -9727,6 +9727,20 @@ async function initCore(runtimeContext) {
     showBanner: (title, sub, ms) => _showWorldBanner(title, sub, ms),
     lieDown: () => playerModel?.userData?.qwopRig?.glbCharacter?.playDeath?.(),
     standUp: () => playerModel?.userData?.qwopRig?.glbCharacter?.revive?.(),
+    // Sitting (on the stone, playing the flute): the Sitting clip, the arms left on the IK
+    sit: (on) => {
+      const g = playerModel?.userData?.qwopRig?.glbCharacter;
+      if (on) g?.playPose?.(glbCharacterConfig.sitClip, { armIK: true });
+      else g?.endPose?.();
+    },
+    // The sky: Town's sun (the cut scene's night, then the sunrise) — as the town ctx's
+    setSunHour,
+    setTimeOfDay: (mode) => {
+      lastAutoMode = mode;
+      applyPresetForMode(mode);
+      applyDisplaySettings();
+      if (mode === 'day') clearRoadLightPool();
+    },
     // A sound file (a missing one is just silent): the element, to stop it
     playSound: (url, { volume = 1, loop = false } = {}) => {
       try {
