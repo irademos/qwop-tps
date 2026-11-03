@@ -175,6 +175,7 @@ src/
 
 ## What NOT to Do
 
+- Don't debug big dark-blue / grey triangles across the sky in headless Chromium screenshots: it's the SwiftShader renderer drawing the skybox, not the game (see CLAUDE.md → Headless browser testing, which also has the build / get-into-Town recipe).
 - Don't bypass `appContext` with `window.*` globals in new code
 - Don't import heavy modules at top level — use the facade pattern (`src/features/`)
 - Don't modify `public/service-worker.js` cache list without bumping the cache version

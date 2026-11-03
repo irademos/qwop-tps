@@ -392,3 +392,10 @@ npm run build        # Production build → dist/
 Vite splits vendor chunks: `vendor-three`, `vendor-rapier`, `vendor-firebase`.
 
 PWA service worker is at `public/service-worker.js` — update cache version when adding new static assets.
+
+### Headless browser testing (Playwright / the pre-installed Chromium)
+
+- **Known artifact — ignore it:** in headless Chromium (SwiftShader software GL) the skybox renders as big flat **dark-blue and grey triangles** across the sky when the camera faces some directions. It happens with every scene object hidden and at the island's spawn too, so it is the headless renderer, not the map, a mesh or your change. Don't debug it.
+- **Build without a `.env`:** Firebase throws at boot without a database URL. Build with fake values and serve `dist/` statically: `VITE_FIREBASE_DATABASE_URL=https://fake-test-default-rtdb.firebaseio.com VITE_FIREBASE_PROJECT_ID=fake-test VITE_FIREBASE_API_KEY=x VITE_FIREBASE_APP_ID=1:1:web:1 npx vite build --outDir <scratch>/dist`, then `python3 -m http.server 4173 -d <scratch>/dist`. Network errors (Firebase, PeerJS CDN) in the console are expected; Town falls back to "just you". Launch with `--use-gl=swiftshader --enable-unsafe-swiftshader`.
+- **Getting into Town:** the page opens as a guest on the sea start (`window.seaStart.isActive()`). Set `seaStart.debug().boat` to `x = -71, z = -102` (by the fishing spot) until `seaStart.interactLabel() === 'Get out'`, then `seaStart.interact()`; wait for `town.isActive() && town.debug().T.ready`. Then `town.debug().ctx.teleport(x, z, yaw)` moves the player, `town.debug().T.acts` lists the interact buttons (`a.onClick()`), and `window.playerControls.yaw` turns the camera (set it every frame for a while — other code resets it).
+- Software rendering is slow: loads that take a second on a GPU (a mappack, a big GLB) can take 20–30 s, so wait on a condition, not a fixed sleep.
