@@ -809,7 +809,10 @@ export class PlayerControls {
     const hasSword = appState?.ownsSword?.() ?? true;
     // (in Town's canoe: just the oar, and the rod to fish from it)
     const inCanoe = !!appState?.isInCanoe?.();
-    const weapons = inCanoe ? (hasRod ? [{ id: 'canoe_oar', label: 'Oar' }, { id: 'fishing_rod', label: 'Rod' }] : []) : [
+    // (Story: just the rod once found — nothing from Showdown)
+    const story = !!appState?.isStoryMode?.();
+    const weapons = inCanoe ? (hasRod ? [{ id: 'canoe_oar', label: 'Oar' }, { id: 'fishing_rod', label: 'Rod' }] : [])
+      : story ? (hasRod ? [{ id: 'fishing_rod', label: 'Rod' }] : []) : [
       ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
       ...(hasWand ? [{ id: 'magic_wand', label: 'Wand' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),

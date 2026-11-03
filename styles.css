@@ -5030,132 +5030,34 @@ body.sea-start.sea-steer > #joystick-container { display: block !important; }
 }
 
 /* ── Story mode (src/story/storyMode.js): one player, on Tree Island ─────────────
-   Its own HUD (#story-hud): Lobby top left, one act button (Talk to the Crow, Pick up the rod,
-   Get in the canoe…), Rod / Hands (Rod / Oar in the canoe), the catch, notes, the talk box (the
-   village's), banners (GAME OVER / To be continued…) and the cut scenes' black. The rest of the
-   page is hidden but ⚙️, the joystick (walking on touch screens — not in a cut scene) and the
-   phone QR / calibration popups. */
-body.story-mode > :not(#game-container):not(#story-hud):not(#update-banner):not(#settings-button):not(#settings-overlay):not(#joystick-container):not(#phone-sword-qr-modal):not(#phone-sword-connect-calib):not(#phone-sword-calib-modal) { display: none !important; }
-body.story-mode.story-cut > #joystick-container,
-body.story-mode.story-cut > #settings-button { visibility: hidden; }
-.story-hud {
-  position: fixed;
-  inset: 0;
-  z-index: 900;
-  pointer-events: none;
-  font-family: var(--font-ui);
-  color: var(--text);
-}
-.story-hud > * { pointer-events: auto; }
-.story-hud .hidden { display: none; }
+   Town's UI (.town-hud on #story-hud: the top chip, the feed, the acts, the goods pill, the quest
+   tracker, the talk subtitle) and the game's own controls (joystick, jump, the weapon buttons —
+   Rod / Hands, Oar / Rod in the canoe). What's Showdown's is hidden; in a cut scene
+   (body.story-cut) the controls and Town's HUD are too, under the black (.story-fade). */
+body.story-mode #player-info,
+body.story-mode #xp-bar,
+body.story-mode #health-display,
+body.story-mode #shield-health-display,
+body.story-mode #ammo-display,
+body.story-mode #coin-popup,
+body.story-mode #ps-kill-counter,
+body.story-mode #combo-meter,
+body.story-mode #ps-bubble-btn,
+body.story-mode #ps-bomb-btn,
+body.story-mode #ps-bow-btn,
+body.story-mode #ps-broom-btn,
+body.story-mode #ps-boost-btn,
+body.story-mode #bow-crosshair { display: none !important; }
+body.story-mode .town-feed { top: calc(64px + env(safe-area-inset-top, 0px)); }
+body.story-cut #action-buttons,
+body.story-cut #joystick-container,
+body.story-cut #jump-button,
+body.story-cut #gyro-button,
+body.story-cut #settings-button,
+body.story-cut .story-hud > :not(.story-fade):not(.town-talk) { visibility: hidden; }
 .story-fade {
   position: absolute;
   inset: 0;
   background: #000;
   pointer-events: none;
 }
-.story-lobby {
-  position: absolute;
-  top: calc(10px + env(safe-area-inset-top, 0px));
-  left: calc(12px + env(safe-area-inset-left, 0px));
-  min-height: 44px;
-  padding: 0 16px;
-  font-size: 15px;
-  font-weight: 700;
-  background: var(--surface-strong);
-  border-color: var(--border-strong);
-}
-body.story-cut .story-lobby { visibility: hidden; }
-.story-tools {
-  position: absolute;
-  right: calc(14px + env(safe-area-inset-right, 0px));
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-  display: flex;
-  gap: 10px;
-}
-.story-tool {
-  min-width: 96px;
-  min-height: 50px;
-  font-size: 16px;
-  font-weight: 700;
-}
-.story-tool.is-active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-ring);
-  color: var(--accent-hi);
-}
-.story-act {
-  position: absolute;
-  left: 0;
-  right: 0;
-  width: fit-content;
-  margin: 0 auto;
-  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
-  min-height: 52px;
-  padding: 0 22px;
-  font-size: 17px;
-  font-weight: 800;
-}
-.story-fish-acts {
-  position: absolute;
-  left: 50%;
-  bottom: calc(88px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
-  display: flex;
-  gap: 12px;
-}
-.story-catch {
-  position: absolute;
-  top: calc(64px + env(safe-area-inset-top, 0px));
-  right: calc(12px + env(safe-area-inset-right, 0px));
-  font-size: 16px;
-  font-weight: 800;
-  pointer-events: none;
-}
-.story-note {
-  position: absolute;
-  top: calc(64px + env(safe-area-inset-top, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  width: max-content;
-  max-width: min(440px, calc(100% - 32px));
-  padding: 10px 16px;
-  font-size: 15px;
-  font-weight: 600;
-  text-align: center;
-  pointer-events: none;
-}
-.story-talk-layer { position: absolute; inset: 0; pointer-events: none; }
-.story-talk-layer.hidden { display: none; }
-.story-talk { pointer-events: auto; }
-.story-talk .village-talk-choices { flex-wrap: wrap; }
-.story-banner {
-  position: absolute;
-  top: 34%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-  pointer-events: auto;
-}
-.story-banner-title {
-  font-family: var(--font-display);
-  font-size: clamp(34px, 8vw, 64px);
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: var(--accent-hi);
-  text-shadow: 0 4px 18px rgba(0, 0, 0, 0.75);
-}
-.story-banner-sub {
-  margin-top: 6px;
-  font-size: 17px;
-  font-weight: 600;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
-}
-.story-banner-btns {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 18px;
-}
-.story-banner-btns:empty { display: none; }
-.story-hud .town-fishing { bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }

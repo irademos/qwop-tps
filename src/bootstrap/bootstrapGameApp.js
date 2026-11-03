@@ -3162,7 +3162,7 @@ async function initCore(runtimeContext) {
   const hasMagicWand = () => (inventoryState[MAGIC_WAND_ITEM_ID]?.count || 0) > 0;
   const isWandEquipped = () => _wandActive && foamSword?.holder === playerControls;
   const getMana = () => (Number.isFinite(statsState.mana) ? statsState.mana : MAX_MANA);
-  const isWandAllowed = () => hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout);
+  const isWandAllowed = () => hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout) && !story?.isActive();
   // Town's fishing rod: the sword weapon in rod form too (casts / hooks / reels instead of
   // hitting — townTrade.js); Town only, once bought (and the guest's sea start, which begins with it)
   let _rodActive = false;
@@ -6755,7 +6755,7 @@ async function initCore(runtimeContext) {
   })();
   const _bowDrawAmount = () => (_bowDraw.active ? THREE.MathUtils.clamp((performance.now() - _bowDraw.startMs) / (BOW_DRAW_S * 1000), 0, 1) : 0);
   const _ownsBow = () => (inventoryState.pistol?.count ?? 0) > 0;
-  const _canDrawBow = () => !!playerControls?.enabled && !playerDead && !_gamePaused && !_classicMode
+  const _canDrawBow = () => !!playerControls?.enabled && !playerDead && !_gamePaused && !_classicMode && !story?.isActive()
     && !_mpSwordOnly() && !town?.inCanoe?.() && _ownsBow() && !playerRoll && !playerBombThrow
     && !isPlayerFrozen() && !_wandShieldHold && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
     && !(_matchLoadout && !matchMode?.isFighting());
@@ -6947,6 +6947,14 @@ async function initCore(runtimeContext) {
       return {
         bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false,
         ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null, blockOnly: true
+      };
+    }
+    if (story?.isActive()) {
+      // Story: the rod once found (and the oar in the canoe) — nothing from Showdown
+      return {
+        bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false, hasWand: false,
+        ammo: 0, hasSword: false, hasRod: isRodAllowed(), canUnequip: false,
+        equipped: _heldWeaponId() ?? 'none', highlight: null
       };
     }
     if (_mpSwordOnly()) {
@@ -7558,10 +7566,12 @@ async function initCore(runtimeContext) {
     // Magic wand: owned (Showdown / the tutorial) or picked up in a Multiplayer battle
     isWandAllowed: () => isWandAllowed(),
     // Town: nothing in hand is allowed (✋ Hands), and the sword has to be bought
-    isUnarmedAllowed: () => !!_townLoadout,
-    ownsSword: () => !_townLoadout || _townLoadout.hasSword,
+    // (Story: no sword either — the rod once found)
+    isUnarmedAllowed: () => !!_townLoadout || !!story?.isActive(),
+    ownsSword: () => (story?.isActive() ? false : !_townLoadout || _townLoadout.hasSword),
+    isStoryMode: () => !!story?.isActive(),
     putWeaponsAway: () => {
-      if (!_townLoadout) return;
+      if (!_townLoadout && !story?.isActive()) return;
       _putWeaponsAway();
       playerControls?.refreshActionButtons?.();
     },
@@ -9284,6 +9294,20 @@ async function initCore(runtimeContext) {
     if (_activeMap) visit(_activeMap.group);
     return out;
   };
+  // Big text over the world (the stage win banner's look) — Town's and Story's banners
+  const _showWorldBanner = (title, sub, ms = 2600) => {
+    _psWinTitle.textContent = title;
+    _psWinSub.textContent = sub || '';
+    _psWinTitle.style.animation = 'none';
+    _psWinSub.style.animation = 'none';
+    _psWinOverlay.classList.add('ps-win-banner');
+    _psWinOverlay.classList.remove('hidden');
+    void _psWinOverlay.offsetWidth;
+    _psWinTitle.style.animation = '';
+    _psWinSub.style.animation = '';
+    clearTimeout(_psWinHideTimer);
+    _psWinHideTimer = setTimeout(() => _psWinOverlay.classList.add('hidden'), ms);
+  };
   town = createTownMode({
     net: townNet,
     scene,
@@ -9363,19 +9387,7 @@ async function initCore(runtimeContext) {
       if (mode === 'day') clearRoadLightPool();
     },
     // Big text over the world (the stage win banner's look)
-    showBanner: (title, sub, ms = 2600) => {
-      _psWinTitle.textContent = title;
-      _psWinSub.textContent = sub || '';
-      _psWinTitle.style.animation = 'none';
-      _psWinSub.style.animation = 'none';
-      _psWinOverlay.classList.add('ps-win-banner');
-      _psWinOverlay.classList.remove('hidden');
-      void _psWinOverlay.offsetWidth;
-      _psWinTitle.style.animation = '';
-      _psWinSub.style.animation = '';
-      clearTimeout(_psWinHideTimer);
-      _psWinHideTimer = setTimeout(() => _psWinOverlay.classList.add('hidden'), ms);
-    },
+    showBanner: (title, sub, ms) => _showWorldBanner(title, sub, ms),
     // Someone who fights the player: a stage swordsman (EnemyPlayer) in their character; with
     // `gear` ({ shield, gun, … }) it fights like a stage boss with it (createBossFighter, no
     // health bar across the top / red glow)
@@ -9698,6 +9710,10 @@ async function initCore(runtimeContext) {
     },
     // Washed up: lying on the beach (the death clip, held on its last frame) / back up
     // (no stand-up clip yet — he just stands)
+    // What's in hand: 'rod' | 'oar' | null (the game's weapon buttons / the phone change it too)
+    heldKind: () => (isRodEquipped() ? 'rod' : isOarEquipped() ? 'oar' : null),
+    refreshButtons: () => { _refreshGearUI(); _phoneSwordStatusNow?.(); },
+    showBanner: (title, sub, ms) => _showWorldBanner(title, sub, ms),
     lieDown: () => playerModel?.userData?.qwopRig?.glbCharacter?.playDeath?.(),
     standUp: () => playerModel?.userData?.qwopRig?.glbCharacter?.revive?.(),
     // A sound file (a missing one is just silent): the element, to stop it
