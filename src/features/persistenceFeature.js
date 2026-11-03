@@ -25,6 +25,8 @@ export {
   saveTutorialCompleted,
   loadTownSave,
   saveTownSave,
+  loadStorySave,
+  saveStorySave,
   randomGuestName,
   buildGuestProfile
 } from '../player/playerProfile.js';

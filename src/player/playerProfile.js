@@ -367,6 +367,24 @@ export async function saveTownSave(nameKey, part, data) {
   }
 }
 
+// Story mode (src/story/storyMode.js): profiles/<nameKey>/storySave = { at, json } — the
+// story's step, what the player has, where they are (moves / goes with the profile)
+export async function loadStorySave(nameKey) {
+  if (!nameKey) return null;
+  const raw = (await get(ref(db, `profiles/${nameKey}/storySave`))).val();
+  if (!raw || typeof raw.json !== 'string') return null;
+  try { return JSON.parse(raw.json); } catch (_) { return null; }
+}
+
+export async function saveStorySave(nameKey, data) {
+  if (!nameKey || !data) return;
+  try {
+    await set(ref(db, `profiles/${nameKey}/storySave`), { at: data.at || Date.now(), json: JSON.stringify(data) });
+  } catch (err) {
+    console.warn('Failed to save the story:', err);
+  }
+}
+
 // Sword Showdown tutorial: profiles/<nameKey>/tutorialCompleted = true once finished
 export function hasCompletedTutorial(profile) {
   return profile?.tutorialCompleted === true;

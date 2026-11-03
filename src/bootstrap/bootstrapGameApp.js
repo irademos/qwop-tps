@@ -67,6 +67,7 @@ import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
 import { createSeaStart } from '../town/seaStart.js';
+import { createStoryMode } from '../story/storyMode.js';
 import { OAR_REST_SWING, OAR_REST_TILT, OAR_TIP_AT, oarGripPoint, oarStrokeDuration, oarStrokePose } from '../items/oar.js';
 import { CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
 import { createBroomRide } from '../items/broom.js';
@@ -99,6 +100,8 @@ import {
   hasCompletedTutorial,
   saveTutorialCompleted,
   loadTownSave,
+  loadStorySave,
+  saveStorySave,
   saveTownSave,
   randomGuestName,
   buildGuestProfile
@@ -320,6 +323,7 @@ function createArcadeOverlay(startOverlay) {
   const multiplayerButton = startOverlay.querySelector('[data-arcade-multiplayer]');
   const classicButton = startOverlay.querySelector('[data-arcade-classic]');
   const townButton = startOverlay.querySelector('[data-arcade-town]');
+  const storyButton = startOverlay.querySelector('[data-arcade-story]');
   const guestButton = startOverlay.querySelector('[data-arcade-guest]');
 
   let mode = 'login';
@@ -655,6 +659,7 @@ function createArcadeOverlay(startOverlay) {
   multiplayerButton?.addEventListener('click', () => chooseMode('multiplayer'));
   classicButton?.addEventListener('click', () => chooseMode('classic'));
   townButton?.addEventListener('click', () => chooseMode('town'));
+  storyButton?.addEventListener('click', () => chooseMode('story'));
 
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
@@ -819,6 +824,7 @@ async function initCore(runtimeContext) {
   let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
   let devRoam = null; // Dev: Free Roam (Settings → Dev; created further down)
   let town = null; // Town mode (src/town/townMode.js; created further down)
+  let story = null; // Story mode (src/story/storyMode.js; created with the town)
   let seaStart = null; // The guest's sea start (src/town/seaStart.js; created with the town)
   let townNet = null; // Town's shared room (src/town/townNet.js; created with the town)
   // Multiplayer battle (Team Battle / Free For All): everyone starts with the sword and finds
@@ -2401,6 +2407,23 @@ async function initCore(runtimeContext) {
     }
     return pin;
   };
+  // An island of the active map loaded (once — kept after): resolves to its state ({ def, group… }),
+  // or null when the map has no such island / it failed to load (Story mode starts on Tree Island)
+  function _ensureIsland(islandKey) {
+    const m = _activeMap;
+    const idef = MAPS[_activeMapKey]?.islands?.find((d) => d.key === islandKey);
+    if (!m?.islandLoads || !idef) return Promise.resolve(null);
+    if (!m.islandLoads.has(islandKey)) {
+      const job = _loadIsland(_activeMapKey, m, idef).then((isl) => {
+        m.islands.push(isl);
+        if (_activeMap === m) _refreshMapLayers();
+        console.info(`[map] ${idef.name} is in`);
+        return isl;
+      }).catch((err) => { console.warn(`[map] ${idef.name} failed to load:`, err); return null; });
+      m.islandLoads.set(islandKey, job);
+    }
+    return m.islandLoads.get(islandKey);
+  }
   function _updateIslands() {
     const m = _activeMap;
     const def = MAPS[_activeMapKey];
@@ -2413,13 +2436,7 @@ async function initCore(runtimeContext) {
         if (m.islandLoads.has(idef.key)) continue;
         const edge = _islandEdge(idef, p);
         if (!(inCanoe && edge < ISLAND_LOAD_EDGE) && edge > 0) continue;
-        const key = _activeMapKey;
-        const job = _loadIsland(key, m, idef).then((isl) => {
-          m.islands.push(isl);
-          if (_activeMap === m) _refreshMapLayers();
-          console.info(`[map] ${idef.name} is in`);
-        }).catch((err) => console.warn(`[map] ${idef.name} failed to load:`, err));
-        m.islandLoads.set(idef.key, job);
+        void _ensureIsland(idef.key);
       }
       // Drawing: each island's land (the home one's too) only near it
       if (def.home) {
@@ -3149,7 +3166,7 @@ async function initCore(runtimeContext) {
   // Town's fishing rod: the sword weapon in rod form too (casts / hooks / reels instead of
   // hitting — townTrade.js); Town only, once bought (and the guest's sea start, which begins with it)
   let _rodActive = false;
-  const isRodAllowed = () => !!_townLoadout?.hasRod || !!seaStart?.isActive();
+  const isRodAllowed = () => !!_townLoadout?.hasRod || !!seaStart?.isActive() || !!story?.hasRod();
   const isRodEquipped = () => _rodActive && foamSword?.holder === playerControls;
   // Town's canoe oar: the sword weapon in oar form again (held upside down — the phone up holds
   // it pointing down; townCanoe.js paddles with it); only while standing in the canoe, and then
@@ -3160,7 +3177,7 @@ async function initCore(runtimeContext) {
   const _broomGyro = { q: new THREE.Quaternion(), rest: new THREE.Quaternion(), needRest: true, at: 0 };
   const _broomTiltQ = new THREE.Quaternion();
   const _broomTiltV = new THREE.Vector3();
-  const isOarAllowed = () => !!town?.inCanoe?.() || !!seaStart?.isActive();
+  const isOarAllowed = () => !!town?.inCanoe?.() || !!seaStart?.isActive() || !!story?.inCanoe();
   const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
   // ── Paddling: the steer (the phone's tilt — _readOarTilt —, the joystick or WASD: _getSteer)
   // moves the canoe (canoeBoat.js); the oar's strokes play by themselves to fit it (_oarPose). A
@@ -5151,7 +5168,7 @@ async function initCore(runtimeContext) {
   let _pauseGraceUntil = 0;
   const _isSettingsPauseWanted = () => document.body.classList.contains('settings-open')
     && !multiplayer
-    && (_psStageActive || !!showdownTutorial?.isActive() || !!town?.isActive());
+    && (_psStageActive || !!showdownTutorial?.isActive() || !!town?.isActive() || !!story?.isActive());
   // Enemies don't attack the player: dead (body carried off) or just back from a pause
   const _attacksHeld = () => playerDead || _psBossTalking || performance.now() < _pauseGraceUntil;
   let _psStageKills = 0;       // enemies killed this stage
@@ -6847,6 +6864,7 @@ async function initCore(runtimeContext) {
       else if (village?.isOpen()) village.interact();
       else if (town?.isActive()) town.interact();
       else if (seaStart?.isActive()) seaStart.interact();
+      else if (story?.isActive()) story.interact();
       return;
     }
     if (!playerControls?.enabled || _classicMode || _gamePaused) return; // Classic: Block only
@@ -6871,6 +6889,8 @@ async function initCore(runtimeContext) {
     } else if (action === 'rod') {
       // The sea start: the rod (from the oar)
       if (seaStart?.isActive()) { seaStart.pick('rod'); return; }
+      // Story: rod ↔ hands (the canoe: ↔ the oar)
+      if (story?.isActive()) { story.toggleRod(); return; }
       // Town: fishing rod ↔ the sword (or empty hands); in the canoe, ↔ the oar
       if (!isRodAllowed()) return;
       if (isRodEquipped() && town?.inCanoe?.()) _equipByPlayer(OAR_ITEM_ID);
@@ -6905,12 +6925,15 @@ async function initCore(runtimeContext) {
     if (town?.isActive()) return _heldWeaponId() && !isRodEquipped() && !isOarEquipped() ? undefined : town.interactLabel(); // (undefined when there's nothing to do: Block stays Block)
     // The sea start: 🛶 Oar / 🛶 Get out
     if (seaStart?.isActive()) return seaStart.interactLabel();
+    // Story mode: its act (Talk to the Crow, Get in the canoe…) / the talk's Next
+    if (story?.isActive()) return story.interactLabel();
     return undefined;
   };
   const _phoneControllerStatus = () => {
     const status = _phoneControllerGearStatus();
     // Town fishing, the line out: the bar is a reel (cranked round on the phone's screen)
-    const fishing = town?.isActive() ? town.fishingHud() : seaStart?.isActive() ? seaStart.fishingHud() : null;
+    const fishing = town?.isActive() ? town.fishingHud() : seaStart?.isActive() ? seaStart.fishingHud()
+      : story?.isActive() ? story.fishingHud() : null;
     if (fishing?.reel) return { ...status, reelMode: true, fishCue: fishing.cue, fishText: fishing.text };
     // Town, something grabbed (the hose): the bar is its mode (💧 Water — held), 🗡/✋ drops it
     if (town?.isActive() && town.holding()) return { ...status, holding: true, heldBar: town.heldBar() };
@@ -8333,6 +8356,8 @@ async function initCore(runtimeContext) {
     birds.clear();
     town?.exit();
     seaStart?.exit();
+    // (Story mode plays on Tree Island: back to the island town's spawn)
+    if (story?.isActive()) { story.exit(); if (_activeMap) _placeAtSpawn(); }
     _psStopSong();
     village?.exit();
     _psRoamQuest = null;
@@ -9225,6 +9250,40 @@ async function initCore(runtimeContext) {
     const turn = (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0);
     return (!fwd && !turn && _oarTiltSteer()) || { fwd, turn };
   };
+  // The active map's placed objects (houses, trees, rocks… — its islands' too) with their centres
+  // inside `b` (`object`: its placement wrapper — Town's trees are felled by posing it, townTrees.js)
+  const _getMapObjects = (b) => {
+    const out = [];
+    const visit = (o) => {
+      const mo = o.userData?.mapObject;
+      if (mo) {
+        _townMapObjectBox.setFromObject(o);
+        if (!_townMapObjectBox.isEmpty()) {
+          const c = _townMapObjectBox.getCenter(new THREE.Vector3());
+          const size = _townMapObjectBox.getSize(new THREE.Vector3());
+          if (c.x >= b.minX && c.x <= b.maxX && c.z >= b.minZ && c.z <= b.maxZ) {
+            // (local: the object's own frame — its GLB's axes — and its bounds there, for
+            // spots on the model like a house's front door)
+            const local = new THREE.Box3();
+            const inv = new THREE.Matrix4().copy(o.matrixWorld).invert();
+            o.traverse((m) => {
+              if (!m.isMesh || !m.geometry) return;
+              if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+              local.union(m.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld)));
+            });
+            out.push({
+              file: mo.modelFile ?? '', x: c.x, z: c.z, radius: Math.max(size.x, size.z) / 2,
+              local, matrix: o.matrixWorld.clone(), id: mo.id, object: o,
+            });
+          }
+        }
+        return; // (its own meshes aren't separate objects)
+      }
+      o.children.forEach(visit);
+    };
+    if (_activeMap) visit(_activeMap.group);
+    return out;
+  };
   town = createTownMode({
     net: townNet,
     scene,
@@ -9245,38 +9304,7 @@ async function initCore(runtimeContext) {
     pathAt: (x, z) => _activeMap?.paths?.(x, z) ?? null,
     // The active map's placed objects (houses, trees…) with their centres inside `b` (`object`:
     // its placement wrapper — Town's trees are felled by posing it, townTrees.js)
-    getMapObjects: (b) => {
-      const out = [];
-      const visit = (o) => {
-        const mo = o.userData?.mapObject;
-        if (mo) {
-          _townMapObjectBox.setFromObject(o);
-          if (!_townMapObjectBox.isEmpty()) {
-            const c = _townMapObjectBox.getCenter(new THREE.Vector3());
-            const size = _townMapObjectBox.getSize(new THREE.Vector3());
-            if (c.x >= b.minX && c.x <= b.maxX && c.z >= b.minZ && c.z <= b.maxZ) {
-              // (local: the object's own frame — its GLB's axes — and its bounds there, for
-              // spots on the model like a house's front door)
-              const local = new THREE.Box3();
-              const inv = new THREE.Matrix4().copy(o.matrixWorld).invert();
-              o.traverse((m) => {
-                if (!m.isMesh || !m.geometry) return;
-                if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
-                local.union(m.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld)));
-              });
-              out.push({
-                file: mo.modelFile ?? '', x: c.x, z: c.z, radius: Math.max(size.x, size.z) / 2,
-                local, matrix: o.matrixWorld.clone(), id: mo.id, object: o,
-              });
-            }
-          }
-          return; // (its own meshes aren't separate objects)
-        }
-        o.children.forEach(visit);
-      };
-      if (_activeMap) visit(_activeMap.group);
-      return out;
-    },
+    getMapObjects: (b) => _getMapObjects(b),
     // Each placed road lamp's head: its light goes just under the top, like the night road
     // lights' (ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset of the 1-unit-tall model)
     getRoadLamps: () => _mapRoadLamps().map((o) => {
@@ -9633,6 +9661,91 @@ async function initCore(runtimeContext) {
     window.addEventListener('keydown', startAudio, true);
   };
 
+  // Story mode (src/story/storyMode.js): one player, on Tree Island; saved as it goes (signed in)
+  const _storyLsKey = () => (profileNameKey ? `story_${profileNameKey}` : null);
+  let _storyCloudAt = 0;
+  let _storyCloudStep = null;
+  story = createStoryMode({
+    scene,
+    camera,
+    getPlayerModel: () => playerModel,
+    getControls: () => playerControls,
+    getIsland: (key) => _ensureIsland(key),
+    getMapObjects: (b) => _getMapObjects(b),
+    getGroundY: (x, z) => getTerrainHeight(x, z),
+    getWaterY: (x, z) => _activeMap?.water?.(x, z) ?? null,
+    waterDepth: _waterDepthAt,
+    teleport: (x, z, yaw) => _teleportPlayer(x, z, yaw),
+    holdStill: (on) => { if (playerControls) playerControls.holdStill = !!on; },
+    setPositionConstraint: (fn) => { if (playerControls) playerControls.positionConstraint = fn; },
+    carryPlayer: _carryPlayer,
+    getSteer: _getSteer,
+    getOarModel: () => (isOarEquipped() ? foamSword?.getOarModel?.() ?? null : null),
+    getOarStroke: () => (isOarEquipped() ? _currentOarStroke() : null),
+    getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
+    takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
+    isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
+    refreshPhone: () => _phoneSwordStatusNow?.(),
+    hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
+    isTouch: () => !!playerControls?.isTouchLayout?.(),
+    // 'rod' | 'oar' in hand, or null: nothing
+    hold: (kind) => {
+      if (kind === 'rod') _equipByPlayer(FISHING_ROD_ITEM_ID);
+      else if (kind === 'oar') _equipByPlayer(OAR_ITEM_ID);
+      else _putWeaponsAway();
+      _refreshGearUI();
+      _phoneSwordStatusNow?.();
+    },
+    // Washed up: lying on the beach (the death clip, held on its last frame) / back up
+    // (no stand-up clip yet — he just stands)
+    lieDown: () => playerModel?.userData?.qwopRig?.glbCharacter?.playDeath?.(),
+    standUp: () => playerModel?.userData?.qwopRig?.glbCharacter?.revive?.(),
+    // A sound file (a missing one is just silent): the element, to stop it
+    playSound: (url, { volume = 1, loop = false } = {}) => {
+      try {
+        const a = new Audio(url);
+        a.loop = loop;
+        a.volume = Math.max(0, Math.min(1, volume * (audioManager?.masterVolume ?? 1)));
+        a.play().catch(() => {});
+        return a;
+      } catch (_) {
+        return null;
+      }
+    },
+    // Saves: guests none; localStorage + Firebase (profiles/<key>/storySave), the newest wins
+    canSave: () => !!profileNameKey,
+    load: async () => {
+      let local = null;
+      try { const k = _storyLsKey(); local = k ? JSON.parse(localStorage.getItem(k) || 'null') : null; } catch (_) {}
+      const cloud = await Promise.race([
+        loadStorySave(profileNameKey).catch(() => null),
+        new Promise((r) => setTimeout(() => r(null), 4000)),
+      ]);
+      return (cloud?.at ?? 0) > (local?.at ?? 0) ? cloud : local;
+    },
+    save: (data) => {
+      try { const k = _storyLsKey(); if (k) localStorage.setItem(k, JSON.stringify(data)); } catch (_) {}
+      // (the cloud at most every 5 s — the step changes always go)
+      const now = Date.now();
+      if (now - _storyCloudAt < 5000 && data.step === _storyCloudStep) return;
+      _storyCloudAt = now;
+      _storyCloudStep = data.step;
+      void saveStorySave(profileNameKey, data);
+    },
+    onLobby: () => {
+      _resetForMenu();
+      arcadeOverlay.showStartScreen();
+    },
+  });
+  window.story = story; // (dev console: story.debug())
+  const startStoryMode = () => {
+    _resetForMenu();
+    setPlayerCharacterUrl(playerModel, glbCharacterConfig.villageBoyUrl);
+    _putWeaponsAway();
+    _refreshGearUI();
+    void story.enter();
+  };
+
   let _modeStartToken = 0;
   const _startMode = (gameMode) => {
     _birdsMode = false;
@@ -9648,6 +9761,8 @@ async function initCore(runtimeContext) {
       startDevRoamMode();
     } else if (gameMode === 'town') {
       startTownMode();
+    } else if (gameMode === 'story') {
+      startStoryMode();
     } else {
       startTutorialMode();
     }
@@ -11075,6 +11190,8 @@ async function initCore(runtimeContext) {
     if (playerModel) birds.update(frameDelta, playerModel.position, _birdsWanted());
     // The guest's sea start: the canoe on the sea, the player in it
     seaStart?.update(frameDelta);
+    // Story mode: its cut scenes, the Crow, the canoe (it has the last word on the camera in a cut scene)
+    story?.update(frameDelta);
     // Ships on the sea bob on the swell
     _activeMap?.animate?.(performance.now() / 1000);
     _updateIslands();
