@@ -6,7 +6,7 @@
 //   seat      — the stone he climbs onto (ours — the island's rocks are boulders)
 //   crowSpot  — where the Crow lands, beside the stone; crowFrom — where it flies in from
 //   mooring   — the (holed) canoe, off the beach to one side
-//   tree      — the sacred tree (a tree creature hiding as one): inland, straight up the beach,
+//   tree      — the sacred tree (the wise tree): inland, straight up the beach,
 //               among the island's trees
 //   frogMom   — the frog mom, sitting off to one side of the way up to it (or null)
 // ctx: { getMapObjects(bounds), waterDepth(x, z), getGroundY(x, z), canoeFits(x, z, yaw) }

@@ -5,7 +5,7 @@
 //   storyLayout.js  — where everything goes, found on the island at run time
 //   storyProps.js   — the stone, the rod leaning in the canoe, the canoe's hole…
 //   crow.js         — the Crow (a recurring character)
-//   treeCreature.js — the sacred tree: a tree creature hiding as a tree
+//   wiseTree.js — the sacred tree: the wise tree (wise_tree.glb), a face in its bark
 // This file: the cut scene, the talk (Town's subtitle talk box + text to speech), the actions a
 // talk can run (ACTIONS), the acts (buttons), the canoe (holed until mended with wood), the sword
 // (from the sacred tree), saving / resuming.
@@ -31,7 +31,7 @@ import {
 } from '../town/townConfig.js';
 import { createFluteModel, disposeFluteModel, FLUTE_HAND_AT, FLUTE_LENGTH } from '../items/flute.js';
 import { createCrow } from './crow.js';
-import { createTreeCreature } from './treeCreature.js';
+import { createWiseTree } from './wiseTree.js';
 import { createFrogMom } from './frogMom.js';
 import { findStoryLayout, SEAT_RADIUS, SEAT_TOP } from './storyLayout.js';
 import { fitSeatStone, makeSeatStone, makeLeaningRod, makeCanoeDamage, makeNote, pulseGlint, removeProp } from './storyProps.js';
@@ -77,7 +77,7 @@ const NOTE_LIFE_S = 1.8;
 const CROW_FROM_UP = 10;      // m up over the sea the Crow comes from
 const TALK_DIST = 2.8;        // m from the Crow: Talk
 const TREE_TALK_DIST = 3.2;   // m from the sacred tree: Talk (once the Crow's told of it)
-const TREE_REVEAL_HOLD_S = 4; // s it keeps its arms down after its last line
+const TREE_REVEAL_HOLD_S = 4; // s it stays awake (turned to the player) after its last line
 const ROD_PICK_DIST = CANOE_BOARD_DIST + 0.5; // m from the canoe's middle: Take the rod
 const SACRED_GROVE_R = 7;     // m round the sacred tree: its friends — not choppable
 const CUT_FOV = 50;
@@ -129,7 +129,7 @@ export function createStoryMode(ctx) {
   const notes = [];            // ♪ sprites
   let noteAt = 0;
   const crow = createCrow({ scene: ctx.scene });
-  const tree = createTreeCreature({ scene: ctx.scene });
+  const tree = createWiseTree({ scene: ctx.scene });
   const frogMom = createFrogMom({ scene: ctx.scene });
 
   // What the chapter's data sees (chapter1.js talks / quest)
@@ -203,7 +203,7 @@ export function createStoryMode(ctx) {
   const speech = createSpeech();
   const speakerAt = (who) => {
     if (who === CROW && crow.isVisible()) return crow.position();
-    if (who === TREE && tree.isPlaced()) return tree.position().clone().setY(tree.position().y + tree.height() * 0.8);
+    if (who === TREE && tree.isPlaced()) return tree.faceWorld();
     return null;
   };
   const speakTalk = (text, { who, reply = false, interrupt = false, stop = false } = {}) => {
@@ -513,7 +513,7 @@ export function createStoryMode(ctx) {
     return F.tryChop(tip);
   };
 
-  // ── The sacred tree (the tree creature hiding as one) ──
+  // ── The sacred tree (the wise tree) ──
   const placeTree = () => {
     const g = groundAt(L.tree);
     tree.placeAt(g, Math.atan2(L.wash.x - L.tree.x, L.wash.z - L.tree.z));
@@ -1194,7 +1194,7 @@ export function createStoryMode(ctx) {
     dt = Math.min(dt, 0.1);
     simT += dt;
     crow.update(dt);
-    // (the sacred tree lowers its arms to talk, then hides again)
+    // (the sacred tree wakes to talk, then goes still again)
     tree.reveal((talk && talk.who === TREE) || simT < treeRevealUntil);
     tree.update(dt);
     frogMom.update(dt);
