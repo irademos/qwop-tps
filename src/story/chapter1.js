@@ -9,7 +9,7 @@
 //   fish  → it wants a fish first: the old rod leans on the canoe moored off the beach (the canoe is
 //           holed — WOOD_NEEDED wood mends it), fish from the shore
 //   tree  → the fish to the Crow: it tells of the sacred tree somewhere on the island that can help
-//   wood  → the sacred tree (a tree creature, arms up, leaves all over — hiding as a tree) gives the
+//   wood  → the sacred tree (the wise tree — a face in its bark) gives the
 //           player a sword: chop down trees for wood (Town's chopping — townTrees.js)
 //   done  → the canoe mended → "To be continued…"
 //
