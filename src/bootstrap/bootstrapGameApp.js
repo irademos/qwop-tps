@@ -291,7 +291,16 @@ const SUN_RISE_H = 5.5;
 const SUN_SET_H = 21;
 const SUN_SOUTH = 0.35;
 const SUN_MIN_ELEV = 0.17;
-const SUN_LOW_COLOR = new THREE.Color(0xff9a55);
+// The sun's colour low down: deep red-orange at the horizon → gold → white by a quarter of the
+// way to midday; the ambient light warms toward a soft pink-orange with it
+const SUN_LOW_COLOR = new THREE.Color(0xff5a2a);
+const SUN_GOLD_COLOR = new THREE.Color(0xffb060);
+const AMBIENT_LOW_COLOR = new THREE.Color(0xffa088);
+// The sunrise / sunset glow over the skybox (`_skyGlow`: one camera-centred dome, alpha-blended):
+// a red → orange band along the horizon, brightest toward the sun, a little pink-violet up high
+// on the far side; strength = how low the sun is (0 by full day and full night)
+const SKY_GLOW_STRENGTH = 0.85;
+const SKY_GLOW_RADIUS = 900; // inside the camera's far plane (1000)
 const SUN_LOW_LIGHT = 0.3;    // sun intensity at the horizon (× the day's)
 const SUN_LOW_AMBIENT = 0.45; // ambient at the horizon (× the day's)
 const SUN_LOW_SKY = 0.4;      // sky brightness at the horizon
@@ -1506,6 +1515,68 @@ async function initCore(runtimeContext) {
   };
   const _sunOffset = SHADOW_LIGHT_OFFSET.clone();
   const _sunWhite = new THREE.Color(0xffffff);
+  // Sunrise / sunset sky glow (see SKY_GLOW_*): made the first time it's needed
+  let _skyGlow = null;
+  const _skyGlowMesh = () => {
+    if (_skyGlow || !scene) return _skyGlow;
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        uSunDir: { value: new THREE.Vector3(1, 0.2, 0) },
+        uStrength: { value: 0 },
+      },
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 uSunDir;
+        uniform float uStrength;
+        varying vec3 vDir;
+        void main() {
+          vec3 d = normalize(vDir);
+          vec3 sunFlat = normalize(vec3(uSunDir.x, 0.0, uSunDir.z));
+          float toSun = max(dot(normalize(vec3(d.x, 0.0, d.z)), sunFlat), 0.0);
+          float h = max(d.y, 0.0);
+          float band = exp(-h * 5.0);                  // the horizon band
+          float sunSide = pow(toSun, 3.0);
+          float near = pow(max(dot(d, normalize(uSunDir)), 0.0), 24.0); // round the sun itself
+          vec3 red = vec3(1.0, 0.28, 0.12);
+          vec3 orange = vec3(1.0, 0.58, 0.22);
+          vec3 pink = vec3(0.85, 0.45, 0.65);
+          vec3 col = mix(orange, red, clamp(1.0 - h * 4.0, 0.0, 1.0) * (0.4 + 0.6 * sunSide));
+          col = mix(pink, col, clamp(band + sunSide, 0.0, 1.0));
+          col = mix(col, vec3(1.0, 0.85, 0.5), near);
+          float a = band * (0.3 + 0.7 * sunSide) + 0.18 * (1.0 - band) + near * 0.6;
+          gl_FragColor = vec4(col, clamp(a * uStrength, 0.0, 0.92));
+        }`,
+      side: THREE.BackSide,
+      transparent: true,
+      depthWrite: false,
+      fog: false,
+    });
+    _skyGlow = new THREE.Mesh(new THREE.SphereGeometry(SKY_GLOW_RADIUS, 32, 16), mat);
+    _skyGlow.name = 'skyGlow';
+    _skyGlow.frustumCulled = false;
+    _skyGlow.renderOrder = -1000;
+    _skyGlow.castShadow = _skyGlow.receiveShadow = false;
+    _skyGlow.visible = false;
+    scene.add(_skyGlow);
+    return _skyGlow;
+  };
+  const _setSkyGlow = (strength) => {
+    if (!(strength > 0.001)) { if (_skyGlow) _skyGlow.visible = false; return; }
+    const g = _skyGlowMesh();
+    if (!g) return;
+    g.visible = true;
+    g.material.uniforms.uStrength.value = strength;
+    g.material.uniforms.uSunDir.value.copy(_sunOffset).normalize();
+  };
+  // (before each render: the dome stays centred on the camera)
+  const _syncSkyGlow = () => {
+    if (_skyGlow?.visible) _skyGlow.position.copy(camera.position);
+  };
   const _applySun = () => {
     // (the water: dimmed with the night, whatever else applies)
     const waterK = _sunHour == null ? 1 : 1 - (1 - WATER_NIGHT_BRIGHTNESS) * _sunNightLevel;
@@ -1515,7 +1586,9 @@ async function initCore(runtimeContext) {
     if (off) {
       if (_sunHour == null) _sunOffset.copy(SHADOW_LIGHT_OFFSET);
       dirLight?.color.copy(_sunWhite);
+      ambientLight?.color.copy(_sunWhite);
       if (scene) scene.backgroundIntensity = 1;
+      _setSkyGlow(0);
       return;
     }
     const u = clampValue((_sunHour - SUN_RISE_H) / (SUN_SET_H - SUN_RISE_H), 0, 1);
@@ -1531,12 +1604,16 @@ async function initCore(runtimeContext) {
     const tw = 1 - _sunNightLevel; // 0 at the horizon (= night: lights off, black sky) … 1 out of twilight
     if (dirLight) {
       dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2) * tw * (SUN_LOW_LIGHT + (1 - SUN_LOW_LIGHT) * ease);
-      dirLight.color.copy(SUN_LOW_COLOR).lerp(_sunWhite, ease);
+      if (ease < 0.5) dirLight.color.copy(SUN_LOW_COLOR).lerp(SUN_GOLD_COLOR, ease * 2);
+      else dirLight.color.copy(SUN_GOLD_COLOR).lerp(_sunWhite, ease * 2 - 1);
     }
     if (ambientLight) {
       ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2) * tw * (SUN_LOW_AMBIENT + (1 - SUN_LOW_AMBIENT) * ease);
+      ambientLight.color.copy(AMBIENT_LOW_COLOR).lerp(_sunWhite, ease);
     }
     if (scene) scene.backgroundIntensity = tw * (SUN_LOW_SKY + (1 - SUN_LOW_SKY) * ease);
+    // (the glow lingers a little into the dusk: √tw)
+    _setSkyGlow(SKY_GLOW_STRENGTH * (1 - ease) * Math.sqrt(tw));
   };
   const setSunHour = (h, nightLevel = 0) => {
     _sunHour = Number.isFinite(h) ? h : null;
@@ -9858,6 +9935,7 @@ async function initCore(runtimeContext) {
     // Paused (settings open in a single-player stage): draw the frozen world, simulate nothing
     if (_isSettingsPauseWanted()) {
       if (!_gamePaused) { _gamePaused = true; _pausedAtMs = Date.now(); }
+      _syncSkyGlow();
       renderer.render(scene, camera);
       return;
     }
@@ -11262,6 +11340,7 @@ async function initCore(runtimeContext) {
       const m = camera.matrixWorld.elements;
       audioManager.setListener(playerModel.position, m[0], m[2]);
     }
+    _syncSkyGlow();
     renderer.render(scene, camera);
     const frameTotalMs = performance.now() - frameStartMs;
     if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
