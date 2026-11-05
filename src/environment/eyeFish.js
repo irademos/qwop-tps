@@ -27,15 +27,17 @@ const BOB_AMP = 0.05;             // m
 const WIGGLE = 0.14;              // rad: each fish's tail sway
 const TURN_RATE = 2.2;            // rad/s turning to face the player
 const DRIFT_SPEED = 0.25;         // m/s wandering while peeking
+const SWIM_SPEED = 1.5;           // m/s swimming in to its spot (spawnPair `from`), peeking
+const SWIM_ACCEL = 1.2;           // m/s² getting going
 const FLEE_SPEED = [2.2, 4.5];    // m/s, speeding up
 const FLEE_S = 3.2;               // swimming away, then gone
 const MIN_DEPTH = 0.7;            // m of water a pair needs (to go under in)
 
 // Town (`updateAmbient`)
 const AMBIENT_PAIRS = [2, 3];     // how many pairs at once
-const AMBIENT_NEAR = [6, 20];     // m from the player they come up
-const AMBIENT_LEAVE = 40;         // m: further than this → they go
-const AMBIENT_SHY = 3.5;          // m: closer than this → they dive and come up elsewhere
+const AMBIENT_NEAR = [11, 26];    // m from the player they come up
+const AMBIENT_LEAVE = 45;         // m: further than this → they go
+const AMBIENT_SHY = 6;            // m: closer than this → they dive and come up elsewhere
 const AMBIENT_WATCH_S = [7, 16];
 const AMBIENT_UNDER_S = [2, 6];
 const AMBIENT_FIRST_S = [1, 4];   // the first comes up this long after it's allowed
@@ -95,15 +97,19 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
     return { group, phase: Math.random() * Math.PI * 2, wig: rand(5, 8), bob: rand(1.4, 2.2) };
   };
 
-  /** A pair peeking up at (x, z) after `delay` s, watching `look` ({x, z} or a function → one). */
-  const spawnPair = ({ x, z, look = null, delay = 0, watchS = Infinity, shy = 0 }) => {
+  /** A pair peeking up at (x, z) after `delay` s, watching `look` ({x, z} or a function → one).
+   *  With `from` ({x, z}) it comes up there instead and swims in to (x, z), peeking, then settles. */
+  const spawnPair = ({ x, z, from = null, look = null, delay = 0, watchS = Infinity, shy = 0 }) => {
     if (!template) return null;
     const pair = {
-      x, z,
+      x: from ? from.x : x,
+      z: from ? from.z : z,
+      swimTo: from ? { x, z } : null,
+      speed: 0,
       yaw: Math.random() * Math.PI * 2,
       look,
       fish: [makeFish(), makeFish()],
-      state: 'wait',     // wait → rise → watch → dive → under → rise … / flee / gone
+      state: 'wait',     // wait → rise → (swim →) watch → dive → under → rise … / flee / gone
       t: -delay,
       sink: 1,           // 0 peeking … 1 under
       watchS,
@@ -111,6 +117,9 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
       drift: { x: 0, z: 0, t: 0 },
       flee: null,
     };
+    // (already facing whoever it watches)
+    const lp = lookPoint(pair);
+    if (lp) pair.yaw = Math.atan2(lp.x - pair.x, lp.z - pair.z);
     pairs.push(pair);
     return pair;
   };
@@ -166,12 +175,12 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
     return _pose;
   };
 
-  const placeFish = (f, x, z, yaw, sink, t, level) => {
+  const placeFish = (f, x, z, yaw, sink, t, level, wigK = 1) => {
     const peekY = level - EYE_Y * FISH_SCALE - PEEK_SINK;
     const underBy = BODY_H * FISH_SCALE + 0.25;
     const bob = Math.sin(t * f.bob + f.phase) * BOB_AMP;
     f.group.position.set(x, peekY + bob - easeInOut(Math.min(1, sink)) * underBy, z);
-    f.group.rotation.set(Math.sin(t * f.bob * 0.7 + f.phase) * 0.05, yaw + Math.sin(t * f.wig + f.phase) * WIGGLE, 0);
+    f.group.rotation.set(Math.sin(t * f.bob * 0.7 + f.phase) * 0.05, yaw + Math.sin(t * f.wig * wigK + f.phase) * WIGGLE, 0);
     f.group.visible = sink < 0.999;
   };
 
@@ -205,7 +214,17 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
         if (p.t >= 0) { p.state = 'rise'; p.t = 0; }
       } else if (p.state === 'rise') {
         p.sink = 1 - Math.min(1, p.t / RISE_S);
-        if (p.t >= RISE_S) { p.state = 'watch'; p.t = 0; p.sink = 0; }
+        if (p.t >= RISE_S) { p.state = p.swimTo ? 'swim' : 'watch'; p.t = 0; p.sink = 0; }
+      } else if (p.state === 'swim') {
+        // Swimming in to its spot, eyes up: speeding up, slowing to a stop there
+        p.sink = 0;
+        const dx = p.swimTo.x - p.x;
+        const dz = p.swimTo.z - p.z;
+        const left = Math.hypot(dx, dz);
+        p.speed = Math.min(SWIM_SPEED, p.speed + SWIM_ACCEL * dt, 0.15 + left * 1.1);
+        const step = Math.min(left, p.speed * dt);
+        if (left > 1e-3) { p.x += (dx / left) * step; p.z += (dz / left) * step; }
+        if (left - step < 0.03) { p.swimTo = null; p.state = 'watch'; p.t = 0; p.drift.t = rand(1.5, 3); }
       } else if (p.state === 'watch') {
         p.sink = 0;
         // (a slow wander, staying in deep enough water)
@@ -228,11 +247,11 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
       if (lp) {
         const want = Math.atan2(lp.x - p.x, lp.z - p.z);
         const d = wrapAngle(want - p.yaw);
-        p.yaw += Math.sign(d) * Math.min(Math.abs(d), TURN_RATE * dt * (p.state === 'watch' ? 1 : 0.5));
+        p.yaw += Math.sign(d) * Math.min(Math.abs(d), TURN_RATE * dt * (p.state === 'watch' || p.state === 'swim' ? 1 : 0.5));
       }
       p.fish.forEach((f, i) => {
         const pose = fishPose(p, i);
-        placeFish(f, pose.x, pose.z, pose.yaw, p.sink, clock, level);
+        placeFish(f, pose.x, pose.z, pose.yaw, p.sink, clock, level, p.state === 'swim' ? 1 + p.speed : 1);
       });
     }
   };
@@ -256,7 +275,7 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
     const look = () => player;
     if (!on) {
       // (they slip under and go)
-      for (const p of pairs) if (p.state === 'watch' || p.state === 'rise') { p.state = 'dive'; p.t = RISE_S * p.sink; }
+      for (const p of pairs) if (p.state === 'watch' || p.state === 'rise' || p.state === 'swim') { p.state = 'dive'; p.t = RISE_S * p.sink; }
       for (let k = pairs.length - 1; k >= 0; k -= 1) {
         const p = pairs[k];
         if (p.state === 'wait' || p.state === 'under') removePair(p);

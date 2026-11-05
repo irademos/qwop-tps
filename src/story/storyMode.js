@@ -59,7 +59,7 @@ const FLASH_S = 1.6;          // the lightning (two flashes and a fading glow)
 const THUNDER_AT_S = 0.45;    // the thunder, this far into it
 const DARK_S = 2.2;           // black again (he's put on the stone meanwhile)
 const FADE_IN_S = 3.5;        // the fade in on him playing, from behind
-const PLAY_BEFORE_CROW_S = 6; // playing before the Crow comes (in on the same shot)
+const PLAY_BEFORE_CROW_S = 11; // playing before the Crow comes (in on the same shot)
 const FLASH_COLOR = 0xd8e4ff;
 const FLASH_LIGHT = 3.2;      // the lightning's light at its brightest
 const FLASH_SCREEN = 0.28;    // the white over the screen at its brightest
@@ -77,10 +77,11 @@ const NOTE_EVERY_S = 0.6;     // ♪ off the flute
 const NOTE_LIFE_S = 1.8;
 const CROW_FROM_UP = 10;      // m up over the sea the Crow comes from
 // Eye fish (src/environment/eyeFish.js) watching him play from the water, until the Crow comes
-const EYE_FISH_PAIRS = [      // m out to sea from the stone / to the side / s after the dark starts
-  { out: 8, side: -3.6, at: DARK_S + 1.2 },
-  { out: 10, side: 3.4, at: DARK_S + FADE_IN_S + 1 },
+const EYE_FISH_PAIRS = [      // where they settle: m out to sea from the stone / to the side; s after the fade in they come up
+  { out: 12, side: -4.6, at: 0.2 },
+  { out: 14, side: 4.3, at: 1.2 },
 ];
+const EYE_FISH_SWIM_IN = 8;   // m further out they come up, then swim in to their spot
 const TALK_DIST = 2.8;        // m from the Crow: Talk
 const TREE_TALK_DIST = 3.2;   // m from the sacred tree: Talk (once the Crow's told of it)
 const TREE_REVEAL_HOLD_S = 4; // s it stays awake (turned to the player) after its last line
@@ -927,7 +928,7 @@ export function createStoryMode(ctx) {
   };
 
   // ── The cut scene ──
-  // Eye fish: pairs peeking out of the water in front of him, watching him play
+  // Eye fish: once it's faded in, pairs come up out at sea and swim in to watch him play
   const spawnEyeFish = () => {
     eyeFish.clear();
     const d = L.dir;
@@ -939,7 +940,9 @@ export function createStoryMode(ctx) {
         const x = L.seat.x + d.x * out + side.x * e.side;
         const z = L.seat.z + d.z * out + side.z * e.side;
         if (!eyeFish.okWater(x, z)) continue;
-        eyeFish.spawnPair({ x, z, look, delay: e.at });
+        const from = { x: x + d.x * EYE_FISH_SWIM_IN + side.x * e.side * 0.3, z: z + d.z * EYE_FISH_SWIM_IN + side.z * e.side * 0.3 };
+        // (they come up once it's faded in — the dark and the fade come first)
+        eyeFish.spawnPair({ x, z, from: eyeFish.okWater(from.x, from.z) ? from : null, look, delay: DARK_S + FADE_IN_S + e.at });
         break;
       }
     }
