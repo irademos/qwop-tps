@@ -1,5 +1,6 @@
 // app.js
 import '../core/appUpdate.js'; // "new version" banner — first, so it runs even if the game can't boot
+import { setupOfflineCache } from '../core/offlineCache.js';
 import QRCode from 'qrcode';
 import * as THREE from "three";
 import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/bloodEffect.js";
@@ -20,7 +21,7 @@ import { createEyeFish } from '../environment/eyeFish.js';
 import { showFeatureLoading } from '../features/loadingState.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
-import { createMatchMode, MATCH_CHARACTERS } from '../multiplayer/matchMode.js';
+import { createMatchMode, MATCH_CHARACTERS, ARENA_LOCATION } from '../multiplayer/matchMode.js';
 import { PlayerControls } from '../controls/controls.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
@@ -73,7 +74,7 @@ import { OAR_REST_SWING, OAR_REST_TILT, OAR_TIP_AT, oarGripPoint, oarStrokeDurat
 import { CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
 import { createBroomRide } from '../items/broom.js';
 import { CANOE_STAND_Z, WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
-import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
+import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE, STAGE_BOSS_SCALE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
 import {
@@ -104,10 +105,14 @@ import {
   loadStorySave,
   saveStorySave,
   saveTownSave,
+  loadEndlessStats,
+  recordEndlessRun,
+  normalizeEndlessStats,
   randomGuestName,
   buildGuestProfile
 } from '../features/persistenceFeature.js';
 
+setupOfflineCache();
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     if (location.hostname !== 'localhost') {
@@ -330,6 +335,7 @@ function createArcadeOverlay(startOverlay) {
   const modeSelect = startOverlay.querySelector('[data-arcade-modes]');
   const tutorialButton = startOverlay.querySelector('[data-arcade-tutorial]');
   const showdownButton = startOverlay.querySelector('[data-arcade-showdown]');
+  const endlessButton = startOverlay.querySelector('[data-arcade-endless]');
   const multiplayerButton = startOverlay.querySelector('[data-arcade-multiplayer]');
   const classicButton = startOverlay.querySelector('[data-arcade-classic]');
   const townButton = startOverlay.querySelector('[data-arcade-town]');
@@ -666,6 +672,7 @@ function createArcadeOverlay(startOverlay) {
   startButton?.addEventListener('click', () => chooseMode('tutorial'));
   tutorialButton?.addEventListener('click', () => chooseMode('tutorial'));
   showdownButton?.addEventListener('click', () => chooseMode('showdown'));
+  endlessButton?.addEventListener('click', () => chooseMode('endless'));
   multiplayerButton?.addEventListener('click', () => chooseMode('multiplayer'));
   classicButton?.addEventListener('click', () => chooseMode('classic'));
   townButton?.addEventListener('click', () => chooseMode('town'));
@@ -4371,6 +4378,8 @@ async function initCore(runtimeContext) {
   // blocking/idling (20% at stage 1, rising to 60% by stage 21).
   const _psMaxAttackers = (stage) => (stage <= 7 ? 1 : Math.min(4, 2 + Math.floor((stage - 8) / 4)));
   const _psSwingChance = (stage) => Math.min(0.6, 0.2 + Math.max(0, stage - 1) * 0.02);
+  // The stage the enemies' difficulty follows (Endless: its wave's — _endlessWave)
+  const _psDiffStage = () => (_endless ? _endless.diff : _psStage);
   const _spawnHordeEnemy = (opts = {}) => {
     const angle = Math.random() * Math.PI * 2;
     const dist  = 5 + Math.random() * 4;
@@ -4391,11 +4400,11 @@ async function initCore(runtimeContext) {
         position: spawnPos,
         hearts: opts.hearts ?? 3,
         speedScale: opts.speedScale ?? 1.0,
-        swingChance: opts.swingChance ?? _psSwingChance(_psStage),
+        swingChance: opts.swingChance ?? _psSwingChance(_psDiffStage()),
         characterUrl: opts.characterUrl,
         swordDamage: opts.swordDamage,
         nameTag: opts.nameTag,
-        showHealthBar: !opts.pemberton && !opts.stageBoss, // (theirs is across the top of the screen)
+        showHealthBar: !opts.pemberton && !opts.stageBoss && !opts.champion, // (theirs is across the top of the screen)
         wand: !!opts.wand,
         ranged: opts.wand ? WAND_ENEMY_RANGE : undefined,
       });
@@ -5249,6 +5258,12 @@ async function initCore(runtimeContext) {
     && (_psStageActive || !!showdownTutorial?.isActive() || !!town?.isActive() || !!story?.isActive());
   // Enemies don't attack the player: dead (body carried off) or just back from a pause
   const _attacksHeld = () => playerDead || _psBossTalking || performance.now() < _pauseGraceUntil;
+  // Endless Showdown's run (startEndlessMode, before _resetForMenu): null outside it
+  let _endless = null;
+  let _endlessPanel = null;        // its start / results card
+  let _endlessPanelAction = null;  // the card's main button (Start / Play Again)
+  let _endlessStats = null;        // { best, bestWave, runs } (the better of this device's / the profile's)
+  const _endlessPanelOpen = () => !!_endlessPanel && !_endlessPanel.classList.contains('hidden');
   let _psStageKills = 0;       // enemies killed this stage
   let _psStageTotal = 0;       // enemies in this stage
   let _psKillHud = null;
@@ -5260,8 +5275,14 @@ async function initCore(runtimeContext) {
       _psKillHud.setAttribute('aria-live', 'polite');
       document.body.appendChild(_psKillHud);
     }
-    _psKillHud.textContent = `⚔️ ${Math.min(_psStageKills, _psStageTotal)} / ${_psStageTotal}`;
-    _psKillHud.classList.toggle('hidden', !visible || _classicMode || _psIsFinalStage(_psStage));
+    if (_endless) {
+      const best = _endlessStats?.best || 0;
+      _psKillHud.textContent = `⚔️ ${_psStageKills} · Wave ${Math.max(1, _endless.wave)} · 🏆 ${Math.max(best, _psStageKills)}`;
+    } else {
+      _psKillHud.textContent = `⚔️ ${Math.min(_psStageKills, _psStageTotal)} / ${_psStageTotal}`;
+    }
+    _psKillHud.classList.toggle('ps-kill-best', !!_endless && _psStageKills > (_endlessStats?.best || 0));
+    _psKillHud.classList.toggle('hidden', !visible || _classicMode || (!_endless && _psIsFinalStage(_psStage)));
     if (_classicMode) _classicUpdateScore();
   };
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
@@ -6938,6 +6959,7 @@ async function initCore(runtimeContext) {
       // The Block bar as an interact button: the calibration popup's Okay, a boss's talk, the village
       if (_isSwordCalibPromptOpen()) document.getElementById('phone-sword-connect-calib-ok')?.click();
       else if (_gamePaused) return;
+      else if (_endlessPanelOpen()) _endlessPanelAction?.();
       else if (bossTalk.isOpen()) bossTalk.interact();
       else if (village?.isOpen()) village.interact();
       else if (town?.isActive()) town.interact();
@@ -6998,6 +7020,7 @@ async function initCore(runtimeContext) {
   // null: interact, but nothing to do) — the calibration popup, a boss's talk, the village
   const _phoneInteract = () => {
     if (_isSwordCalibPromptOpen()) return 'Okay';
+    if (_endlessPanelOpen()) return _endless?.result ? 'Play Again' : 'Start';
     if (bossTalk.isOpen()) return bossTalk.interactLabel();
     if (village?.isOpen()) return village.interactLabel();
     // Town: only with empty hands (✋ Hands), the fishing rod or the canoe's oar — holding a weapon,
@@ -7403,12 +7426,14 @@ async function initCore(runtimeContext) {
       _psStats.deaths = (_psStats.deaths || 0) + 1;
       if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
     }
+    _endlessOnDeath(); // (Endless: the run's score saved now)
     hideGameOver();
     gameOverOverlay.classList.remove('hidden');
     gameOverMessage.classList.remove('hidden');
     const backToStageScreen = () => {
       hideGameOver();
       respawnPlayer();
+      if (_endless) { _endlessAfterDeath(); return; }
       _psRestartCurrentStage();
     };
     // Showdown: two frog men walk up, pick the player up and carry them off screen first
@@ -8449,8 +8474,311 @@ async function initCore(runtimeContext) {
   window.eyeFish = eyeFish; // (dev console)
   const _eyeFishWanted = () => !!(town?.isActive() && !town.isIndoors() && town.nightLevel() >= 0.5);
 
+  // ── Endless Showdown (start screen → Endless; mode `endless`) ──
+  // Waves of enemies come at the player in the Multiplayer arena (ARENA_LOCATION) until they
+  // die; the score is the kills of the run, against the best (this device's — localStorage
+  // `ps_endless_<key | guest>`, so it works offline and for guests — and, signed in, the
+  // profile's `endlessStats`). Every wave is bigger and harder (`_endlessWave`): more alive at
+  // once, more hearts, more attackers / swings (`_psDiffStage`), and new kinds join in: bombers
+  // (ENDLESS_FROM.bomber), archers (bow — the boss fighter logic with a gun), wand casters,
+  // shield bearers; every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
+  // health bar across the top, more gear each time — stageBossGear). Between waves: heart bubbles
+  // and a few coins. The player's Showdown coins / gear / health are used (it is Showdown).
+  const ENDLESS_SPAWN_DIST = [9, 15];  // m from the player
+  const ENDLESS_BREAK_MS = 4500;       // between waves
+  const ENDLESS_CHAMPION_EVERY = 5;
+  const ENDLESS_FROM = { bomber: 2, archer: 3, wand: 4, shield: 6, gearBombs: 10 };
+  const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'tree'];
+  const _endlessWave = (w) => ({
+    count: Math.min(40, 5 + 2 * w),
+    maxAlive: Math.min(12, 3 + Math.floor(w / 2)),
+    gapMs: Math.max(350, 1300 - 50 * w),
+    diff: w + Math.floor(w / 2), // (the Showdown stage its hearts / attackers / swings follow)
+    speed: PS_ENEMY_SPEED * (1 + Math.min(0.5, (w - 1) * 0.04)),
+    bomber: w >= ENDLESS_FROM.bomber ? Math.min(0.18, 0.07 + 0.015 * (w - ENDLESS_FROM.bomber)) : 0,
+    archer: w >= ENDLESS_FROM.archer ? Math.min(0.2, 0.07 + 0.015 * (w - ENDLESS_FROM.archer)) : 0,
+    wand: w >= ENDLESS_FROM.wand ? Math.min(0.2, 0.06 + 0.015 * (w - ENDLESS_FROM.wand)) : 0,
+    shield: w >= ENDLESS_FROM.shield ? Math.min(0.2, 0.06 + 0.015 * (w - ENDLESS_FROM.shield)) : 0,
+    champion: w % ENDLESS_CHAMPION_EVERY === 0,
+  });
+  const ENDLESS_NEWS = {
+    [ENDLESS_FROM.bomber]: 'Bomb throwers join the fight',
+    [ENDLESS_FROM.archer]: 'Archers join the fight',
+    [ENDLESS_FROM.wand]: 'Wizards join the fight',
+    [ENDLESS_FROM.shield]: 'Shield bearers join the fight',
+  };
+  const _endlessLsKey = () => `ps_endless_${profileNameKey || 'guest'}`;
+  const _endlessLoadLocal = () => {
+    try { return normalizeEndlessStats(JSON.parse(localStorage.getItem(_endlessLsKey()) || 'null')); } catch (_) { return normalizeEndlessStats(null); }
+  };
+  const _endlessSaveLocal = (stats) => {
+    try { localStorage.setItem(_endlessLsKey(), JSON.stringify(stats)); } catch (_) {}
+  };
+  const _endlessMergeStats = (a, b) => ({
+    best: Math.max(a?.best || 0, b?.best || 0),
+    bestWave: Math.max(a?.bestWave || 0, b?.bestWave || 0),
+    runs: Math.max(a?.runs || 0, b?.runs || 0),
+  });
+
+  // The start / results card: title, the run's kills (results), best, Start / Play Again + Lobby
+  const _endlessShowPanel = ({ result = null } = {}) => {
+    if (!_endlessPanel) {
+      _endlessPanel = document.createElement('div');
+      _endlessPanel.className = 'endless-panel ui-panel hidden';
+      _endlessPanel.innerHTML = `
+        <div class="endless-title"></div>
+        <div class="endless-score"><span class="endless-kills"></span><span class="endless-kills-label">kills</span></div>
+        <div class="endless-new">New best!</div>
+        <div class="endless-sub"></div>
+        <div class="endless-help"></div>
+        <div class="endless-btns">
+          <button type="button" class="ui-btn endless-go"></button>
+          <button type="button" class="ui-btn-secondary endless-lobby">Lobby</button>
+        </div>`;
+      document.body.appendChild(_endlessPanel);
+      _endlessPanel.querySelector('.endless-go').addEventListener('click', () => _endlessPanelAction?.());
+      _endlessPanel.querySelector('.endless-lobby').addEventListener('click', () => {
+        _resetForMenu();
+        arcadeOverlay.showStartScreen();
+      });
+    }
+    const s = _endlessStats || normalizeEndlessStats(null);
+    const q = (sel) => _endlessPanel.querySelector(sel);
+    q('.endless-title').textContent = result ? 'GAME OVER' : 'ENDLESS';
+    q('.endless-score').classList.toggle('hidden', !result);
+    q('.endless-kills').textContent = result ? String(result.kills) : '';
+    q('.endless-new').classList.toggle('hidden', !result?.newBest);
+    q('.endless-sub').textContent = result
+      ? `Wave ${result.wave} · Best ${s.best} kills`
+      : (s.best > 0 ? `Your best: ${s.best} kills (wave ${s.bestWave})` : 'No best yet');
+    q('.endless-help').textContent = result ? '' : 'Waves keep coming, each one tougher. How many can you take down?';
+    q('.endless-help').classList.toggle('hidden', !!result);
+    q('.endless-go').textContent = result ? 'Play Again' : 'Start';
+    _endlessPanelAction = () => {
+      _endlessHidePanel();
+      _villageUnsheathe();
+      _requireSwordCalibration(_endlessBegin);
+    };
+    _endlessPanel.classList.remove('hidden');
+    document.body.classList.add('endless-panel-open');
+    _villageSheathe();
+  };
+  const _endlessHidePanel = () => {
+    _endlessPanel?.classList.add('hidden');
+    document.body.classList.remove('endless-panel-open');
+  };
+  // (Enter / the phone's interact press the panel's main button)
+  window.addEventListener('keydown', (e) => {
+    if (!_endlessPanelOpen() || (e.key !== 'Enter' && e.key !== ' ')) return;
+    if (document.body.classList.contains('settings-open')) return;
+    e.preventDefault();
+    _endlessPanelAction?.();
+  });
+
+  // The field cleared: enemies, bombs, spells, heart bubbles
+  const _endlessClearField = () => {
+    for (let i = hordeEnemies.length - 1; i >= 0; i--) _tutorialRemoveEnemy(hordeEnemies[i]);
+    _psBoss?.dispose();
+    _psBoss = null;
+    playerBombs?.clear();
+    magicBlasts.clear();
+    heartBubbles.clear();
+    stageChests.clear();
+    thawPlayer();
+  };
+
+  // Somewhere on dry ground round the player, not far above / below them
+  const _endlessSpawnSpot = () => {
+    const p = playerModel.position;
+    for (let tries = 0; tries < 24; tries++) {
+      const a = Math.random() * Math.PI * 2;
+      const near = tries >= 16; // (no luck further out: closer in)
+      const d = near ? 5 + Math.random() * 3 : ENDLESS_SPAWN_DIST[0] + Math.random() * (ENDLESS_SPAWN_DIST[1] - ENDLESS_SPAWN_DIST[0]);
+      const x = p.x + Math.cos(a) * d;
+      const z = p.z + Math.sin(a) * d;
+      const y = getTerrainHeight(x, z);
+      if (!Number.isFinite(y) || Math.abs(y - p.y) > 2.5 || _isOverWater(x, z)) continue;
+      return new THREE.Vector3(x, y, z);
+    }
+    return null;
+  };
+
+  const _endlessSpawnOne = (champion) => {
+    const e = _endless;
+    const W = e.def;
+    const r = Math.random();
+    let kind = 'sword';
+    if (champion) kind = 'champion';
+    else if (r < W.bomber) kind = 'bomber';
+    else if (r < W.bomber + W.archer) kind = 'archer';
+    else if (r < W.bomber + W.archer + W.wand) kind = 'wand';
+    else if (r < W.bomber + W.archer + W.wand + W.shield) kind = 'shield';
+    const charKey = kind === 'wand' ? PS_WAND_ENEMY_CHARACTER
+      : ENDLESS_CHARACTERS[Math.floor(Math.random() * ENDLESS_CHARACTERS.length)];
+    const url = MATCH_CHARACTERS[charKey].url;
+    if (!isCharacterModelSettled(url)) { preloadCharacterModel(url); return false; }
+    const pos = _endlessSpawnSpot();
+    if (!pos) return false;
+    const hearts = champion ? 4 + 2 * (e.wave / ENDLESS_CHAMPION_EVERY) : _psHeartsForStage(W.diff);
+    const enemy = _spawnHordeEnemy({
+      position: pos, hearts, speedScale: W.speed,
+      bombThrower: kind === 'bomber', wand: kind === 'wand', characterUrl: url,
+      champion,
+      swingChance: champion ? Math.min(0.75, _psSwingChance(W.diff) + PS_BOSS_SWING_BONUS) : undefined,
+    });
+    enemy.group.rotation.y = Math.atan2(playerModel.position.x - pos.x, playerModel.position.z - pos.z);
+    if (champion) {
+      const gear = stageBossGear(1 + e.wave / ENDLESS_CHAMPION_EVERY);
+      const boss = createBossFighter({
+        ..._bossFighterCtx(enemy), name: `Champion of wave ${e.wave}`, gear,
+        scale: STAGE_BOSS_SCALE, swordScale: 1.12, bodyHitRadius: 0.75, bodyHitCenterY: 0.95,
+      });
+      if (gear.wand) enemy.onCast = (cast) => _castEnemySpell(enemy, cast);
+      _psBoss?.dispose();
+      _psTrackBoss(boss, enemy);
+    } else if (kind === 'archer' || kind === 'shield') {
+      const gear = kind === 'archer'
+        ? { gun: true, bombs: e.wave >= ENDLESS_FROM.gearBombs && Math.random() < 0.3 }
+        : { shield: true, bombs: e.wave >= ENDLESS_FROM.gearBombs && Math.random() < 0.3 };
+      const fighter = createBossFighter({
+        ..._bossFighterCtx(enemy), name: '', gear, hud: false, glow: false,
+        ...(kind === 'archer' ? { swordMs: [1500, 3200] } : {}),
+      });
+      enemy.onAfterUpdate = () => fighter.update();
+    }
+    return true;
+  };
+
+  const _endlessStartWave = (w) => {
+    const def = _endlessWave(w);
+    Object.assign(_endless, { wave: w, def, diff: def.diff, toSpawn: def.count, phase: 'fight', nextSpawnAt: performance.now() + 600 });
+    const news = def.champion ? 'A champion is coming' : ENDLESS_NEWS[w] || `${def.count} enemies`;
+    _showWorldBanner(`WAVE ${w}`, news, 2200);
+    _psUpdateKillHud(true);
+  };
+
+  // Each frame (game loop, before the controls): spawn, wave cleared, the break, the next wave
+  const _endlessUpdate = () => {
+    const e = _endless;
+    if (!e || e.phase === 'over' || e.phase === 'idle' || playerDead) return;
+    const now = performance.now();
+    if (e.phase === 'break') {
+      if (now >= e.breakUntil) _endlessStartWave(e.wave + 1);
+      return;
+    }
+    const alive = hordeEnemies.reduce((n, h) => n + (h.isDead ? 0 : 1), 0);
+    if (e.toSpawn > 0 && now >= e.nextSpawnAt && alive < e.def.maxAlive) {
+      if (_endlessSpawnOne(e.toSpawn === 1 && e.def.champion)) {
+        e.toSpawn -= 1;
+        e.nextSpawnAt = now + e.def.gapMs;
+      }
+      return;
+    }
+    if (e.toSpawn === 0 && alive === 0) {
+      e.phase = 'break';
+      e.breakUntil = now + ENDLESS_BREAK_MS;
+      comboMeter.end();
+      const bonus = 4 + 2 * e.wave;
+      _spawnRewardCoins(bonus);
+      const hearts = Math.min(3, 1 + Math.floor(e.wave / 3));
+      for (let i = 0; i < hearts; i++) {
+        const a = (i / hearts) * Math.PI * 2 + Math.random();
+        heartBubbles.spawn(playerModel.position.clone().add(new THREE.Vector3(Math.cos(a) * 3.5, 0, Math.sin(a) * 3.5)));
+      }
+      _showWorldBanner(`WAVE ${e.wave} CLEARED`, `+${bonus} coins`, 2600);
+    }
+  };
+
+  // Down: the run's over (showGameOver) — saved now, the results once the body's carried off
+  const _endlessOnDeath = () => {
+    const e = _endless;
+    if (!e || e.phase === 'over') return;
+    e.phase = 'over';
+    _psStageActive = false;
+    comboMeter.end();
+    const kills = _psStageKills;
+    const wave = e.wave;
+    const prev = _endlessStats || normalizeEndlessStats(null);
+    const newBest = kills > prev.best;
+    _endlessStats = {
+      best: Math.max(prev.best, kills),
+      bestWave: Math.max(prev.bestWave, wave),
+      runs: prev.runs + 1,
+    };
+    _endlessSaveLocal(_endlessStats);
+    if (profileNameKey) void recordEndlessRun(profileNameKey, { kills, wave });
+    e.result = { kills, wave, newBest };
+  };
+  // After the carry: the field cleared, back at the arena, the results card
+  const _endlessAfterDeath = () => {
+    const result = _endless?.result;
+    _endlessClearField();
+    _psUpdateKillHud(false);
+    _endlessToArena();
+    _endlessShowPanel({ result });
+  };
+  const _endlessToArena = () => {
+    _teleportPlayer(ARENA_LOCATION.x, ARENA_LOCATION.z, ARENA_LOCATION.yaw);
+  };
+
+  // A run: full health, the field empty, wave 1 after a moment
+  const _endlessBegin = () => {
+    if (!_endless) return;
+    _endlessHidePanel();
+    _endlessClearField();
+    if (playerDead) { hideGameOver(); respawnPlayer(); }
+    _endlessToArena();
+    setStat('health', statsState.maxHealthSegments);
+    comboMeter.reset();
+    _psEnemyQueue = [];
+    _psPath = null;
+    _psAutoWalking = false;
+    _psStageKills = 0;
+    _psStageTotal = 0;
+    _psStageActive = true;
+    _psWinShown = false;
+    Object.assign(_endless, { wave: 0, def: _endlessWave(1), diff: 1, toSpawn: 0, phase: 'break', breakUntil: performance.now() + 1500, result: null });
+    _psUpdateKillHud(true);
+    _psSongPool = [];
+    _psStopSong();
+    _psPlayNextSong(false);
+  };
+
+  const startEndlessMode = () => {
+    _resetForMenu();
+    _endless = { wave: 0, def: _endlessWave(1), diff: 1, toSpawn: 0, phase: 'idle', result: null };
+    document.body.classList.add('endless-mode');
+    setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected]?.url ?? glbCharacterConfig.villageBoyUrl);
+    _endlessToArena();
+    [...ENDLESS_CHARACTERS, PS_WAND_ENEMY_CHARACTER].forEach((k) => preloadCharacterModel(MATCH_CHARACTERS[k].url));
+    _endlessStats = _endlessMergeStats(_endlessStats, _endlessLoadLocal());
+    _endlessShowPanel();
+    // (the profile's best, when the network answers: the card updates if it's still up)
+    if (profileNameKey) {
+      void loadEndlessStats(profileNameKey).then((cloud) => {
+        if (!cloud) return;
+        _endlessStats = _endlessMergeStats(_endlessStats, cloud);
+        _endlessSaveLocal(_endlessStats);
+        if (_endless?.phase === 'idle' && _endlessPanelOpen()) _endlessShowPanel();
+      });
+    }
+  };
+  // (dev console: endless.debug(), endless.startWave(n))
+  window.endless = {
+    debug: () => ({ run: _endless, stats: _endlessStats, kills: _psStageKills, alive: hordeEnemies.filter((h) => !h.isDead).length }),
+    startWave: (w) => { if (_endless && _endless.phase !== 'idle') _endlessStartWave(w); },
+  };
+  // Leaving (the lobby, another mode)
+  const _endlessStop = () => {
+    if (!_endless) return;
+    _endless = null;
+    _endlessHidePanel();
+    document.body.classList.remove('endless-mode');
+  };
+
   const _resetForMenu = () => {
     cancelBowDraw();
+    _endlessStop();
     _birdsMode = false;
     birds.clear();
     eyeFish.clear();
@@ -9884,6 +10212,8 @@ async function initCore(runtimeContext) {
       void _psInit();
     } else if (gameMode === 'classic') {
       void startClassicMode();
+    } else if (gameMode === 'endless') {
+      startEndlessMode();
     } else if (gameMode === 'multiplayer') {
       startMultiplayerMode();
     } else if (gameMode === 'roam') {
@@ -9896,7 +10226,7 @@ async function initCore(runtimeContext) {
       startTutorialMode();
     }
     // (after the mode's start: those reset to the menu on the way in)
-    _birdsMode = gameMode === 'showdown' || gameMode === 'town';
+    _birdsMode = gameMode === 'showdown' || gameMode === 'endless' || gameMode === 'town';
   };
 
   // Mode picked on the start screen (first time, after the tutorial, leaving the lobby):
@@ -10043,6 +10373,7 @@ async function initCore(runtimeContext) {
     updateRoadLightsNearPlayer();
     // A voyage on the pirate ship: it sails, carrying everyone aboard (before the player moves)
     _voyageUpdate(frameDelta);
+    _endlessUpdate();
     // Town's flying broom: it moves the player (before the controls place them), then sits
     // under them (after)
     _updateBroom(frameDelta);
@@ -10649,7 +10980,7 @@ async function initCore(runtimeContext) {
 
       // Win detection
       // (a voyage ends back at anchor instead — _voyageUpdate)
-      if (_psStageActive && !_psWinShown && !_voyage && _psEnemyQueue.length === 0 && (hordeEnemies.length > 0 || _psSparedEnemies.length > 0)
+      if (_psStageActive && !_psWinShown && !_voyage && !_endless && _psEnemyQueue.length === 0 && (hordeEnemies.length > 0 || _psSparedEnemies.length > 0)
         && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;
@@ -10990,7 +11321,7 @@ async function initCore(runtimeContext) {
 
       // Determine which swordsmen get an attack slot (closest alive ones, count by stage;
       // bombers don't use slots)
-      const _MAX_ATTACKERS = _psMaxAttackers(_psStage);
+      const _MAX_ATTACKERS = _psMaxAttackers(_psDiffStage());
       const _liveEnemies = hordeEnemies.filter(e => !e.isDead && !(e instanceof BombThrowerEnemy) && !e.wand
         && e.script?.mode !== 'passive'); // (a stage boss waiting to talk)
       _liveEnemies.sort((a, b) =>

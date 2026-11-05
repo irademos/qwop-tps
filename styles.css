@@ -2970,6 +2970,63 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   white-space: nowrap;
 }
 .ps-kill-counter.hidden { display: none; }
+/* Endless: past the best */
+.ps-kill-counter.ps-kill-best { color: var(--accent-hi); border-color: var(--accent-ring); }
+
+/* ── Endless Showdown: the start / results card (startEndlessMode in bootstrapGameApp.js) ── */
+.endless-panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1200;
+  width: min(360px, calc(100vw - 32px));
+  padding: 22px 22px 18px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.endless-panel.hidden { display: none; }
+.endless-title {
+  font: 800 28px/1.1 var(--font-display);
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+.endless-score { display: flex; align-items: baseline; justify-content: center; gap: 8px; }
+.endless-score.hidden, .endless-new.hidden, .endless-help.hidden { display: none; }
+.endless-kills { font: 800 56px/1 var(--font-display); color: var(--text); font-variant-numeric: tabular-nums; }
+.endless-kills-label { font: 600 16px/1 var(--font-ui); color: var(--text-muted); }
+.endless-new { font: 800 15px/1.2 var(--font-ui); color: var(--accent-hi); letter-spacing: 0.08em; text-transform: uppercase; }
+.endless-sub { font: 600 15px/1.3 var(--font-ui); color: var(--text); }
+.endless-help { font: 500 14px/1.4 var(--font-ui); color: var(--text-muted); }
+.endless-btns { display: flex; gap: 10px; justify-content: center; margin-top: 8px; }
+.endless-btns > button { flex: 1 1 0; }
+/* The card up: no fight controls under it */
+body.endless-panel-open #joystick-container,
+body.endless-panel-open #action-buttons,
+body.endless-panel-open #jump-button,
+body.endless-panel-open #ps-kill-counter { visibility: hidden; }
+
+/* "Ready to play offline" (src/core/offlineCache.js) */
+.offline-note {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translate(-50%, 160%);
+  opacity: 0;
+  z-index: 9500;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font: 600 14px/1.2 var(--font-ui);
+  pointer-events: none;
+  transition: transform 0.35s var(--ease), opacity 0.35s;
+}
+.offline-note.is-shown { transform: translate(-50%, 0); opacity: 1; }
 /* Phones: the name pill reaches the middle — sit beside the settings button instead */
 @media (max-width: 600px) {
   .ps-kill-counter {
