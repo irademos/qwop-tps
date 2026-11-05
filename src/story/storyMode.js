@@ -78,8 +78,8 @@ const NOTE_LIFE_S = 1.8;
 const CROW_FROM_UP = 10;      // m up over the sea the Crow comes from
 // Eye fish (src/environment/eyeFish.js) watching him play from the water, until the Crow comes
 const EYE_FISH_PAIRS = [      // m out to sea from the stone / to the side / s after the dark starts
-  { out: 9, side: -2.4, at: DARK_S + 1.2 },
-  { out: 12, side: 2.6, at: DARK_S + FADE_IN_S + 1.5 },
+  { out: 8, side: -3.6, at: DARK_S + 1.2 },
+  { out: 10, side: 3.4, at: DARK_S + FADE_IN_S + 1 },
 ];
 const TALK_DIST = 2.8;        // m from the Crow: Talk
 const TREE_TALK_DIST = 3.2;   // m from the sacred tree: Talk (once the Crow's told of it)
