@@ -19,10 +19,11 @@ export const EYE_FISH_MODEL_URL = '/assets/props/eye_fish.glb?v=1';
 const FISH_SCALE = 0.85;          // the GLB is 1 m long
 const EYE_Y = 0.33;               // model units: the eyes' middle over the model's origin
 const BODY_H = 0.76;              // model units: belly to the top of the fin
-const NOSE_GAP = 0.12;            // m between the two noses
+const NOSE_GAP = [0.04, 0.45];    // m between the two noses: each pair drifts closer / further apart within this
+const GAP_FREQ = [0.12, 0.3];     // rad/s of that drift (two slow waves, so it never quite repeats)
 const EMISSIVE = 0.45;            // a faint glow so they read in the dark
 const RISE_S = 1.4;               // coming up / going under
-const PEEK_SINK = 0.06;           // m: how far under the eyes' middle the water line sits
+const PEEK_RISE = 0.11;           // m: how far over the eyes' middle the water line sits under them (eyes well out)
 const BOB_AMP = 0.05;             // m
 const WIGGLE = 0.14;              // rad: each fish's tail sway
 const TURN_RATE = 2.2;            // rad/s turning to face the player
@@ -115,6 +116,9 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
       watchS,
       shy,
       drift: { x: 0, z: 0, t: 0 },
+      gap: rand(...NOSE_GAP),
+      gapT: Math.random() * 100,
+      gapF: [rand(...GAP_FREQ), rand(...GAP_FREQ) * 1.7],
       flee: null,
     };
     // (already facing whoever it watches)
@@ -165,7 +169,7 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
   const _pose = { x: 0, z: 0, yaw: 0 };
   const fishPose = (p, i) => {
     const side = i ? 1 : -1;
-    const sep = 0.5 * FISH_SCALE + NOSE_GAP / 2;
+    const sep = 0.5 * FISH_SCALE + p.gap / 2;
     // (the pair's own +X)
     const rx = Math.cos(p.yaw);
     const rz = -Math.sin(p.yaw);
@@ -176,8 +180,8 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
   };
 
   const placeFish = (f, x, z, yaw, sink, t, level, wigK = 1) => {
-    const peekY = level - EYE_Y * FISH_SCALE - PEEK_SINK;
-    const underBy = BODY_H * FISH_SCALE + 0.25;
+    const peekY = level - EYE_Y * FISH_SCALE + PEEK_RISE;
+    const underBy = BODY_H * FISH_SCALE + PEEK_RISE + 0.25;
     const bob = Math.sin(t * f.bob + f.phase) * BOB_AMP;
     f.group.position.set(x, peekY + bob - easeInOut(Math.min(1, sink)) * underBy, z);
     f.group.rotation.set(Math.sin(t * f.bob * 0.7 + f.phase) * 0.05, yaw + Math.sin(t * f.wig * wigK + f.phase) * WIGGLE, 0);
@@ -190,6 +194,10 @@ export function createEyeFish({ scene, waterY, waterDepth }) {
     for (let k = pairs.length - 1; k >= 0; k -= 1) {
       const p = pairs[k];
       p.t += dt;
+      // (the two drift a little closer together and further apart)
+      p.gapT += dt;
+      const g = 0.5 + 0.32 * Math.sin(p.gapT * p.gapF[0]) + 0.18 * Math.sin(p.gapT * p.gapF[1] + 1.3);
+      p.gap = NOSE_GAP[0] + (NOSE_GAP[1] - NOSE_GAP[0]) * Math.min(1, Math.max(0, g));
       const level = waterY(p.x, p.z) ?? 0;
       if (p.state === 'flee') {
         const u = p.t;
