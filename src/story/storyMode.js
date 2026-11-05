@@ -31,6 +31,7 @@ import {
 } from '../town/townConfig.js';
 import { createFluteModel, disposeFluteModel, FLUTE_HAND_AT, FLUTE_LENGTH } from '../items/flute.js';
 import { createCrow } from './crow.js';
+import { createEyeFish } from '../environment/eyeFish.js';
 import { createWiseTree } from './wiseTree.js';
 import { createFrogMom } from './frogMom.js';
 import { findStoryLayout, SEAT_RADIUS, SEAT_TOP } from './storyLayout.js';
@@ -58,7 +59,7 @@ const FLASH_S = 1.6;          // the lightning (two flashes and a fading glow)
 const THUNDER_AT_S = 0.45;    // the thunder, this far into it
 const DARK_S = 2.2;           // black again (he's put on the stone meanwhile)
 const FADE_IN_S = 3.5;        // the fade in on him playing, from behind
-const PLAY_BEFORE_CROW_S = 6; // playing before the Crow comes (in on the same shot)
+const PLAY_BEFORE_CROW_S = 11; // playing before the Crow comes (in on the same shot)
 const FLASH_COLOR = 0xd8e4ff;
 const FLASH_LIGHT = 3.2;      // the lightning's light at its brightest
 const FLASH_SCREEN = 0.28;    // the white over the screen at its brightest
@@ -75,6 +76,12 @@ const HEAD_STAND = { x: 0.02, y: 0.93, z: 0 }; // the Head bone standing (idle),
 const NOTE_EVERY_S = 0.6;     // ♪ off the flute
 const NOTE_LIFE_S = 1.8;
 const CROW_FROM_UP = 10;      // m up over the sea the Crow comes from
+// Eye fish (src/environment/eyeFish.js) watching him play from the water, until the Crow comes
+const EYE_FISH_PAIRS = [      // where they settle: m out to sea from the stone / to the side; s after the fade in they come up
+  { out: 12, side: -4.6, at: 0.2 },
+  { out: 14, side: 4.3, at: 1.2 },
+];
+const EYE_FISH_SWIM_IN = 8;   // m further out they come up, then swim in to their spot
 const TALK_DIST = 2.8;        // m from the Crow: Talk
 const TREE_TALK_DIST = 3.2;   // m from the sacred tree: Talk (once the Crow's told of it)
 const TREE_REVEAL_HOLD_S = 4; // s it stays awake (turned to the player) after its last line
@@ -131,6 +138,7 @@ export function createStoryMode(ctx) {
   const crow = createCrow({ scene: ctx.scene });
   const tree = createWiseTree({ scene: ctx.scene });
   const frogMom = createFrogMom({ scene: ctx.scene });
+  const eyeFish = createEyeFish({ scene: ctx.scene, waterY: (x, z) => ctx.getWaterY(x, z), waterDepth: ctx.waterDepth });
 
   // What the chapter's data sees (chapter1.js talks / quest)
   const view = () => ({
@@ -920,6 +928,32 @@ export function createStoryMode(ctx) {
   };
 
   // ── The cut scene ──
+  // Eye fish: once it's faded in, pairs come up out at sea and swim in to watch him play
+  const spawnEyeFish = () => {
+    eyeFish.clear();
+    const d = L.dir;
+    const side = { x: -d.z, z: d.x };
+    const look = () => ctx.getPlayerModel().position;
+    for (const e of EYE_FISH_PAIRS) {
+      // (out along the shot until the water's deep enough)
+      for (let out = e.out; out <= e.out + 10; out += 1) {
+        const x = L.seat.x + d.x * out + side.x * e.side;
+        const z = L.seat.z + d.z * out + side.z * e.side;
+        if (!eyeFish.okWater(x, z)) continue;
+        const from = { x: x + d.x * EYE_FISH_SWIM_IN + side.x * e.side * 0.3, z: z + d.z * EYE_FISH_SWIM_IN + side.z * e.side * 0.3 };
+        // (they come up once it's faded in — the dark and the fade come first)
+        eyeFish.spawnPair({ x, z, from: eyeFish.okWater(from.x, from.z) ? from : null, look, delay: DARK_S + FADE_IN_S + e.at });
+        break;
+      }
+    }
+  };
+  const eyeFishFlee = () => {
+    const d = L.dir;
+    const side = { x: -d.z, z: d.x };
+    const lat = (L.crowFrom.x - L.seat.x) * side.x + (L.crowFrom.z - L.seat.z) * side.z;
+    const away = lat >= 0 ? -1 : 1;
+    eyeFish.flee({ dir: { x: d.x + side.x * away * 0.9, z: d.z + side.z * away * 0.9 } });
+  };
   const lockPlayer = (on) => ctx.holdStill(on);
   const startCut = () => {
     if (aboard) leaveBoat(null);
@@ -929,6 +963,7 @@ export function createStoryMode(ctx) {
     standUpFromSeat();
     crow.hide();
     crow.carry(null);
+    eyeFish.clear();
     if (cut?.fov) { ctx.camera.fov = cut.fov; ctx.camera.updateProjectionMatrix(); }
     cut = { phase: 'black', t: 0 };
     lockPlayer(true);
@@ -1034,6 +1069,7 @@ export function createStoryMode(ctx) {
           sitDown();
           holdFlute(true);
           setSky(DAWN_H);
+          spawnEyeFish();
         }
         if (cut.t >= DARK_S) {
           fluteSound = ctx.playSound(STORY_SOUNDS.flute, { volume: 0.8, loop: true });
@@ -1059,6 +1095,8 @@ export function createStoryMode(ctx) {
             runTalk('crow', 'arrive');
           });
           playCaw();
+          // (the eye fish take fright and swim off, away from where it's coming from)
+          eyeFishFlee();
         }
         break;
       default:
@@ -1121,7 +1159,7 @@ export function createStoryMode(ctx) {
     window.addEventListener('keydown', onKey);
     document.addEventListener('visibilitychange', onHidden);
     const [island, saved] = await Promise.all([
-      ctx.getIsland(CHAPTER.island), ctx.canSave() ? ctx.load().catch(() => null) : null, crow.load(), tree.load(), frogMom.load(),
+      ctx.getIsland(CHAPTER.island), ctx.canSave() ? ctx.load().catch(() => null) : null, crow.load(), tree.load(), frogMom.load(), eyeFish.load(),
     ]);
     if (my !== token || !active) return;
     if (!island) {
@@ -1176,6 +1214,7 @@ export function createStoryMode(ctx) {
     crow.hide();
     tree.hide();
     frogMom.hide();
+    eyeFish.clear();
     clearNotes();
     clearTrees();
     removeSeat();
@@ -1194,6 +1233,7 @@ export function createStoryMode(ctx) {
     dt = Math.min(dt, 0.1);
     simT += dt;
     crow.update(dt);
+    eyeFish.update(dt);
     // (the sacred tree wakes to talk, then goes still again)
     tree.reveal((talk && talk.who === TREE) || simT < treeRevealUntil);
     tree.update(dt);
@@ -1273,7 +1313,7 @@ export function createStoryMode(ctx) {
     },
     fishingHud: () => (active ? F.fishingHud() : null),
     debug: () => ({
-      S, L, F, boat, cut, crow, tree, frogMom, aboard, held, acts, sitting, skyH, setSky, glb: glbOf, fluteH,
+      S, L, F, boat, cut, crow, tree, frogMom, eyeFish, aboard, held, acts, sitting, skyH, setSky, glb: glbOf, fluteH,
       skipCut: () => { if (cut && cut.phase !== 'talk') { cut.t = 999; } },
       // (jump ahead: set the step and what goes with it)
       give: ({ rod, sword, fish, wood } = {}) => {
