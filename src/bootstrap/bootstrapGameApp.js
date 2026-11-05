@@ -16,6 +16,7 @@ import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { presetStyleReference, setStyleReference, stylizeObject } from '../environment/artStyle.js';
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
 import { createBirds } from '../environment/birds.js';
+import { createEyeFish } from '../environment/eyeFish.js';
 import { showFeatureLoading } from '../features/loadingState.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
@@ -8439,10 +8440,20 @@ async function initCore(runtimeContext) {
     return (lastAutoMode || getAutoMode()) !== 'night';
   };
 
+  // Eye fish (src/environment/eyeFish.js): pairs peeking out of the water like eyes — Town at night
+  const eyeFish = createEyeFish({
+    scene,
+    waterY: (x, z) => _activeMap?.water?.(x, z) ?? null,
+    waterDepth: (x, z) => _waterDepthAt(x, z),
+  });
+  window.eyeFish = eyeFish; // (dev console)
+  const _eyeFishWanted = () => !!(town?.isActive() && !town.isIndoors() && town.nightLevel() >= 0.5);
+
   const _resetForMenu = () => {
     cancelBowDraw();
     _birdsMode = false;
     birds.clear();
+    eyeFish.clear();
     town?.exit();
     seaStart?.exit();
     // (Story mode plays on Tree Island: back to the island town's spawn)
@@ -11313,6 +11324,11 @@ async function initCore(runtimeContext) {
     _updateTownLantern(frameDelta);
     // Birds flying past (Showdown / Town)
     if (playerModel) birds.update(frameDelta, playerModel.position, _birdsWanted());
+    // Eye fish peeking out of the water near the player (Town, at night)
+    if (playerModel) {
+      eyeFish.updateAmbient(frameDelta, playerModel.position, _eyeFishWanted());
+      eyeFish.update(frameDelta);
+    }
     // The guest's sea start: the canoe on the sea, the player in it
     seaStart?.update(frameDelta);
     // Story mode: its cut scenes, the Crow, the canoe (it has the last word on the camera in a cut scene)
