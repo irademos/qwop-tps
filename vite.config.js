@@ -1,4 +1,6 @@
 import { defineConfig } from 'vite';
+import { readdirSync, statSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -13,11 +15,50 @@ const versionFile = () => ({
   }
 });
 
+// Offline play (public/service-worker.js): every build also writes dist/offline-manifest.json —
+// { id: the build id, files: [...] } — the app's own files (index.html, the hashed chunks / CSS)
+// plus the public files the game needs to run with no network. The page asks the worker to cache
+// them all once it's up (src/core/offlineCache.js). Left out (online only): Classic's map, Story's
+// Tree Island, the songs (music just stays off offline), the worker itself.
+const OFFLINE_SKIP = [
+  /^glb_map\//,
+  /^mappacks\/tree_island/,
+  /^assets\/audio\/Songs\//,
+  /^service-worker\.js$/,
+  /\.map$/,
+  /(^|\/)\./,
+];
+const listPublic = (dir, root = dir, out = []) => {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) listPublic(full, root, out);
+    else out.push(relative(root, full).split(sep).join('/'));
+  }
+  return out;
+};
+const offlineManifest = () => ({
+  name: 'offline-manifest',
+  apply: 'build',
+  generateBundle(_options, bundle) {
+    const built = Object.keys(bundle).filter((f) => !f.endsWith('.map') && f !== 'version.json');
+    let pub = [];
+    try { pub = listPublic('public'); } catch (_) {}
+    const files = ['/', ...[...built, ...pub]
+      .filter((f) => !OFFLINE_SKIP.some((re) => re.test(f)))
+      .map((f) => `/${encodeURI(f)}`)];
+    this.emitFile({
+      type: 'asset',
+      fileName: 'offline-manifest.json',
+      source: JSON.stringify({ id: buildId, files: [...new Set(files)] }),
+    });
+  }
+});
+
 export default defineConfig(({ command }) => ({
   define: {
     __BUILD_ID__: JSON.stringify(command === 'build' ? buildId : 'dev')
   },
-  plugins: [versionFile()],
+  plugins: [versionFile(), offlineManifest()],
   server: {
     open: true,
     port: 3000

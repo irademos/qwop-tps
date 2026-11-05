@@ -773,3 +773,38 @@ export async function deleteProfileData(nameKey, playerName) {
     return { status: 'error' };
   }
 }
+
+// Endless Showdown: profiles/<key>/endlessStats = { best (kills in one run), bestWave, runs }.
+// The best only goes up (transaction); the device keeps its own copy too (works offline).
+export const normalizeEndlessStats = (raw) => ({
+  best: Math.max(0, Math.floor(Number(raw?.best) || 0)),
+  bestWave: Math.max(0, Math.floor(Number(raw?.bestWave) || 0)),
+  runs: Math.max(0, Math.floor(Number(raw?.runs) || 0)),
+});
+
+export async function loadEndlessStats(nameKey) {
+  if (!nameKey) return null;
+  try {
+    const snap = await get(ref(db, `profiles/${nameKey}/endlessStats`));
+    return normalizeEndlessStats(snap.val());
+  } catch (err) {
+    console.warn('Failed to load Endless stats:', err);
+    return null;
+  }
+}
+
+export async function recordEndlessRun(nameKey, { kills, wave }) {
+  if (!nameKey) return;
+  try {
+    await runTransaction(ref(db, `profiles/${nameKey}/endlessStats`), (cur) => {
+      const s = normalizeEndlessStats(cur);
+      return {
+        best: Math.max(s.best, Math.floor(kills) || 0),
+        bestWave: Math.max(s.bestWave, Math.floor(wave) || 0),
+        runs: s.runs + 1,
+      };
+    });
+  } catch (err) {
+    console.warn('Failed to save Endless run:', err);
+  }
+}
