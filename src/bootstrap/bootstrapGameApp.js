@@ -8535,7 +8535,7 @@ async function initCore(runtimeContext) {
   // every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
   // health bar across the top, more gear each time — stageBossGear). Between waves: heart bubbles
   // and a few coins. Every run starts with 0 coins, the sword and a shield that never breaks
-  // (_endlessFreshLoadout; the real coins / gear / bombs / bubbles / mana are set aside meanwhile —
+  // (_endlessFreshLoadout — the sword, the bow (no arrows) and a shield; the real coins / gear / bombs / bubbles / mana are set aside meanwhile —
   // _saveAside, so saves keep the real ones); auto-buy still spends what the run earns. The
   // player auto-walks all the Showdown stage routes one after another (_endlessLoop), and after
   // the last one starts over on the first.
@@ -8592,6 +8592,8 @@ async function initCore(runtimeContext) {
     inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
       count: 1, [SHIELD_HEALTH_KEY]: getShieldMaxHealth(), [SHIELD_MAX_HEALTH_KEY]: getShieldMaxHealth(),
     }));
+    // The bow from the start, with no arrows (auto-buy gets them once the run has the coins)
+    inventoryState.pistol = ensureCatalogEntry('pistol', { count: 1, [PISTOL_AMMO_KEY]: 0 });
     statsState.coins = 0;
     xpAnimationQueue.length = 0;
     statsState.xp = 0;
