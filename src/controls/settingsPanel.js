@@ -763,7 +763,7 @@ function buildSwordGyroPanel() {
     if (window.phoneSwordShowQr?.()) {
       closeSettings();
     } else {
-      qrBtn.textContent = 'Phone link still starting… try again';
+      qrBtn.textContent = 'Phone link not ready… try again';
       setTimeout(() => { qrBtn.textContent = 'Show Phone QR Code'; }, 2000);
     }
   });
