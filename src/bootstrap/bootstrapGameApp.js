@@ -4144,6 +4144,8 @@ async function initCore(runtimeContext) {
   const damageEquippedShield = (damage = 1) => {
     const currentEntry = normalizeShieldEntry(inventoryState[SHIELD_ITEM_ID]);
     if (!currentEntry.count || currentEntry[SHIELD_HEALTH_KEY] <= 0) return false;
+    // (Endless: the shield is always there — it blocks but never wears down)
+    if (_endless) return true;
     const currentHealth = currentEntry[SHIELD_HEALTH_KEY];
     const nextHealth = Math.max(0, currentHealth - Math.max(1, Math.round(damage)));
     if (shield?.mesh) {
@@ -8521,14 +8523,29 @@ async function initCore(runtimeContext) {
   // `ps_endless_<key | guest>`, so it works offline and for guests — and, signed in, the
   // profile's `endlessStats`). Every wave is bigger and harder (`_endlessWave`): more alive at
   // once, more hearts, more attackers / swings (`_psDiffStage`), and new kinds join in: bombers
-  // (ENDLESS_FROM.bomber), archers (bow — the boss fighter logic with a gun), wand casters,
-  // shield bearers; every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
+  // (ENDLESS_FROM.bomber), shield bearers, wand casters, archers (bow — the boss fighter logic with a gun) —
+  // one the wave a kind joins, a few more as the waves go on (ENDLESS_KIND_GROWTH);
+  // every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
   // health bar across the top, more gear each time — stageBossGear). Between waves: heart bubbles
-  // and a few coins. The player's Showdown coins / gear / health are used (it is Showdown).
+  // and a few coins. Every run starts with 0 coins, the sword and a shield that never breaks
+  // (_endlessFreshLoadout; the real coins / gear / bombs / bubbles / mana are set aside meanwhile —
+  // _saveAside, so saves keep the real ones); auto-buy still spends what the run earns. The
+  // player auto-walks all the Showdown stage routes one after another (_endlessLoop), and after
+  // the last one starts over on the first.
   const ENDLESS_SPAWN_DIST = [9, 15];  // m from the player
   const ENDLESS_BREAK_MS = 4500;       // between waves
   const ENDLESS_CHAMPION_EVERY = 5;
-  const ENDLESS_FROM = { bomber: 2, archer: 3, wand: 4, shield: 6, gearBombs: 10 };
+  const ENDLESS_FROM = { bomber: 2, shield: 3, wand: 4, archer: 6, gearBombs: 10 };
+  // How many of each kind a wave brings: one the wave it joins, then one more every `every`
+  // waves, up to `max` (the rest are swordsmen)
+  const ENDLESS_KIND_GROWTH = {
+    bomber: { every: 2, max: 6 },
+    shield: { every: 2, max: 6 },
+    wand: { every: 3, max: 5 },
+    archer: { every: 3, max: 5 },
+  };
+  const _endlessKindCount = (kind, w) => (w < ENDLESS_FROM[kind] ? 0
+    : Math.min(ENDLESS_KIND_GROWTH[kind].max, 1 + Math.floor((w - ENDLESS_FROM[kind]) / ENDLESS_KIND_GROWTH[kind].every)));
   const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'tree'];
   const _endlessWave = (w) => ({
     count: Math.min(40, 5 + 2 * w),
@@ -8536,10 +8553,7 @@ async function initCore(runtimeContext) {
     gapMs: Math.max(350, 1300 - 50 * w),
     diff: w + Math.floor(w / 2), // (the Showdown stage its hearts / attackers / swings follow)
     speed: PS_ENEMY_SPEED * (1 + Math.min(0.5, (w - 1) * 0.04)),
-    bomber: w >= ENDLESS_FROM.bomber ? Math.min(0.18, 0.07 + 0.015 * (w - ENDLESS_FROM.bomber)) : 0,
-    archer: w >= ENDLESS_FROM.archer ? Math.min(0.2, 0.07 + 0.015 * (w - ENDLESS_FROM.archer)) : 0,
-    wand: w >= ENDLESS_FROM.wand ? Math.min(0.2, 0.06 + 0.015 * (w - ENDLESS_FROM.wand)) : 0,
-    shield: w >= ENDLESS_FROM.shield ? Math.min(0.2, 0.06 + 0.015 * (w - ENDLESS_FROM.shield)) : 0,
+    kinds: Object.fromEntries(Object.keys(ENDLESS_KIND_GROWTH).map((k) => [k, _endlessKindCount(k, w)])),
     champion: w % ENDLESS_CHAMPION_EVERY === 0,
   });
   const ENDLESS_NEWS = {
@@ -8547,6 +8561,92 @@ async function initCore(runtimeContext) {
     [ENDLESS_FROM.archer]: 'Archers join the fight',
     [ENDLESS_FROM.wand]: 'Wizards join the fight',
     [ENDLESS_FROM.shield]: 'Shield bearers join the fight',
+  };
+  // ── The run's loadout ──
+  const ENDLESS_ASIDE_STATS = ['coins', 'health', 'maxHealthSegments', 'level', 'xp', 'bombs', 'bubbles', 'mana'];
+  const ENDLESS_ITEM_IDS = [FOAM_SWORD_ITEM_ID, 'pistol', SHIELD_ITEM_ID, MAGIC_WAND_ITEM_ID];
+  // The real stats / gear set aside (saves write these instead) — on entering Endless
+  const _endlessSetAside = () => {
+    if (_saveAside) return;
+    const aside = { stats: {}, inventory: {} };
+    ENDLESS_ASIDE_STATS.forEach((key) => { aside.stats[key] = statsState[key]; });
+    ENDLESS_ITEM_IDS.forEach((id) => { aside.inventory[id] = inventoryState[id] ?? null; });
+    _saveAside = aside;
+  };
+  // A run's start: level 1 with the base hearts, 0 coins, the sword and a shield (it never
+  // breaks — damageEquippedShield)
+  const _endlessFreshLoadout = () => {
+    if (!_saveAside) return;
+    _putWeaponsAway();
+    deactivatePlayerBubble();
+    playerBombs?.clear();
+    ENDLESS_ITEM_IDS.forEach((id) => { delete inventoryState[id]; });
+    inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+    inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+      count: 1, [SHIELD_HEALTH_KEY]: getShieldMaxHealth(), [SHIELD_MAX_HEALTH_KEY]: getShieldMaxHealth(),
+    }));
+    statsState.coins = 0;
+    xpAnimationQueue.length = 0;
+    statsState.xp = 0;
+    statsState.level = 1;
+    displayedXp = 0;
+    displayedLevel = 1;
+    setXpBarProgress(0, 1);
+    statsState.maxHealthSegments = SHOWDOWN_BASE_HEALTH_SEGMENTS;
+    statsState.health = SHOWDOWN_BASE_HEALTH_SEGMENTS;
+    updateHealthUI();
+    statsState.bombs = 0;
+    statsState.bubbles = 0;
+    statsState.mana = 0;
+    hideShieldHealthHUD();
+    equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    updatePlayerInfoUI();
+    _refreshGearUI();
+  };
+  // Leaving Endless: the real ones back
+  const _endlessRestoreAside = () => {
+    if (!_saveAside) return;
+    _putWeaponsAway();
+    deactivatePlayerBubble();
+    playerBombs?.clear();
+    const aside = _saveAside;
+    _saveAside = null;
+    for (const [id, entry] of Object.entries(aside.inventory)) {
+      if (entry) inventoryState[id] = entry;
+      else delete inventoryState[id];
+    }
+    Object.assign(statsState, aside.stats);
+    hideShieldHealthHUD();
+    updateHealthUI();
+    updatePlayerInfoUI();
+    equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    _refreshGearUI();
+  };
+
+  // ── The walk: every stage route with a path, one after another, as one loop ──
+  const ENDLESS_MAX_ROUTES = 40;
+  const _endlessLoop = () => {
+    const pts = [];
+    for (let stage = 1; stage <= ENDLESS_MAX_ROUTES; stage++) {
+      const route = _psRoute(stage);
+      if (!route || route.points.length < 2) continue;
+      route.points.forEach((p) => pts.push({ x: p.x, z: p.z }));
+    }
+    return pts.length >= 2 ? pts : null;
+  };
+  // Onto the loop: from its start (teleport) or, coming round again, from the player's spot
+  // near its start (the last route ends close to the first one's start)
+  const _endlessStartLoop = ({ teleport = false } = {}) => {
+    const pts = _endlessLoop();
+    if (!pts) { _psPath = null; _psAutoWalking = false; return false; }
+    if (teleport) _teleportPlayer(pts[0].x, pts[0].z, Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
+    const path = createPolyline(pts);
+    _psPath = path;
+    _psPathProgress = teleport ? 0 : path.project(playerModel.position.x, playerModel.position.z, 0, PS_ROUTE_WALK_IN_MAX);
+    const last = pts[pts.length - 1];
+    _psPathEnd.set(last.x, getTerrainHeight(last.x, last.z) ?? playerModel.position.y, last.z);
+    _psAutoWalking = true;
+    return true;
   };
   const _endlessLsKey = () => `ps_endless_${profileNameKey || 'guest'}`;
   const _endlessLoadLocal = () => {
@@ -8631,6 +8731,30 @@ async function initCore(runtimeContext) {
   // Somewhere on dry ground round the player, not far above / below them
   const _endlessSpawnSpot = () => {
     const p = playerModel.position;
+    // Walking the routes: always up ahead on the path, off to one side of it, so the player
+    // walks into them (one behind would only chase and never catch up)
+    if (_psPath && _psAutoWalking) {
+      const here = _psPath.at(_psPathProgress);
+      for (let tries = 0; tries < 30; tries++) {
+        // (further on and closer to the path the more tries fail; past the loop's end = its start)
+        const far = tries < 20;
+        let sAt = _psPathProgress + (far
+          ? ENDLESS_SPAWN_DIST[0] + Math.random() * (ENDLESS_SPAWN_DIST[1] - ENDLESS_SPAWN_DIST[0]) + Math.floor(tries / 5) * 4
+          : 6 + Math.random() * 6);
+        if (sAt > _psPath.length) sAt -= _psPath.length;
+        const c = _psPath.at(sAt);
+        const side = (Math.random() * 2 - 1) * (far ? 4 : 1.5);
+        const x = c.x - c.dz * side;
+        const z = c.z + c.dx * side;
+        const y = getTerrainHeight(x, z);
+        if (!Number.isFinite(y) || Math.abs(y - p.y) > 6 || _isOverWater(x, z)) continue;
+        if (Math.hypot(x - p.x, z - p.z) < 6) continue;
+        // (a bend coming back on itself: still in front of the player, not behind)
+        if ((x - p.x) * here.dx + (z - p.z) * here.dz <= 0) continue;
+        return new THREE.Vector3(x, y, z);
+      }
+      return null; // (tried again next frame)
+    }
     for (let tries = 0; tries < 24; tries++) {
       const a = Math.random() * Math.PI * 2;
       const near = tries >= 16; // (no luck further out: closer in)
@@ -8647,13 +8771,8 @@ async function initCore(runtimeContext) {
   const _endlessSpawnOne = (champion) => {
     const e = _endless;
     const W = e.def;
-    const r = Math.random();
-    let kind = 'sword';
-    if (champion) kind = 'champion';
-    else if (r < W.bomber) kind = 'bomber';
-    else if (r < W.bomber + W.archer) kind = 'archer';
-    else if (r < W.bomber + W.archer + W.wand) kind = 'wand';
-    else if (r < W.bomber + W.archer + W.wand + W.shield) kind = 'shield';
+    // (the next of the wave's line-up — taken off it once it's really spawned)
+    const kind = champion ? 'champion' : (e.kinds?.[e.kinds.length - 1] ?? 'sword');
     const charKey = kind === 'wand' ? PS_WAND_ENEMY_CHARACTER
       : ENDLESS_CHARACTERS[Math.floor(Math.random() * ENDLESS_CHARACTERS.length)];
     const url = MATCH_CHARACTERS[charKey].url;
@@ -8668,6 +8787,7 @@ async function initCore(runtimeContext) {
       swingChance: champion ? Math.min(0.75, _psSwingChance(W.diff) + PS_BOSS_SWING_BONUS) : undefined,
     });
     enemy.group.rotation.y = Math.atan2(playerModel.position.x - pos.x, playerModel.position.z - pos.z);
+    if (!champion) enemy.chaseVia = _psEnemyChaseVia; // (keep to the walk when chasing from a way off)
     if (champion) {
       const gear = stageBossGear(1 + e.wave / ENDLESS_CHAMPION_EVERY);
       const boss = createBossFighter({
@@ -8692,8 +8812,18 @@ async function initCore(runtimeContext) {
 
   const _endlessStartWave = (w) => {
     const def = _endlessWave(w);
-    Object.assign(_endless, { wave: w, def, diff: def.diff, toSpawn: def.count, phase: 'fight', nextSpawnAt: performance.now() + 600 });
-    const news = def.champion ? 'A champion is coming' : ENDLESS_NEWS[w] || `${def.count} enemies`;
+    // The wave's line-up, in a random order (popped from the end); the champion comes last
+    const kinds = [];
+    for (const [k, n] of Object.entries(def.kinds)) for (let i = 0; i < n; i++) kinds.push(k);
+    while (kinds.length < def.count - (def.champion ? 1 : 0)) kinds.push('sword');
+    kinds.length = def.count - (def.champion ? 1 : 0);
+    for (let i = kinds.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
+    }
+    if (def.champion) kinds.unshift('champion');
+    Object.assign(_endless, { wave: w, def, diff: def.diff, kinds, toSpawn: kinds.length, phase: 'fight', nextSpawnAt: performance.now() + 600 });
+    const news = [ENDLESS_NEWS[w], def.champion && 'A champion is coming'].filter(Boolean).join(' · ') || `${def.count} enemies`;
     _showWorldBanner(`WAVE ${w}`, news, 2200);
     _psUpdateKillHud(true);
   };
@@ -8702,6 +8832,10 @@ async function initCore(runtimeContext) {
   const _endlessUpdate = () => {
     const e = _endless;
     if (!e || e.phase === 'over' || e.phase === 'idle' || playerDead) return;
+    // The last route's end: round again from the first
+    if (_psPath && _psAutoWalking && _psPathProgress + PS_PATH_LOOKAHEAD >= _psPath.length - 0.25) {
+      _endlessStartLoop();
+    }
     const now = performance.now();
     if (e.phase === 'break') {
       if (now >= e.breakUntil) _endlessStartWave(e.wave + 1);
@@ -8710,6 +8844,7 @@ async function initCore(runtimeContext) {
     const alive = hordeEnemies.reduce((n, h) => n + (h.isDead ? 0 : 1), 0);
     if (e.toSpawn > 0 && now >= e.nextSpawnAt && alive < e.def.maxAlive) {
       if (_endlessSpawnOne(e.toSpawn === 1 && e.def.champion)) {
+        e.kinds?.pop();
         e.toSpawn -= 1;
         e.nextSpawnAt = now + e.def.gapMs;
       }
@@ -8736,6 +8871,7 @@ async function initCore(runtimeContext) {
     if (!e || e.phase === 'over') return;
     e.phase = 'over';
     _psStageActive = false;
+    _psAutoWalking = false;
     comboMeter.end();
     const kills = _psStageKills;
     const wave = e.wave;
@@ -8758,8 +8894,11 @@ async function initCore(runtimeContext) {
     _endlessToArena();
     _endlessShowPanel({ result });
   };
+  // Back to where a run starts: the first route's start (the arena with no routes)
   const _endlessToArena = () => {
-    _teleportPlayer(ARENA_LOCATION.x, ARENA_LOCATION.z, ARENA_LOCATION.yaw);
+    const pts = _endlessLoop();
+    if (pts) _teleportPlayer(pts[0].x, pts[0].z, Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
+    else _teleportPlayer(ARENA_LOCATION.x, ARENA_LOCATION.z, ARENA_LOCATION.yaw);
   };
 
   // A run: full health, the field empty, wave 1 after a moment
@@ -8768,12 +8907,13 @@ async function initCore(runtimeContext) {
     _endlessHidePanel();
     _endlessClearField();
     if (playerDead) { hideGameOver(); respawnPlayer(); }
-    _endlessToArena();
+    _endlessFreshLoadout();
     setStat('health', statsState.maxHealthSegments);
     comboMeter.reset();
     _psEnemyQueue = [];
     _psPath = null;
     _psAutoWalking = false;
+    if (!_endlessStartLoop({ teleport: true })) _endlessToArena();
     _psStageKills = 0;
     _psStageTotal = 0;
     _psStageActive = true;
@@ -8789,6 +8929,8 @@ async function initCore(runtimeContext) {
     _resetForMenu();
     _endless = { wave: 0, def: _endlessWave(1), diff: 1, toSpawn: 0, phase: 'idle', result: null };
     document.body.classList.add('endless-mode');
+    _endlessSetAside();
+    _endlessFreshLoadout();
     setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected]?.url ?? glbCharacterConfig.villageBoyUrl);
     _endlessToArena();
     [...ENDLESS_CHARACTERS, PS_WAND_ENEMY_CHARACTER].forEach((k) => preloadCharacterModel(MATCH_CHARACTERS[k].url));
@@ -8815,6 +8957,9 @@ async function initCore(runtimeContext) {
     _endless = null;
     _endlessHidePanel();
     document.body.classList.remove('endless-mode');
+    _psPath = null;
+    _psAutoWalking = false;
+    _endlessRestoreAside();
   };
 
   const _resetForMenu = () => {
