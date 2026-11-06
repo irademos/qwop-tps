@@ -207,6 +207,8 @@ export class BombThrowerEnemy {
     // up, or null (Showdown: keep to the stage path)
     this.chaseVia = null;
     this.throwsHeld = !!options.throwsHeld;
+    // Showdown / Endless: set by the game while another enemy has its ranged turn (no throws meanwhile)
+    this.throwsPaused = false;
     this.aimAt      = options.aimAt ?? null;
     this._characterUrl = options.characterUrl ?? glbCharacterConfig.url;
 
@@ -481,7 +483,7 @@ export class BombThrowerEnemy {
     const cooldownReady = (now - this._lastThrowTime) >= THROW_COOLDOWN_MS;
     const inRange = dist >= THROW_RANGE_MIN && dist <= THROW_RANGE_MAX;
 
-    if (!this._inWindup && cooldownReady && inRange && !this.throwsHeld) {
+    if (!this._inWindup && cooldownReady && inRange && !this.throwsHeld && !this.throwsPaused) {
       // Start the throw: Throw.fbx when the character is loaded, else a timed windup
       this._inWindup  = true;
       this._windupEnd = now + THROW_WINDUP_MS;

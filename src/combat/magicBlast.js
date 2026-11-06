@@ -207,9 +207,31 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
     return blast;
   };
 
+  // Turned round at `at` to fly along `forward` (level) as the player's blast, with its full range again
+  const reflectBlast = (b, at, forward) => {
+    const f = forward.clone().setY(0);
+    if (f.lengthSq() < 1e-6) f.copy(b.forward).negate();
+    f.normalize();
+    // (the line stays as it was, square to the new way)
+    const l = b.line.clone().addScaledVector(f, -b.line.dot(f));
+    if (l.lengthSq() < 1e-6) l.crossVectors(f, new THREE.Vector3(0, 1, 0));
+    l.normalize();
+    const up = new THREE.Vector3().crossVectors(f, l).normalize();
+    _basis.makeBasis(l, up, f);
+    b.group.quaternion.setFromRotationMatrix(_basis);
+    b.group.position.copy(at).addScaledVector(f, 0.35);
+    b.forward = f;
+    b.line = l;
+    b.side = 'player';
+    b.caster = null;
+    b.travelled = 0;
+    b.reflected = true;
+  };
+
   /**
    * Moves the blasts and resolves hits. `getTargets(blast)` returns what the blast can hit:
-   * [{ center: Vector3, radius, blocks?(blast) → bool, onBlocked?(blast), onHit(blast) }].
+   * [{ center: Vector3, radius, reflect?(blast) → Vector3 | null, blocks?(blast) → bool, onBlocked?(blast), onHit(blast) }].
+   * `reflect` (the player's bubble): a direction sends the blast back that way as the player's.
    */
   const update = (dt, getTargets) => {
     for (let i = blasts.length - 1; i >= 0; i--) {
@@ -257,6 +279,12 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
       }
       if (hit) {
         const p = from.clone().addScaledVector(dir, Math.max(0, hitT));
+        const back = hit.reflect?.(b);
+        if (back) {
+          reflectBlast(b, p, back);
+          burst(p, b.element, 10);
+          continue;
+        }
         if (hit.blocks?.(b)) {
           hit.onBlocked?.(b);
           burst(p, b.element, 10);
