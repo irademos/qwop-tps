@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { getGroundBelow } from '../environment/terrainHeight.js';
 import { spawnExplosion } from './explosionEffect.js';
+import { noteSpellCast } from './shieldThreats.js';
 
 // Sword Showdown magic: the wand's blasts and the ice they freeze people in.
 //
@@ -10,7 +11,11 @@ import { spawnExplosion } from './explosionEffect.js';
 // that target is blocking with its blade along the same line (bladeBlocksBlast). Each blast
 // is randomly FIRE (thrown back like a bomb blast, more damage) or ICE (less damage, frozen in
 // ice cubes for a few seconds). What a hit does is up to the caller (target.onHit).
-// Map surfaces stop blasts (raycastMapSegment) unless spawned with `ignoreMap` (tutorial). Call update(dt, getTargets) once per frame.
+// Map surfaces stop blasts (raycastMapSegment) unless spawned with `ignoreMap` (tutorial).
+// Blasts skim along the ground: each keeps the height over the ground (or water) it was cast at
+// (`hover`, within GROUND_HOVER_MIN … MAX), climbing / dropping with slopes up to
+// GROUND_FOLLOW_MAX_SLOPE_DEG; a steeper rise isn't climbed (the blast flies on level and hits
+// it like a wall), a steeper drop is glided down at that slope. Call update(dt, getTargets) once per frame.
 
 export const MAGIC_ELEMENTS = {
   fire: { key: 'fire', core: 0xfff0b0, glow: 0xff5a14, spark: 0xffa040 },
@@ -26,10 +31,17 @@ const BLAST_HALF_THICKNESS = 0.07;
 const SPARK_LIFE_S = 0.4;
 const MAX_SPARKS = 160;
 const ICE_SHARDS = 5;
+// Following the ground (see the header)
+const GROUND_FOLLOW_MAX_SLOPE_DEG = 38;
+const GROUND_FOLLOW_TAN = Math.tan(GROUND_FOLLOW_MAX_SLOPE_DEG * Math.PI / 180);
+const GROUND_HOVER_MIN = 0.35;
+const GROUND_HOVER_MAX = 1.8;
+const GROUND_PROBE_UP = 2.5; // looks for the ground under (blast height + this): a rise it may climb
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Vector3();
+const _d = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _basis = new THREE.Matrix4();
 const _pB = new THREE.Vector3();
@@ -86,7 +98,8 @@ export function swipeToBlastLine(swipe, forward, out = new THREE.Vector3()) {
   return out.normalize();
 }
 
-export function createMagicBlasts({ scene }) {
+/** getWaterLevel(x, z) → number | null: the water surface there (blasts skim over it, not the seabed). */
+export function createMagicBlasts({ scene, getWaterLevel = null }) {
   const blasts = [];
   const sparks = []; // { sprite, vel, life, max }
 
@@ -119,6 +132,14 @@ export function createMagicBlasts({ scene }) {
     }
   };
 
+  // The surface a blast skims over at (x, z): the ground under y, or the water on top of it
+  const surfaceAt = (x, z, y) => {
+    let g = getGroundBelow(x, z, y);
+    const w = getWaterLevel?.(x, z);
+    if (Number.isFinite(w) && (!Number.isFinite(g) || w > g) && w < y) g = w;
+    return Number.isFinite(g) ? g : null;
+  };
+
   const removeBlast = (blast) => {
     const i = blasts.indexOf(blast);
     if (i !== -1) blasts.splice(i, 1);
@@ -133,9 +154,13 @@ export function createMagicBlasts({ scene }) {
    */
   const spawn = ({ origin, forward, line, side = 'player', element = randomMagicElement(), speed = 15,
     length = 1.4, range = 22, caster = null, ignoreMap = false }) => {
+    // (flies level, the height following the ground — a forward with no level part flies straight)
     const f = forward.clone();
+    if (f.x * f.x + f.z * f.z > 1e-4) f.y = 0;
     if (f.lengthSq() < 1e-6) f.set(0, 0, 1);
     f.normalize();
+    const g0 = Math.abs(f.y) < 0.5 ? surfaceAt(origin.x, origin.z, origin.y + 0.05) : null;
+    const hover = g0 == null ? null : THREE.MathUtils.clamp(origin.y - g0, GROUND_HOVER_MIN, GROUND_HOVER_MAX);
     const l = swipeToBlastLine(line, f);
     const up = new THREE.Vector3().crossVectors(f, l).normalize(); // thickness axis
     const colors = MAGIC_ELEMENTS[element] ?? MAGIC_ELEMENTS.fire;
@@ -173,10 +198,11 @@ export function createMagicBlasts({ scene }) {
     group.traverse((o) => { o.frustumCulled = false; o.renderOrder = 3; });
     scene.add(group);
     const blast = {
-      group, element, side, caster, forward: f, line: l, length, speed, range, ignoreMap,
+      group, element, side, caster, forward: f, line: l, length, speed, range, ignoreMap, hover,
       travelled: 0, age: 0, shards, done: false,
     };
     blasts.push(blast);
+    noteSpellCast({ origin, forward: f, caster, side }); // (shield bearers may raise theirs)
     window.audioManager?.playSFX?.('SFX/Spells/Spell Impact 1.ogg', side === 'player' ? 0.55 : 0.4, { cooldownKey: `magic-cast-${side}`, cooldownMs: 120, at: side === 'player' ? null : group.position });
     return blast;
   };
@@ -192,18 +218,29 @@ export function createMagicBlasts({ scene }) {
       const from = _v.copy(b.group.position);
       const to = _v2.copy(from).addScaledVector(b.forward, step);
       b.age += dt;
+      // Follow the ground: up / down a gentle slope, level into a steep one (the map ray below hits it)
+      if (b.hover != null && step > 1e-5) {
+        const g = surfaceAt(to.x, to.z, from.y + Math.min(GROUND_PROBE_UP, step * GROUND_FOLLOW_TAN + 0.4));
+        if (g != null) {
+          const dy = g + b.hover - from.y;
+          const maxDy = step * GROUND_FOLLOW_TAN;
+          if (dy <= maxDy) to.y = from.y + Math.max(dy, -maxDy);
+        }
+      }
 
       // First target on this frame's sweep (closest along the flight)
       let hit = null;
       let hitT = Infinity;
       const half = b.length / 2;
+      const segLen = from.distanceTo(to);
+      const dir = segLen > 1e-6 ? _d.subVectors(to, from).divideScalar(segLen) : _d.copy(b.forward);
       for (const t of (getTargets?.(b) || [])) {
         if (!t?.center) continue;
         const r = t.radius ?? 0.45;
-        const along = _q.subVectors(t.center, from).dot(b.forward);
-        if (along < -r || along > step + r) continue;
-        const k = THREE.MathUtils.clamp(along, 0, step);
-        const d = _q.copy(t.center).sub(from).addScaledVector(b.forward, -k);
+        const along = _q.subVectors(t.center, from).dot(dir);
+        if (along < -r || along > segLen + r) continue;
+        const k = THREE.MathUtils.clamp(along, 0, segLen);
+        const d = _q.copy(t.center).sub(from).addScaledVector(dir, -k);
         const a = d.dot(b.line);
         if (Math.abs(a) > half + r * 0.5) continue;
         d.addScaledVector(b.line, -a);
@@ -219,7 +256,7 @@ export function createMagicBlasts({ scene }) {
         continue;
       }
       if (hit) {
-        const p = from.clone().addScaledVector(b.forward, Math.max(0, hitT));
+        const p = from.clone().addScaledVector(dir, Math.max(0, hitT));
         if (hit.blocks?.(b)) {
           hit.onBlocked?.(b);
           burst(p, b.element, 10);

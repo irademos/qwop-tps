@@ -74,6 +74,7 @@ import { OAR_REST_SWING, OAR_REST_TILT, OAR_TIP_AT, oarGripPoint, oarStrokeDurat
 import { CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
 import { createBroomRide } from '../items/broom.js';
 import { CANOE_STAND_Z, WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
+import { setBowAim } from '../combat/shieldThreats.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE, STAGE_BOSS_SCALE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
@@ -4790,7 +4791,7 @@ async function initCore(runtimeContext) {
   // (thrown back like a bomb blast, MAGIC_FIRE_DAMAGE) or ice (MAGIC_ICE_DAMAGE, frozen in ice
   // cubes for 3–5 s — shaking the phone melts it sooner). A block stops a blast only with the
   // blade along the blast's line (bladeBlocksBlast).
-  const magicBlasts = createMagicBlasts({ scene });
+  const magicBlasts = createMagicBlasts({ scene, getWaterLevel: (x, z) => _activeMap?.water?.(x, z) ?? null });
   const _magicFreezeSeconds = () => MAGIC_FREEZE_MIN_S + Math.random() * MAGIC_FREEZE_RAND_S;
   const _wandGlow = { level: 0, color: new THREE.Color() };
   const _magicBladeDir = new THREE.Vector3();
@@ -5288,6 +5289,10 @@ async function initCore(runtimeContext) {
     if (_classicMode) _classicUpdateScore();
   };
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
+  // Bow / wand out in Showdown / Endless: the player backs away from enemies closer than this…
+  const PS_RANGED_KEEP_DIST = 6.5;
+  const PS_RANGED_HOLD_DIST = 9;      // …and the auto-walk waits while one is within this
+  const PS_RANGED_BACK_SPEED = 2.6;   // m/s at most, backing off
   const PS_ENEMY_SPEED = 1.0 / 3.0;   // enemy speed multiplier (1/3 of normal)
   const PS_SPAWN_TRIGGER_DIST = 18;    // spawn enemy when player gets within this distance
 
@@ -6881,6 +6886,7 @@ async function initCore(runtimeContext) {
   const _bowAimPoint = new THREE.Vector3();
   const _bowTip = new THREE.Vector3();
   const _bowDir = new THREE.Vector3();
+  const _bowThreatOrigin = new THREE.Vector3();
   const _bowCrosshair = (() => {
     const el = document.createElement('div');
     el.id = 'bow-crosshair';
@@ -6958,6 +6964,12 @@ async function initCore(runtimeContext) {
       releaseBowDraw(true);
     }
     if (_bowDraw.active) pistol.draw = _bowDrawAmount();
+    // (shield bearers raise their shields when it's aimed at them — shieldThreats.js)
+    const threatAim = _bowDraw.active && playerModel ? playerControls.getBowAimPoint?.(_bowAimPoint) : null;
+    if (threatAim) {
+      _bowThreatOrigin.copy(playerModel.position).y += 1.3;
+      setBowAim('local', _bowThreatOrigin, _bowDir.subVectors(threatAim, _bowThreatOrigin));
+    } else setBowAim('local', null, null);
     if (_bowDraw.restoreAt && performance.now() >= _bowDraw.restoreAt) _bowPutAway();
     // (the bow only comes out for a draw: one left in hand some other way — a loadout put back —
     // goes back to the sword / empty hands)
@@ -11104,9 +11116,37 @@ async function initCore(runtimeContext) {
         _psStartBossTalk(_psBoss);
       }
 
+      // Bow / wand out (Showdown / Endless): back away from enemies closer than
+      // PS_RANGED_KEEP_DIST, and hold the auto-walk while one is within PS_RANGED_HOLD_DIST
+      let _psRangedHold = false;
+      const _psRangedOut = _psStageActive && !_tutorialActive && !_classicMode && !_psBossTalking
+        && (_wandActive || _bowDraw.active || pistol?.holder === playerControls);
+      if (_psRangedOut) {
+        let _awayX = 0;
+        let _awayZ = 0;
+        for (const _re of hordeEnemies) {
+          if (_re.isDead || (_psBoss && _re === _psBoss.enemy && !_psBoss.isStarted())) continue;
+          const _rdx = playerModel.position.x - _re.group.position.x;
+          const _rdz = playerModel.position.z - _re.group.position.z;
+          const _rd = Math.hypot(_rdx, _rdz);
+          if (_rd >= PS_RANGED_HOLD_DIST) continue;
+          _psRangedHold = true;
+          if (_rd >= PS_RANGED_KEEP_DIST || _rd < 1e-3) continue;
+          const _w = (PS_RANGED_KEEP_DIST - _rd) / PS_RANGED_KEEP_DIST; // (the closer, the harder)
+          _awayX += (_rdx / _rd) * _w;
+          _awayZ += (_rdz / _rd) * _w;
+        }
+        const _awayLen = Math.hypot(_awayX, _awayZ);
+        if (_awayLen > 1e-4) {
+          const _k = Math.min(1, _awayLen * 2);
+          const _step = PS_RANGED_BACK_SPEED * _k * frameDelta;
+          playerControls.queueStepMove((_awayX / _awayLen) * _step, (_awayZ / _awayLen) * _step);
+        }
+      }
+
       // Auto-walk: pause when an enemy is actively attacking close by,
       // or while the camera is tracking an incoming bomb / magic blast (and while a boss talks)
-      if (_psAutoWalking && _psBossTalking) {
+      if (_psAutoWalking && (_psBossTalking || _psRangedHold)) {
         playerControls.isMoving = false;
       } else if (_psAutoWalking) {
         const _hasNearAttacker = hordeEnemies.some(e =>
