@@ -8713,18 +8713,29 @@ async function initCore(runtimeContext) {
   // Somewhere on dry ground round the player, not far above / below them
   const _endlessSpawnSpot = () => {
     const p = playerModel.position;
-    // Mostly up ahead on the walk, off to one side of it
-    if (_psPath && _psAutoWalking && Math.random() < 0.65) {
-      for (let tries = 0; tries < 6; tries++) {
-        const c = _psPath.at(_psPathProgress + ENDLESS_SPAWN_DIST[0] + Math.random() * (ENDLESS_SPAWN_DIST[1] - ENDLESS_SPAWN_DIST[0]));
-        const side = (Math.random() * 2 - 1) * 4;
+    // Walking the routes: always up ahead on the path, off to one side of it, so the player
+    // walks into them (one behind would only chase and never catch up)
+    if (_psPath && _psAutoWalking) {
+      const here = _psPath.at(_psPathProgress);
+      for (let tries = 0; tries < 30; tries++) {
+        // (further on and closer to the path the more tries fail; past the loop's end = its start)
+        const far = tries < 20;
+        let sAt = _psPathProgress + (far
+          ? ENDLESS_SPAWN_DIST[0] + Math.random() * (ENDLESS_SPAWN_DIST[1] - ENDLESS_SPAWN_DIST[0]) + Math.floor(tries / 5) * 4
+          : 6 + Math.random() * 6);
+        if (sAt > _psPath.length) sAt -= _psPath.length;
+        const c = _psPath.at(sAt);
+        const side = (Math.random() * 2 - 1) * (far ? 4 : 1.5);
         const x = c.x - c.dz * side;
         const z = c.z + c.dx * side;
         const y = getTerrainHeight(x, z);
-        if (!Number.isFinite(y) || Math.abs(y - p.y) > 2.5 || _isOverWater(x, z)) continue;
+        if (!Number.isFinite(y) || Math.abs(y - p.y) > 6 || _isOverWater(x, z)) continue;
         if (Math.hypot(x - p.x, z - p.z) < 6) continue;
+        // (a bend coming back on itself: still in front of the player, not behind)
+        if ((x - p.x) * here.dx + (z - p.z) * here.dz <= 0) continue;
         return new THREE.Vector3(x, y, z);
       }
+      return null; // (tried again next frame)
     }
     for (let tries = 0; tries < 24; tries++) {
       const a = Math.random() * Math.PI * 2;
