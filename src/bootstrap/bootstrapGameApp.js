@@ -6558,9 +6558,37 @@ async function initCore(runtimeContext) {
 
   let _phoneSwordPeerId = null;     // gyro peer id once open (for re-showing the QR code)
   let _phoneSwordQrShownAt = 0;
+  const phoneSwordQrDesc = phoneSwordQrModal?.querySelector('.phone-sword-qr-desc');
+  const PHONE_SWORD_QR_DESC = phoneSwordQrDesc?.textContent || '';
+  let _phoneSwordQrNoLink = false;  // the popup is up without a QR code (no phone link yet)
+  // peerId null = no phone link (offline, or the signalling server can't be reached): the popup
+  // still opens — without the QR code — so "Use This Device" / "Play without phone" stay reachable
   const showPhoneSwordQr = async (peerId) => {
-    _phoneSwordPeerId = peerId;
     _phoneSwordQrShownAt = Date.now();
+    if (!peerId) {
+      _phoneSwordQrNoLink = true;
+      phoneSwordQrCanvas.style.display = 'none';
+      phoneSwordQrUrl.style.display = 'none';
+      phoneSwordQrCopy.style.display = 'none';
+      if (phoneSwordQrDesc) {
+        phoneSwordQrDesc.textContent = navigator.onLine === false
+          ? 'You\'re offline, so a phone can\'t connect right now. You can still use this device as the sword.'
+          : 'The phone link is still starting. You can use this device as the sword, or open this again in a moment for the QR code.';
+      }
+      const connected = !!window.phoneSwordGyro?.connected;
+      phoneSwordQrStatus.textContent = connected ? 'Sword connected' : 'No phone link';
+      phoneSwordQrStatus.classList.toggle('connected', connected);
+      phoneSwordQrModal.classList.remove('hidden');
+      return;
+    }
+    _phoneSwordQrNoLink = false;
+    _phoneSwordPeerId = peerId;
+    phoneSwordQrUrl.style.display = '';
+    phoneSwordQrCopy.style.display = '';
+    if (phoneSwordQrDesc) phoneSwordQrDesc.textContent = PHONE_SWORD_QR_DESC;
+    if (!window.phoneSwordGyro?.connected && phoneSwordQrStatus.textContent === 'No phone link') {
+      phoneSwordQrStatus.textContent = 'Waiting for phone…';
+    }
     const phoneUrl = `${location.origin}/phone-sword.html?host=${encodeURIComponent(peerId)}`;
     phoneSwordQrUrl.textContent = phoneUrl;
     phoneSwordQrUrl.dataset.url = phoneUrl;
@@ -6582,18 +6610,27 @@ async function initCore(runtimeContext) {
   // The automatic QR popup waits until a mode is picked (the game loads behind the start
   // screen, so it would cover the mode buttons) — see the mode handler
   let _phoneSwordQrDeferred = false;
+  let _phoneSwordQrAutoShown = false; // the automatic popup has been put up once
   const autoShowPhoneSwordQr = (peerId) => {
+    _phoneSwordQrAutoShown = true;
+    if (peerId) _phoneSwordPeerId = peerId;
     if (!startOverlay.classList.contains('hidden')) {
-      _phoneSwordPeerId = peerId;
       _phoneSwordQrDeferred = true;
       return;
     }
     void showPhoneSwordQr(peerId);
   };
+  // No phone link a while after boot (offline / PeerJS unreachable): put the popup up anyway,
+  // without the QR code, so this device can still be picked as the sword
+  const PHONE_SWORD_NO_LINK_POPUP_MS = 8000;
+  setTimeout(() => {
+    if (_phoneSwordQrAutoShown || _phoneSwordPeerId || window.phoneSwordGyro?.connected) return;
+    autoShowPhoneSwordQr(null);
+  }, PHONE_SWORD_NO_LINK_POPUP_MS);
   // Settings → Sword Gyro → "Show Phone QR Code": bring the connection popup back on demand
-  // (to connect a phone that dropped, or a different one). False until the gyro peer is open.
+  // (to connect a phone that dropped, or a different one). Without a phone link (offline) it
+  // opens without the QR code, so "Use This Device" is still there.
   window.phoneSwordShowQr = () => {
-    if (!_phoneSwordPeerId) return false;
     const connected = !!window.phoneSwordGyro?.connected;
     phoneSwordQrStatus.textContent = connected ? 'Phone connected — scan to switch phones' : 'Waiting for phone…';
     phoneSwordQrStatus.classList.toggle('connected', connected);
@@ -7258,12 +7295,16 @@ async function initCore(runtimeContext) {
           _firstOpen = false;
           // Give the phone 3 seconds to auto-reconnect (if it has the URL bookmarked)
           // before showing the QR modal.
-          _autoConnectTimer = setTimeout(() => {
-            if (!window.phoneSwordGyro.connected) {
-              autoShowPhoneSwordQr(openId);
-            }
-          }, 3000);
-        } else if (idChanged && !phoneSwordQrModal.classList.contains('hidden')) {
+          if (_phoneSwordQrNoLink && !phoneSwordQrModal.classList.contains('hidden')) {
+            void showPhoneSwordQr(openId); // the no-link popup is up: give it its QR code
+          } else if (!_phoneSwordQrAutoShown) {
+            _autoConnectTimer = setTimeout(() => {
+              if (!window.phoneSwordGyro.connected) {
+                autoShowPhoneSwordQr(openId);
+              }
+            }, 3000);
+          }
+        } else if ((idChanged || _phoneSwordQrNoLink) && !phoneSwordQrModal.classList.contains('hidden')) {
           void showPhoneSwordQr(openId); // the QR on screen pointed at the old ID
         }
       });
@@ -8342,7 +8383,7 @@ async function initCore(runtimeContext) {
     isBlocking: () => _playerBlockHeld(),
     isPhoneConnected: () => !!window.phoneSwordGyro?.connected,
     requestPhoneSetup: () => {
-      if (window.phoneSwordGyro?.connected || !_phoneSwordPeerId) return false;
+      if (window.phoneSwordGyro?.connected) return false;
       phoneSwordQrStatus.textContent = 'Waiting for phone…';
       phoneSwordQrStatus.classList.remove('connected');
       void showPhoneSwordQr(_phoneSwordPeerId);
@@ -10235,7 +10276,7 @@ async function initCore(runtimeContext) {
   arcadeOverlay.setModeHandler((gameMode) => {
     if (_phoneSwordQrDeferred) {
       _phoneSwordQrDeferred = false;
-      if (!window.phoneSwordGyro?.connected && _phoneSwordPeerId) void showPhoneSwordQr(_phoneSwordPeerId);
+      if (!window.phoneSwordGyro?.connected) void showPhoneSwordQr(_phoneSwordPeerId);
     }
     if (gameMode !== 'multiplayer') {
       matchMode.exit();
