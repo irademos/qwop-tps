@@ -8,8 +8,9 @@
  * and, with the gear it was given (`gear`), between sword spells it:
  *   • gun    — backs off and shoots (`ranged`, hostile bullets — ctx.fireBullet),
  *   • shield — raises a shield and advances behind it (blocks swings, bullets, bombs, blasts) —
- *              not a spell of its own: only while a bow is aimed at it (and BOW_GUARD_HOLD_MS
- *              after), and now and then (WAND_GUARD_CHANCE) when a wand blast is cast its way
+ *              not a spell of its own: only while a bow is drawn near it — for BOW_GUARD_MAX_MS at
+ *              most (then BOW_GUARD_REST_MS down before it can come up again), BOW_GUARD_HOLD_MS
+ *              after the draw ends — and now and then (WAND_GUARD_CHANCE) when a wand blast is cast its way
  *              (src/combat/shieldThreats.js),
  *   • wand   — backs off and casts fire / ice blasts (EnemyPlayer's wand AI → enemy.onCast),
  *   • bombs  — lobs a bomb now and then when the player is at a distance (ctx.throwBomb),
@@ -26,7 +27,7 @@
 
 import * as THREE from 'three';
 import { createWandModel, setWandGlow } from '../items/magicWand.js';
-import { isBowAimedAt, spellsSince, spellHeadsAt, latestSpellId } from '../combat/shieldThreats.js';
+import { isBowDrawnNear, spellsSince, spellHeadsAt, latestSpellId } from '../combat/shieldThreats.js';
 
 export const PEMBERTON_SCALE = 1.5;
 export const PEMBERTON_HEARTS = 15;
@@ -46,7 +47,10 @@ const GROW_MS = 900;                 // start(): grows to its size over this lon
 const SWORD_MS = [6500, 10500];
 const GUN_MS = [4000, 6500];
 // Raising the shield (only when threatened — see the header)
-const BOW_GUARD_HOLD_MS = 700;       // kept up this long after the bow stops aiming at it
+const BOW_GUARD_RANGE = 30;          // a bow drawn this near (m) brings it up…
+const BOW_GUARD_MAX_MS = [1500, 4500]; // …for this long at most, however long the draw…
+const BOW_GUARD_REST_MS = [1200, 2800]; // …then down this long before it can come up again
+const BOW_GUARD_HOLD_MS = 700;       // kept up this long after the draw ends (the arrow's on its way)
 const WAND_GUARD_CHANCE = 0.4;       // a wand blast cast its way: raised this often…
 const WAND_GUARD_MS = [1200, 1800];  // …for this long
 const GUARD_REACT_MS = [120, 320];   // how quickly it raises it
@@ -239,6 +243,8 @@ export function createBossFighter(ctx) {
   let seenSpell = latestSpellId(); // wand blasts already looked at
   let guardAt = 0;        // raise the shield at this time (a reaction to a threat)…
   let guardUntil = 0;     // …and keep it up until this
+  let bowGuardMax = 0;    // this bow guard comes down by then at the latest
+  let bowRestUntil = 0;   // no bow guard again before this
   let wandModel = null;
   let swordParts = null;  // the sword model's meshes (hidden while the wand is out)
   let bubble = null;      // the bubble mesh (child of enemy.group)
@@ -525,13 +531,19 @@ export function createBossFighter(ctx) {
       if (!target) return;
       const dist = enemy.group.position.distanceTo(target.position);
 
-      // A bow aimed at it / a wand blast cast its way: the shield comes up (see the header)
+      // A bow drawn near it / a wand blast cast its way: the shield comes up (see the header)
       if (gear.shield) {
         const pos = enemy.group.position;
         const size = enemy.group.scale.y || 1;
-        if (isBowAimedAt(pos, { radius: 1.4 * size, height: 1.8 * size })) {
+        // (a bow guard past its time that never came up — no shield model: start over after a rest)
+        if (bowGuardMax && now >= bowGuardMax && phase !== 'shield') {
+          bowGuardMax = 0;
+          bowRestUntil = now + randIn(BOW_GUARD_REST_MS);
+        }
+        if (now >= bowRestUntil && isBowDrawnNear(pos, BOW_GUARD_RANGE)) {
+          if (!bowGuardMax) bowGuardMax = now + randIn(BOW_GUARD_MAX_MS);
           if (!guardAt && phase !== 'shield') guardAt = now + randIn(GUARD_REACT_MS);
-          guardUntil = Math.max(guardUntil, now + BOW_GUARD_HOLD_MS);
+          guardUntil = Math.max(guardUntil, Math.min(bowGuardMax, now + BOW_GUARD_HOLD_MS));
         }
         for (const s of spellsSince(seenSpell)) {
           seenSpell = s.id;
@@ -550,7 +562,11 @@ export function createBossFighter(ctx) {
       if (phase === 'shield' && guardUntil > phaseUntil) phaseUntil = guardUntil;
 
       if (now >= phaseUntil) {
-        if (phase === 'shield') guardUntil = 0;
+        if (phase === 'shield') {
+          guardUntil = 0;
+          // (a bow guard that ran its time: down a while, even if the draw goes on)
+          if (bowGuardMax) { bowGuardMax = 0; bowRestUntil = now + randIn(BOW_GUARD_REST_MS); }
+        }
         if (phase === 'sword') setPhase(nextAfterSword(), now);
         else setPhase('sword', now);
       }

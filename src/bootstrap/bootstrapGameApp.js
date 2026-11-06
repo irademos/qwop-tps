@@ -74,7 +74,7 @@ import { OAR_REST_SWING, OAR_REST_TILT, OAR_TIP_AT, oarGripPoint, oarStrokeDurat
 import { CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
 import { createBroomRide } from '../items/broom.js';
 import { CANOE_STAND_Z, WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
-import { setBowAim } from '../combat/shieldThreats.js';
+import { setBowDrawn } from '../combat/shieldThreats.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE, STAGE_BOSS_SCALE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
@@ -6886,7 +6886,6 @@ async function initCore(runtimeContext) {
   const _bowAimPoint = new THREE.Vector3();
   const _bowTip = new THREE.Vector3();
   const _bowDir = new THREE.Vector3();
-  const _bowThreatOrigin = new THREE.Vector3();
   const _bowCrosshair = (() => {
     const el = document.createElement('div');
     el.id = 'bow-crosshair';
@@ -6964,12 +6963,8 @@ async function initCore(runtimeContext) {
       releaseBowDraw(true);
     }
     if (_bowDraw.active) pistol.draw = _bowDrawAmount();
-    // (shield bearers raise their shields when it's aimed at them — shieldThreats.js)
-    const threatAim = _bowDraw.active && playerModel ? playerControls.getBowAimPoint?.(_bowAimPoint) : null;
-    if (threatAim) {
-      _bowThreatOrigin.copy(playerModel.position).y += 1.3;
-      setBowAim('local', _bowThreatOrigin, _bowDir.subVectors(threatAim, _bowThreatOrigin));
-    } else setBowAim('local', null, null);
+    // (shield bearers near by raise their shields while it's drawn — shieldThreats.js)
+    setBowDrawn('local', _bowDraw.active && playerModel ? playerModel.position : null);
     if (_bowDraw.restoreAt && performance.now() >= _bowDraw.restoreAt) _bowPutAway();
     // (the bow only comes out for a draw: one left in hand some other way — a loadout put back —
     // goes back to the sword / empty hands)
