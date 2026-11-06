@@ -8523,8 +8523,8 @@ async function initCore(runtimeContext) {
   // `ps_endless_<key | guest>`, so it works offline and for guests — and, signed in, the
   // profile's `endlessStats`). Every wave is bigger and harder (`_endlessWave`): more alive at
   // once, more hearts, more attackers / swings (`_psDiffStage`), and new kinds join in: bombers
-  // (ENDLESS_FROM.bomber), wand casters, archers (bow — the boss fighter logic with a gun),
-  // shield bearers; every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
+  // (ENDLESS_FROM.bomber), shield bearers, wand casters, archers (bow — the boss fighter logic with a gun);
+  // every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
   // health bar across the top, more gear each time — stageBossGear). Between waves: heart bubbles
   // and a few coins. Every run starts with 0 coins, the sword and a shield that never breaks
   // (_endlessFreshLoadout; the real coins / gear / bombs / bubbles / mana are set aside meanwhile —
@@ -8534,7 +8534,7 @@ async function initCore(runtimeContext) {
   const ENDLESS_SPAWN_DIST = [9, 15];  // m from the player
   const ENDLESS_BREAK_MS = 4500;       // between waves
   const ENDLESS_CHAMPION_EVERY = 5;
-  const ENDLESS_FROM = { bomber: 2, wand: 3, archer: 4, shield: 6, gearBombs: 10 };
+  const ENDLESS_FROM = { bomber: 2, shield: 3, wand: 5, archer: 6, gearBombs: 10 };
   const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'tree'];
   const _endlessWave = (w) => ({
     count: Math.min(40, 5 + 2 * w),
@@ -8810,7 +8810,7 @@ async function initCore(runtimeContext) {
   const _endlessStartWave = (w) => {
     const def = _endlessWave(w);
     Object.assign(_endless, { wave: w, def, diff: def.diff, toSpawn: def.count, phase: 'fight', nextSpawnAt: performance.now() + 600 });
-    const news = def.champion ? 'A champion is coming' : ENDLESS_NEWS[w] || `${def.count} enemies`;
+    const news = [ENDLESS_NEWS[w], def.champion && 'A champion is coming'].filter(Boolean).join(' · ') || `${def.count} enemies`;
     _showWorldBanner(`WAVE ${w}`, news, 2200);
     _psUpdateKillHud(true);
   };
