@@ -8523,7 +8523,8 @@ async function initCore(runtimeContext) {
   // `ps_endless_<key | guest>`, so it works offline and for guests — and, signed in, the
   // profile's `endlessStats`). Every wave is bigger and harder (`_endlessWave`): more alive at
   // once, more hearts, more attackers / swings (`_psDiffStage`), and new kinds join in: bombers
-  // (ENDLESS_FROM.bomber), shield bearers, wand casters, archers (bow — the boss fighter logic with a gun);
+  // (ENDLESS_FROM.bomber), shield bearers, wand casters, archers (bow — the boss fighter logic with a gun) —
+  // one the wave a kind joins, a few more as the waves go on (ENDLESS_KIND_GROWTH);
   // every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
   // health bar across the top, more gear each time — stageBossGear). Between waves: heart bubbles
   // and a few coins. Every run starts with 0 coins, the sword and a shield that never breaks
@@ -8534,7 +8535,17 @@ async function initCore(runtimeContext) {
   const ENDLESS_SPAWN_DIST = [9, 15];  // m from the player
   const ENDLESS_BREAK_MS = 4500;       // between waves
   const ENDLESS_CHAMPION_EVERY = 5;
-  const ENDLESS_FROM = { bomber: 2, shield: 3, wand: 5, archer: 6, gearBombs: 10 };
+  const ENDLESS_FROM = { bomber: 2, shield: 3, wand: 4, archer: 6, gearBombs: 10 };
+  // How many of each kind a wave brings: one the wave it joins, then one more every `every`
+  // waves, up to `max` (the rest are swordsmen)
+  const ENDLESS_KIND_GROWTH = {
+    bomber: { every: 2, max: 6 },
+    shield: { every: 2, max: 6 },
+    wand: { every: 3, max: 5 },
+    archer: { every: 3, max: 5 },
+  };
+  const _endlessKindCount = (kind, w) => (w < ENDLESS_FROM[kind] ? 0
+    : Math.min(ENDLESS_KIND_GROWTH[kind].max, 1 + Math.floor((w - ENDLESS_FROM[kind]) / ENDLESS_KIND_GROWTH[kind].every)));
   const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'tree'];
   const _endlessWave = (w) => ({
     count: Math.min(40, 5 + 2 * w),
@@ -8542,10 +8553,7 @@ async function initCore(runtimeContext) {
     gapMs: Math.max(350, 1300 - 50 * w),
     diff: w + Math.floor(w / 2), // (the Showdown stage its hearts / attackers / swings follow)
     speed: PS_ENEMY_SPEED * (1 + Math.min(0.5, (w - 1) * 0.04)),
-    bomber: w >= ENDLESS_FROM.bomber ? Math.min(0.18, 0.07 + 0.015 * (w - ENDLESS_FROM.bomber)) : 0,
-    archer: w >= ENDLESS_FROM.archer ? Math.min(0.2, 0.07 + 0.015 * (w - ENDLESS_FROM.archer)) : 0,
-    wand: w >= ENDLESS_FROM.wand ? Math.min(0.2, 0.06 + 0.015 * (w - ENDLESS_FROM.wand)) : 0,
-    shield: w >= ENDLESS_FROM.shield ? Math.min(0.2, 0.06 + 0.015 * (w - ENDLESS_FROM.shield)) : 0,
+    kinds: Object.fromEntries(Object.keys(ENDLESS_KIND_GROWTH).map((k) => [k, _endlessKindCount(k, w)])),
     champion: w % ENDLESS_CHAMPION_EVERY === 0,
   });
   const ENDLESS_NEWS = {
@@ -8763,13 +8771,8 @@ async function initCore(runtimeContext) {
   const _endlessSpawnOne = (champion) => {
     const e = _endless;
     const W = e.def;
-    const r = Math.random();
-    let kind = 'sword';
-    if (champion) kind = 'champion';
-    else if (r < W.bomber) kind = 'bomber';
-    else if (r < W.bomber + W.archer) kind = 'archer';
-    else if (r < W.bomber + W.archer + W.wand) kind = 'wand';
-    else if (r < W.bomber + W.archer + W.wand + W.shield) kind = 'shield';
+    // (the next of the wave's line-up — taken off it once it's really spawned)
+    const kind = champion ? 'champion' : (e.kinds?.[e.kinds.length - 1] ?? 'sword');
     const charKey = kind === 'wand' ? PS_WAND_ENEMY_CHARACTER
       : ENDLESS_CHARACTERS[Math.floor(Math.random() * ENDLESS_CHARACTERS.length)];
     const url = MATCH_CHARACTERS[charKey].url;
@@ -8809,7 +8812,17 @@ async function initCore(runtimeContext) {
 
   const _endlessStartWave = (w) => {
     const def = _endlessWave(w);
-    Object.assign(_endless, { wave: w, def, diff: def.diff, toSpawn: def.count, phase: 'fight', nextSpawnAt: performance.now() + 600 });
+    // The wave's line-up, in a random order (popped from the end); the champion comes last
+    const kinds = [];
+    for (const [k, n] of Object.entries(def.kinds)) for (let i = 0; i < n; i++) kinds.push(k);
+    while (kinds.length < def.count - (def.champion ? 1 : 0)) kinds.push('sword');
+    kinds.length = def.count - (def.champion ? 1 : 0);
+    for (let i = kinds.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
+    }
+    if (def.champion) kinds.unshift('champion');
+    Object.assign(_endless, { wave: w, def, diff: def.diff, kinds, toSpawn: kinds.length, phase: 'fight', nextSpawnAt: performance.now() + 600 });
     const news = [ENDLESS_NEWS[w], def.champion && 'A champion is coming'].filter(Boolean).join(' · ') || `${def.count} enemies`;
     _showWorldBanner(`WAVE ${w}`, news, 2200);
     _psUpdateKillHud(true);
@@ -8831,6 +8844,7 @@ async function initCore(runtimeContext) {
     const alive = hordeEnemies.reduce((n, h) => n + (h.isDead ? 0 : 1), 0);
     if (e.toSpawn > 0 && now >= e.nextSpawnAt && alive < e.def.maxAlive) {
       if (_endlessSpawnOne(e.toSpawn === 1 && e.def.champion)) {
+        e.kinds?.pop();
         e.toSpawn -= 1;
         e.nextSpawnAt = now + e.def.gapMs;
       }
