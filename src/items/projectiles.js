@@ -158,6 +158,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.damage = Number.isFinite(options.damage) ? options.damage : 1;
   // Enemy shot (the Showdown final boss's gun): hits only the local player (updateProjectiles' localTarget)
   mesh.userData.hostile = !!options.hostile;
+  mesh.userData.shooter = options.shooter ?? null; // (a hostile shot's enemy — the bubble sends it back there)
   scene.add(mesh);
   projectiles.push(mesh);
 }
@@ -169,7 +170,7 @@ export function updateProjectiles({
   hordeEnemies,
   pvpTargets = null,
   pvpAlsoEnemies = false, // (Town: a shot that misses the players can still hit the townsfolk)
-  localTarget = null   // { position, onHit(dir, from) } — what hostile shots can hit
+  localTarget = null   // { position, onHit(dir, from), reflect?(proj, vel) → new direction | null } — what hostile shots can hit
 }) {
   const localId = multiplayer?.getId?.() ?? 'local'; // 'local' = single player (see PlayerControls)
   const getStrengthDamage = baseDamage => {
@@ -245,6 +246,19 @@ export function updateProjectiles({
       if (localTarget && leftShooter) {
         _pvpProbe.group.position = localTarget.position;
         if (sweptHitsEnemy(prevPos, segEnd, _pvpProbe)) {
+          // (the player's bubble: it flies back the other way as the player's own shot — hits enemies)
+          const back = localTarget.reflect?.(proj, vel);
+          if (back) {
+            const v = back.clone().multiplyScalar(Math.max(8, vel.length()));
+            rb.setLinvel({ x: v.x, y: v.y, z: v.z }, true);
+            proj.userData.hostile = false;
+            proj.userData.shooterId = 'reflected';
+            proj.userData.reflected = true; // (only enemies now — never another player)
+            proj.userData.spawnPosition = proj.position.clone();
+            proj.userData.lifetime = Math.max(proj.userData.lifetime, 2000);
+            (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
+            continue;
+          }
           localTarget.onHit(vel.clone().setY(0).normalize(), proj.userData.spawnPosition);
           removeProjectile(i);
           continue;
@@ -257,7 +271,7 @@ export function updateProjectiles({
 
     // Multiplayer battles: every fighter ({id, position, onHit}) — the battle code
     // decides who deals the damage (src/multiplayer/matchMode.js)
-    if (pvpTargets) {
+    if (pvpTargets && !proj.userData.reflected) {
       if (leftShooter) {
         for (const target of pvpTargets) {
           if (target.id === proj.userData.shooterId) continue;

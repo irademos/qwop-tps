@@ -299,7 +299,7 @@ const SHOP_ITEMS = [
   { id: 'magic_wand', at: [62, COUNTER_SURFACE_Y + 3, 42], build: 'wand' },
   { id: 'shield', at: [88, COUNTER_SURFACE_Y - 8, 12], build: 'shield' },
   { id: 'heart_upgrade', at: [-62, 150, 4], build: 'heart', hang: true },
-  { id: 'bubble', at: [0, 160, 4], build: 'bubble', hang: true },
+  // (no bubble: in Showdown a bubble costs mana — buy a mana potion)
   { id: 'shield_upgrade', at: [62, 150, 4], build: 'shieldUpgrade', hang: true },
   { id: 'treasure_chest', chest: true },
 ];

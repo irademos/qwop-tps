@@ -118,6 +118,17 @@ const WAND_CAST_SWIPE_S = 0.18;     // the swipe; the blast leaves at its end
 const WAND_CAST_RECOVER_S = 0.3;
 const WAND_CAST_COOLDOWN_MIN = 3.2, WAND_CAST_COOLDOWN_RAND = 2.6;
 const WAND_CAST_FIRST_DELAY = 1.2;  // after first getting in range
+// Ranged turns (Showdown / Endless — the game sets `rangedTurns` / `lineOfFire` each frame):
+// a wand caster / archer asks for its turn once it has a clear shot (wantsRangedTurn), the game
+// gives it to one at a time (rangedTurn = performance.now()), turns the camera to it and holds
+// everyone else's attacks; the caster waits RANGED_TURN_LEAD_S before it starts charging
+const RANGED_TURN_LEAD_S = 0.7;
+// Clear view: no other enemy within this many m of the line to the player (between the two);
+// a ranged enemy steps sideways out from behind one (CLEAR_SHOT_SPEED), on until the line is
+// CLEAR_SHOT_MARGIN further clear
+const CLEAR_SHOT_WIDTH = 0.9;
+const CLEAR_SHOT_MARGIN = 0.35;
+const CLEAR_SHOT_SPEED = 2.6;        // m/s
 const WAND_CAST_PIVOT = V(0.12, 0.82, 0.32);
 const WAND_CAST_HAND_REACH = 0.24;  // hand travel either side of the pivot along the line
 const WAND_POINT_DIR = N(0, 0.45, 1);
@@ -326,6 +337,12 @@ export class EnemyPlayer {
     this.forceCast = null;    // …only when given { line: WAND_CAST_LINES key, element? }
     this._cast = null;        // { t, line (body-local), element, fired }
     this._castCooldown = WAND_CAST_FIRST_DELAY + Math.random() * 1.5;
+    // Ranged turns + clear view (Showdown / Endless — see RANGED_TURN_LEAD_S / CLEAR_SHOT_WIDTH)
+    this.rangedTurns = false;     // set by the game each frame
+    this.lineOfFire = null;       // the enemies that mustn't be in the way (array), or null
+    this.wantsRangedTurn = false; // ready to shoot / cast with a clear shot
+    this.rangedTurn = 0;          // performance.now() when given its turn, 0 = none
+    this._clearSide = 0;          // stepping that way (±1) out from behind another enemy
     // Ice (magic blast): frozen in place for this many more seconds
     this._frozenLeft = 0;
     this._frozenFor = 0;
@@ -910,8 +927,27 @@ export class EnemyPlayer {
       this.rigidBody.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true);
     }
 
+    // ── Clear view: a ranged one steps out from behind other enemies ───────
+    const clearing = this.ranged && this.lineOfFire && targetModel && !this.stationary
+      && scriptMode !== 'passive' && !this._makingSpace
+      ? this._lineOfFireBlock(targetModel.position, this._clearSide ? CLEAR_SHOT_WIDTH + CLEAR_SHOT_MARGIN : CLEAR_SHOT_WIDTH)
+      : 0;
+    this._clearSide = clearing;
+    if (clearing) {
+      // (sideways to the line to the player, keeping whatever it was doing along it)
+      _toTarget.subVectors(targetModel.position, this.group.position).setY(0);
+      if (_toTarget.lengthSq() > 1e-6) {
+        _toTarget.normalize();
+        const px = -_toTarget.z * clearing, pz = _toTarget.x * clearing;
+        const vel = this.rigidBody.linvel();
+        const along = vel.x * _toTarget.x + vel.z * _toTarget.z;
+        const speed = CLEAR_SHOT_SPEED * this.speedScale;
+        this.rigidBody.setLinvel({ x: _toTarget.x * along + px * speed, y: vel.y, z: _toTarget.z * along + pz * speed }, true);
+      }
+    }
+
     // ── GLB character body animation (walk / idle; arms are posed below) ──
-    this._glbCharacter?.setMoving(this._aiState === 'chase' || this._aiState === 'backoff' || this._makingSpace);
+    this._glbCharacter?.setMoving(this._aiState === 'chase' || this._aiState === 'backoff' || this._makingSpace || !!clearing);
     this._glbCharacter?.animate(dt);
 
     // ── Right hand (drives sword position) ────────────────────────────────
@@ -1223,7 +1259,10 @@ export class EnemyPlayer {
 
   _updateWandCast(dt, targetModel, distToTarget, canCast) {
     dt = Math.min(dt, 0.1); // (a frame hitch never skips the charge-up telegraph)
-    if (this._cast && !this._cast.fired && !canCast) this._cast = null; // (player down / bomb inbound)
+    if (this._cast && !this._cast.fired && !canCast) { // (player down / bomb inbound)
+      this._cast = null;
+      this.releaseRangedTurn();
+    }
     const c = this._cast;
     if (c) {
       c.t += dt;
@@ -1236,6 +1275,7 @@ export class EnemyPlayer {
       }
       if (c.t >= WAND_CAST_CHARGE_S + WAND_CAST_SWIPE_S + WAND_CAST_RECOVER_S) {
         this._cast = null;
+        this.releaseRangedTurn();
         this._castCooldown = WAND_CAST_COOLDOWN_MIN + Math.random() * WAND_CAST_COOLDOWN_RAND;
       }
       return;
@@ -1250,10 +1290,60 @@ export class EnemyPlayer {
     }
     if (this.castsHeld) return;
     const inRange = !this.ranged || distToTarget <= this.ranged.max + 1.5;
-    if (!inRange) return;
+    if (!inRange) { this.wantsRangedTurn = false; return; }
     this._castCooldown -= dt;
     if (this._castCooldown > 0) return;
+    if (this.rangedTurns) {
+      // (one ranged attacker at a time, with a clear shot, once the camera has turned to it)
+      if (!this.rangedTurn) {
+        this.wantsRangedTurn = !!targetModel && this.hasClearShot(targetModel.position);
+        return;
+      }
+      if ((performance.now() - this.rangedTurn) / 1000 < RANGED_TURN_LEAD_S) return;
+    }
     this._startCast(WAND_CAST_LINE_LIST[Math.floor(Math.random() * WAND_CAST_LINE_LIST.length)]);
+  }
+
+  /** Done with (or never got to use) its ranged turn. */
+  releaseRangedTurn() {
+    this.rangedTurn = 0;
+    this.wantsRangedTurn = false;
+  }
+
+  /**
+   * Another living enemy of `lineOfFire` between this one and `targetPos`, within `width` m of
+   * the line: the way to step out from behind it (+1 / −1, sideways to the line) — 0 when clear.
+   */
+  _lineOfFireBlock(targetPos, width = CLEAR_SHOT_WIDTH) {
+    const others = this.lineOfFire;
+    if (!others || !targetPos) return 0;
+    const p = this.group.position;
+    let ux = targetPos.x - p.x, uz = targetPos.z - p.z;
+    const len = Math.hypot(ux, uz);
+    if (len < 1.2) return 0;
+    ux /= len; uz /= len;
+    let push = 0;
+    let blocked = false;
+    for (const o of others) {
+      if (!o || o === this || o.isDead) continue;
+      const op = o.group?.position;
+      if (!op) continue;
+      const rx = op.x - p.x, rz = op.z - p.z;
+      const along = rx * ux + rz * uz;
+      if (along < 0.4 || along > len - 0.6) continue;
+      const side = rx * -uz + rz * ux; // + = the side we'd step to with +1
+      if (Math.abs(side) >= width) continue;
+      blocked = true;
+      const away = side > 0.05 ? -1 : side < -0.05 ? 1 : (this._clearSide || (Math.random() < 0.5 ? 1 : -1));
+      push += away * (width - Math.abs(side) + 0.1);
+    }
+    if (!blocked) return 0;
+    return push > 0 ? 1 : push < 0 ? -1 : (this._clearSide || 1);
+  }
+
+  /** No other enemy in the way of a shot at `targetPos` (always true without a `lineOfFire`). */
+  hasClearShot(targetPos) {
+    return !this.lineOfFire || this._lineOfFireBlock(targetPos) === 0;
   }
 
   _startCast(line, element = randomMagicElement()) {

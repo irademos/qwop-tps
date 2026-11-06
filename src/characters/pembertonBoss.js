@@ -27,6 +27,7 @@
 
 import * as THREE from 'three';
 import { createWandModel, setWandGlow } from '../items/magicWand.js';
+import { setBowDraw } from '../items/bowModel.js';
 import { isBowDrawnNear, spellsSince, spellHeadsAt, latestSpellId } from '../combat/shieldThreats.js';
 
 export const PEMBERTON_SCALE = 1.5;
@@ -58,6 +59,11 @@ const WAND_MS = [4500, 7000];
 const GUN_RANGE = { min: 6, max: 11 };    // keeps this far away while shooting
 const SHIELD_RANGE = { min: 1.4, max: 3.2 }; // walks in behind the shield
 const SHOT_MS = [850, 1600];
+// Ranged turns (Showdown / Endless — enemy.rangedTurns, see EnemyPlayer): it asks for its turn
+// once it has a clear shot, then draws for SHOT_AIM_MS (the camera turns to it, the others hold
+// their attacks) and looses; the next ask comes SHOT_TURN_MS after
+const SHOT_AIM_MS = 1400;
+const SHOT_TURN_MS = [1600, 2800];
 const SHOT_MAX_DIST = 16;
 const SHOT_SPREAD = 0.06;            // radians of aim error
 const MUZZLE = new THREE.Vector3(0, 1.0, 0.75); // model space (scaled with him)
@@ -221,6 +227,7 @@ export function createStageBoss(ctx) {
  *  fireBullet(origin, dir)        — a hostile bullet
  *  throwBomb(origin, target)      — a bomb that can blast the player
  *  onShieldBlock(position, kind)  — its shield / bubble ('shield' | 'bubble') stopped something
+ *  holdAttacks() → boolean        — optional: no bombs now (another enemy's ranged turn)
  *  useBubble() → boolean          — optional: may it raise a bubble now (battle bots use one up)
  * @returns {{ enemy, start(): void, isStarted(): boolean, update(): void, dispose(): void,
  *   isShieldUp(): boolean, guardKind(fromPos): 'shield'|'bubble'|null, getPhase(): string,
@@ -420,7 +427,7 @@ export function createBossFighter(ctx) {
     if (dir.lengthSq() < 1e-4) return;
     dir.normalize().applyAxisAngle(_yAxis, (Math.random() * 2 - 1) * SHOT_SPREAD);
     dir.y += (Math.random() * 2 - 1) * SHOT_SPREAD * 0.5;
-    ctx.fireBullet(origin, dir.normalize().clone());
+    ctx.fireBullet(origin, dir.normalize().clone(), enemy);
   };
 
   const throwBomb = (target) => {
@@ -573,9 +580,30 @@ export function createBossFighter(ctx) {
 
       // (not mid-blast: it's on its back)
       if (enemy._isRagdoll) return;
-      if (phase === 'gun' && now >= nextShotAt) {
+      if (phase === 'gun' && enemy.rangedTurns) {
+        // (its turn: draw, the camera on it, then loose — see SHOT_AIM_MS)
+        if (enemy.rangedTurn) {
+          const k = Math.min(1, (now - enemy.rangedTurn) / SHOT_AIM_MS);
+          setBowDraw(held?.gunMesh, k);
+          phaseUntil = Math.max(phaseUntil, enemy.rangedTurn + SHOT_AIM_MS + 300);
+          if (k >= 1) {
+            if (dist <= SHOT_MAX_DIST) shoot(target);
+            setBowDraw(held?.gunMesh, 0);
+            enemy.releaseRangedTurn();
+            nextShotAt = now + randIn(SHOT_TURN_MS);
+          }
+        } else {
+          enemy.wantsRangedTurn = now >= nextShotAt && dist <= SHOT_MAX_DIST && enemy.hasClearShot(target.position);
+        }
+      } else if (phase === 'gun' && now >= nextShotAt) {
         nextShotAt = now + randIn(SHOT_MS);
         if (dist <= SHOT_MAX_DIST) shoot(target);
+      } else if (phase !== 'gun' && !enemy.wand && (enemy.rangedTurn || enemy.wantsRangedTurn)) {
+        setBowDraw(held?.gunMesh, 0);
+        enemy.releaseRangedTurn();
+      }
+      if (gear.bombs && phase !== 'shield' && now >= nextBombAt && ctx.holdAttacks?.()) {
+        nextBombAt = now + 800; // (someone else's turn: a little later)
       }
       if (gear.bombs && phase !== 'shield' && now >= nextBombAt) {
         nextBombAt = now + randIn(BOMB_MS);

@@ -3399,8 +3399,8 @@ async function initCore(runtimeContext) {
   function updateManaUI() {
     const bar = document.getElementById('mana-bar');
     if (!bar) return;
-    // (Town: always — mana pays for the bubble and the broom's boost too)
-    const show = !!_townLoadout || (hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout));
+    // (Town / Showdown / Endless: always — mana pays for the bubble (and Town's broom boost) too)
+    const show = !!_townLoadout || (!_classicMode && (_bubblesOnMana() || hasMagicWand()) && (!duelMode?.isActive() || !!_matchLoadout));
     bar.classList.toggle('hidden', !show);
     document.body.classList.toggle('has-mana', show);
     if (!show) return;
@@ -4018,10 +4018,13 @@ async function initCore(runtimeContext) {
   let bubbleActiveUntil = 0;
   let bubbleMesh = null;
   const isPlayerBubbleActive = () => Date.now() < bubbleActiveUntil && !playerDead;
-  // (Town: no bubbles to buy — each one costs TOWN_BUBBLE_MANA mana; the count is how many the mana pays for)
-  const TOWN_BUBBLE_MANA = 5;
-  const getBubbleCount = () => (_townLoadout
-    ? Math.floor(getMana() / TOWN_BUBBLE_MANA)
+  // (Town, Showdown and Endless: no bubbles to buy — each one costs BUBBLE_MANA_COST mana; the
+  // count is how many the mana pays for. Multiplayer battles (pickups) and the tutorial count bubbles.)
+  const BUBBLE_MANA_COST = 5;
+  const _bubblesOnMana = () => !!_townLoadout
+    || (!_classicMode && !_matchLoadout && !duelMode?.isActive() && !showdownTutorial?.isActive());
+  const getBubbleCount = () => (_bubblesOnMana()
+    ? Math.floor(getMana() / BUBBLE_MANA_COST)
     : Math.max(0, Math.floor(statsState.bubbles || 0)));
   const ensureBubbleMesh = () => {
     if (bubbleMesh) return bubbleMesh;
@@ -4051,7 +4054,7 @@ async function initCore(runtimeContext) {
     if (playerDead || isPlayerBubbleActive()) return false;
     if (duelMode?.isActive() && !(_matchLoadout && matchMode?.isFighting())) return false; // battles only in Multiplayer
     if (getBubbleCount() <= 0) return false;
-    if (_townLoadout) setStat('mana', getMana() - TOWN_BUBBLE_MANA, { skipSave: true });
+    if (_bubblesOnMana()) setStat('mana', getMana() - BUBBLE_MANA_COST, { skipSave: true });
     else setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     bubbleActiveUntil = Date.now() + BUBBLE_DURATION_MS;
@@ -4072,7 +4075,7 @@ async function initCore(runtimeContext) {
     const active = isPlayerBubbleActive();
     const label = active
       ? `🫧 ${Math.ceil((bubbleActiveUntil - Date.now()) / 1000)}s`
-      : _townLoadout ? '🫧' : `🫧 ${getBubbleCount()}`; // (Town: no count — it runs on mana)
+      : _bubblesOnMana() ? '🫧' : `🫧 ${getBubbleCount()}`; // (no count when it runs on mana)
     if (label !== lastPsBubbleButtonLabel) {
       button.textContent = label;
       lastPsBubbleButtonLabel = label;
@@ -4456,6 +4459,17 @@ async function initCore(runtimeContext) {
   const _pembertonShotTarget = {
     get position() { return playerModel.position; },
     onHit: (dir, src) => _pembertonHitPlayer(PEMBERTON_BULLET_DAMAGE, src, dir),
+    // The bubble sends an arrow back at whoever loosed it (its shooter, else back the way it came)
+    reflect: (proj, vel) => {
+      if (playerDead || !isPlayerBubbleActive()) return null;
+      const shooter = proj.userData.shooter;
+      const dir = shooter?.group && !shooter.isDead
+        ? shooter.group.position.clone().setY(shooter.group.position.y + 0.9 * (shooter.group.scale.y || 1)).sub(proj.position)
+        : vel.clone().negate();
+      if (dir.lengthSq() < 1e-6) return null;
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.55, { cooldownKey: 'bubble-reflect', cooldownMs: 120 });
+      return dir.normalize();
+    },
   };
   const _pembertonBombTargets = [{
     get group() { return playerModel; },
@@ -4471,8 +4485,9 @@ async function initCore(runtimeContext) {
     enemy,
     getTarget: () => (_attacksHeld() ? null : playerModel),
     getWeaponGear: () => matchCtx.getWeaponGear(),
-    fireBullet: (origin, dir) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton',
-      arrowShotOptions({ speed: PEMBERTON_BULLET_SPEED, gravityScale: 0, hostile: true })),
+    fireBullet: (origin, dir, shooter = enemy) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton',
+      arrowShotOptions({ speed: PEMBERTON_BULLET_SPEED, gravityScale: 0, hostile: true, shooter })),
+    holdAttacks: () => !!_psRangedTurn && _psRangedTurn !== enemy, // (another enemy's ranged turn)
     throwBomb: (origin, target) => playerBombs.throw(origin, target, { getBlastTargets: () => _pembertonBombTargets, keepHeld: true }),
     onShieldBlock: () => duelCtx.onShieldHit(),
     wandRange: WAND_ENEMY_RANGE,
@@ -4819,6 +4834,17 @@ async function initCore(runtimeContext) {
   const _playerBlastTarget = {
     center: new THREE.Vector3(),
     radius: 0.42,
+    // The bubble sends a blast back at its caster (magicBlast.js turns it into the player's)
+    reflect: (blast) => {
+      if (playerDead || !isPlayerBubbleActive()) return null;
+      const c = blast.caster;
+      const dir = c?.group && !c.isDead
+        ? c.group.position.clone().sub(playerModel.position).setY(0)
+        : blast.forward.clone().negate().setY(0);
+      if (dir.lengthSq() < 1e-6) return null;
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.55, { cooldownKey: 'bubble-reflect', cooldownMs: 120 });
+      return dir.normalize();
+    },
     // Bubble, a shield facing the blast, or a sword / wand block along the blast's line
     blocks: (blast) => {
       if (window.isPlayerBubbleActive?.()) return true;
@@ -5355,6 +5381,46 @@ async function initCore(runtimeContext) {
       consider(b.group.position, b.forward.x, b.forward.z);
     }
     return closest;
+  }
+
+  // ── Ranged turns (Showdown / Endless / roam quests / voyages): one wand caster / archer at a time ──
+  // A ranged enemy with a clear shot asks for its turn (EnemyPlayer.wantsRangedTurn); given it,
+  // it waits / draws for a moment before the shot (RANGED_TURN_LEAD_S in EnemyPlayer.js,
+  // SHOT_AIM_MS in pembertonBoss.js) while the camera turns to it and every other enemy holds
+  // its attacks (the horde loop); it hands the turn back once the shot is off.
+  const PS_RANGED_TURN_MAX_MS = 4000; // taken back after this at the latest (knocked down / frozen…)
+  const PS_RANGED_TURN_GAP_MS = 350;  // between one turn and the next
+  let _psRangedTurn = null;
+  let _psRangedTurnGapUntil = 0;
+  const _psRangedTurnsWanted = () => !_classicMode && !showdownTutorial?.isActive() && !town?.isActive()
+    && !duelMode?.isActive() && (_psStageActive || !!_endless || !!_voyage);
+  // Before the horde loop each frame (`incoming`: a bomb / blast is already on its way)
+  function _psUpdateRangedTurns(incoming) {
+    const on = _psRangedTurnsWanted();
+    const now = performance.now();
+    for (const e of hordeEnemies) {
+      if (e instanceof BombThrowerEnemy) continue;
+      e.rangedTurns = on;
+      e.lineOfFire = on ? hordeEnemies : null;
+    }
+    const t = _psRangedTurn;
+    if (t && (!on || t.isDead || !t.group?.parent || !t.rangedTurn || t.isFrozen?.() || now - t.rangedTurn > PS_RANGED_TURN_MAX_MS)) {
+      t.releaseRangedTurn?.();
+      _psRangedTurn = null;
+      _psRangedTurnGapUntil = now + PS_RANGED_TURN_GAP_MS;
+    }
+    if (!on || _psRangedTurn || incoming || _attacksHeld() || now < _psRangedTurnGapUntil || !playerModel) return;
+    let pick = null;
+    let best = Infinity;
+    for (const e of hordeEnemies) {
+      if (!e.wantsRangedTurn || e.isDead || e.isFrozen?.() || e._isRagdoll) continue;
+      const d = e.group.position.distanceToSquared(playerModel.position);
+      if (d < best) { best = d; pick = e; }
+    }
+    if (pick) {
+      pick.rangedTurn = now;
+      _psRangedTurn = pick;
+    }
   }
 
   // Phone Sword: time-of-day choice ('random', 'day', 'night') and current stage night flag
@@ -7118,7 +7184,7 @@ async function initCore(runtimeContext) {
       bubbles: getBubbleCount(),
       bubbleActive: isPlayerBubbleActive(),
       // (Town: bubbles run on mana — no count on the button)
-      bubbleMana: !!_townLoadout,
+      bubbleMana: _bubblesOnMana(),
       hasGun: (inv.pistol?.count ?? 0) > 0,
       hasShield: (inv[SHIELD_ITEM_ID]?.count ?? 0) > 0,
       ammo: getPistolAmmoCount(),
@@ -7991,13 +8057,13 @@ async function initCore(runtimeContext) {
   // automatically (in this priority order, one purchase per tick) and flash a purchase toast.
   const PS_AUTO_BUY_ITEMS = [
     { itemId: 'showdown_bomb', has: () => getPlayerBombCount() > 0 },
-    { itemId: 'bubble', has: () => getBubbleCount() > 0 },
+    { itemId: 'bubble', has: () => _bubblesOnMana() || getBubbleCount() > 0 },
     { itemId: SHIELD_ITEM_ID, has: () => (inventoryState[SHIELD_ITEM_ID]?.count || 0) > 0 },
     { itemId: 'pistol', has: () => (inventoryState.pistol?.count || 0) > 0 },
     // Bullets are only useful once the gun is owned
     { itemId: PISTOL_AMMO_KEY, has: () => !(inventoryState.pistol?.count > 0) || getPistolAmmoCount() > 0 },
-    // Mana: only with the wand, once there isn't enough left for a spell
-    { itemId: 'mana_potion', has: () => !hasMagicWand() || getMana() >= WAND_MANA_COST }
+    // Mana: once there isn't enough left for a spell (with the wand) / a bubble (it runs on mana)
+    { itemId: 'mana_potion', has: () => getMana() >= (hasMagicWand() ? WAND_MANA_COST : _bubblesOnMana() ? BUBBLE_MANA_COST : 0) }
   ];
   let psAutoBuyBusy = false;
   const psAutoBuyTick = async () => {
@@ -8957,7 +9023,15 @@ async function initCore(runtimeContext) {
   };
   // (dev console: endless.debug(), endless.startWave(n))
   window.endless = {
-    debug: () => ({ run: _endless, stats: _endlessStats, kills: _psStageKills, alive: hordeEnemies.filter((h) => !h.isDead).length }),
+    debug: () => ({ run: _endless, stats: _endlessStats, kills: _psStageKills, alive: hordeEnemies.filter((h) => !h.isDead).length,
+      enemies: hordeEnemies, rangedTurn: _psRangedTurn, bubble: () => activatePlayerBubble(), blasts: () => magicBlasts.list(),
+      // (an arrow / a blast from enemy `e` at the player — to try the bubble's reflections)
+      fireAt: (e, kind = 'arrow') => {
+        const origin = e.group.position.clone().setY(e.group.position.y + 1);
+        const dir = playerModel.position.clone().setY(playerModel.position.y + 0.8).sub(origin).normalize();
+        if (kind === 'arrow') _bossFighterCtx(e).fireBullet(origin, dir);
+        else _castEnemySpell(e, { origin: origin.setY(e.group.position.y + 0.55), forward: dir, line: new THREE.Vector3(1, 0, 0) });
+      } }),
     startWave: (w) => { if (_endless && _endless.phase !== 'idle') _endlessStartWave(w); },
   };
   // Leaving (the lobby, another mode)
@@ -11258,7 +11332,9 @@ async function initCore(runtimeContext) {
           }
         }
 
-        const _incoming = _psFindIncomingThreat();
+        // (an archer / wand caster about to shoot — its ranged turn — comes next)
+        const _incoming = _psFindIncomingThreat()
+          ?? (_psRangedTurn && !_psRangedTurn.isDead ? _psRangedTurn.group.position : null);
         if (_now >= _psCamManualUntil && _incoming) {
           // An incoming bomb / magic blast takes priority over enemies: track the closest one
           const _bp = _incoming;
@@ -11553,8 +11629,10 @@ async function initCore(runtimeContext) {
       );
       const _attackSlotSet = new Set(_liveEnemies.slice(0, _MAX_ATTACKERS));
 
-      // Sword Showdown: enemies hold their attacks while a bomb / magic blast is inbound
+      // Sword Showdown: enemies hold their attacks while a bomb / magic blast is inbound, and
+      // all but the one with the ranged turn while an archer / wand caster gets ready to shoot
       const _pauseForBomb = !!_psFindIncomingThreat();
+      _psUpdateRangedTurns(_pauseForBomb);
 
       for (let _hi = hordeEnemies.length - 1; _hi >= 0; _hi--) {
         const _he = hordeEnemies[_hi];
@@ -11593,11 +11671,13 @@ async function initCore(runtimeContext) {
         }
 
         const _allowAttack = _attackSlotSet.has(_he);
+        const _othersTurn = !!_psRangedTurn && _he !== _psRangedTurn; // (another's ranged turn)
+        if (_he instanceof BombThrowerEnemy) _he.throwsPaused = _othersTurn;
         if (_attacksHeld()) {
           // (the body is being carried off / just back from a pause: no swings / bombs at it)
           _he.update(frameDelta, _he instanceof BombThrowerEnemy ? null : playerModel, playerControls, false, false, true);
         } else {
-          _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb);
+          _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb || _othersTurn);
         }
         if (!_he.isFrozen?.()) _he.onAfterUpdate?.(frameDelta); // (Pemberton: gun / shield / bombs; not while frozen)
 
