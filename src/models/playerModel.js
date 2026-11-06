@@ -52,6 +52,9 @@ function updateGLBCharacter(rig, dt, isMoving) {
 // Town lantern (userData.lanternHeld, bootstrapGameApp.js): the game 'right' hand (the
 // anatomical left arm) carries it low at the side; whatever else is held is one-handed
 const LANTERN_HAND = Object.freeze({ x: 0.3, y: 0.52, z: 0.18 });
+// The bubble (userData.bubbleCast, bootstrapGameApp.js): the same hand held out in front,
+// palm toward the bubble's edge, while it lasts — the sword / wand / bomb go one-handed too
+export const BUBBLE_HAND = Object.freeze({ x: 0.38, y: 0.92, z: 0.6 });
 
 const CLIMB_HAND_CYCLES_PER_M = 1.2; // hand-over-hand cycles per m of wall climbed
 
@@ -72,7 +75,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const gyroQ = playerGroup.userData.gyroArmQuat;
     const gyroLive = !!gyroQ && performance.now() - (playerGroup.userData.gyroArmTime || 0) < GYRO_ARM_MAX_AGE_MS;
     const armed = !!playerGroup.userData.foamSwordMode;
-    const lantern = !!playerGroup.userData.lanternHeld;
+    const bubbleCast = !!playerGroup.userData.bubbleCast && !options.climbing;
+    // The game 'right' hand (the anatomical left) busy: the lantern / the bubble's hand
+    const lantern = !!playerGroup.userData.lanternHeld || bubbleCast;
     // A held two-hand pose (userData.handPose = { left, right }, group-local points — Story's
     // flute): both arms on the IK, the hands there (nothing in hand)
     const handPose = !armed && !options.climbing ? playerGroup.userData.handPose : null;
@@ -80,7 +85,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       ? { left: true, right: true }
       : { left: gyroLive, right: lantern });
     if (lantern) {
-      _fsHandTarget.set(LANTERN_HAND.x, LANTERN_HAND.y, LANTERN_HAND.z).multiplyScalar(grip);
+      const at = bubbleCast ? BUBBLE_HAND : LANTERN_HAND;
+      _fsHandTarget.set(at.x, at.y, at.z).multiplyScalar(grip);
       rig.floatingHands.right.position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
     }
     if (armed) {
@@ -204,7 +210,7 @@ export function playHitReaction(playerGroup) {
 function applyStaggerHand(playerGroup, rig, dt) {
   const ud = playerGroup.userData;
   const st = ud.blockedStagger;
-  if (!st || ud.lanternHeld) return;
+  if (!st || ud.lanternHeld || ud.bubbleCast) return;
   const w = blockedStaggerHand((performance.now() - st.start) / 1000, 1, _staggerHand);
   if (w <= 0) {
     if (performance.now() >= st.until) ud.blockedStagger = null;

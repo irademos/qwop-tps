@@ -542,6 +542,7 @@ export function createShowdownTutorial(ctx) {
   // let go to loose at the crosshair
   step(async () => {
     removeEnemy(swordsman);
+    ctx.endBubble?.(); // (no bow while a bubble is up)
     const ownsGun = ctx.hasItem('pistol');
     const bulletsPrice = await ctx.getPrice('gun bullets');
     panel(13, TOTAL, 'BOW',
