@@ -2875,6 +2875,12 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
 .ps-bow-btn.ps-bow-empty {
   opacity: 0.5;
 }
+/* The bubble's hand is held out (body.bubble-cast): no bow / shield while it lasts */
+body.bubble-cast .ps-bow-btn,
+body.bubble-cast .ps-weapon-btn[data-ps-weapon-id="shield"] {
+  opacity: 0.35;
+  filter: grayscale(0.8);
+}
 /* The crosshair (the middle of the screen = where the arrow goes): a dot and four ticks that
    close in as the string comes back (--spread), the distance in metres beside it */
 .bow-crosshair {

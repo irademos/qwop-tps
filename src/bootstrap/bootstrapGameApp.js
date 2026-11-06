@@ -58,6 +58,7 @@ import { createDeathCarry } from '../combat/deathCarry.js';
 import {
   createMagicBlasts, bladeBlocksBlast, createIceEncasing, setIceEncasingLevel, shakeIceEncasing, MAGIC_ELEMENTS
 } from '../combat/magicBlast.js';
+import { createBubbleMagic } from '../combat/bubbleMagic.js';
 import { setWandGlow, createWandModel } from '../items/magicWand.js';
 import { createFishingRodModel, ROD_HOLD_PITCH } from '../items/fishingRod.js';
 import { createLantern } from '../items/lantern.js';
@@ -699,7 +700,7 @@ function createArcadeOverlay(startOverlay) {
       } else if (consumeShowLoginFlag()) {
         showLoginForm({ name: initialName }); // the player asked to sign in
       } else {
-        startAsGuest({ seaStart: true });
+        startAsGuest(); // the start screen (the sea start — startAsGuest({ seaStart: true }) — is off for now)
       }
       return authPromise;
     },
@@ -3624,6 +3625,8 @@ async function initCore(runtimeContext) {
     if (_townLoadout && itemId === FOAM_SWORD_ITEM_ID && !_townLoadout.hasSword) return;
     // Multiplayer duels are sword only
     if (_mpSwordOnly() && itemId !== FOAM_SWORD_ITEM_ID) return;
+    // The bubble's hand is held out while it lasts: no bow / shield
+    if (_bubbleHandOut() && (itemId === SHIELD_ITEM_ID || itemId === 'pistol')) return;
     if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
     // (off Town's broom first: hands on the weapon)
     if (_broomRide?.isRiding()) _broomRide.dismount();
@@ -4018,13 +4021,29 @@ async function initCore(runtimeContext) {
   let bubbleActiveUntil = 0;
   let bubbleMesh = null;
   const isPlayerBubbleActive = () => Date.now() < bubbleActiveUntil && !playerDead;
-  // (Town, Showdown and Endless: no bubbles to buy — each one costs BUBBLE_MANA_COST mana; the
+  // A bubble the player cast (not Most Kills' spawn protection — _grantPlayerBubble): their
+  // left hand is held out making it (bubbleMagic.js) and the bow / shield can't be used
+  let _bubbleCast = false;
+  let _bubbleMagic = null;
+  const _bubbleHandOut = () => _bubbleCast && isPlayerBubbleActive();
+  // Casting it puts away what needs the left hand: the bow (a draw is let go) and the shield
+  // (also the wand's held shield — back to the wand)
+  const _bubbleDropTwoHanded = () => {
+    cancelBowDraw();
+    if (_wandShieldHold) { setWandShieldHold(false); return; }
+    const held = getEquippedInventoryItemIdForHand('right');
+    if (held === SHIELD_ITEM_ID || held === 'pistol') _backToSword();
+    playerControls?.refreshActionButtons?.();
+  };
+  // (Town, Showdown and Endless: no bubbles to buy — each one costs BUBBLE_MANA_COST mana (ENDLESS_BUBBLE_MANA_COST in Endless); the
   // count is how many the mana pays for. Multiplayer battles (pickups) and the tutorial count bubbles.)
   const BUBBLE_MANA_COST = 5;
+  const ENDLESS_BUBBLE_MANA_COST = 10;
+  const _bubbleManaCost = () => (_endless ? ENDLESS_BUBBLE_MANA_COST : BUBBLE_MANA_COST);
   const _bubblesOnMana = () => !!_townLoadout
     || (!_classicMode && !_matchLoadout && !duelMode?.isActive() && !showdownTutorial?.isActive());
   const getBubbleCount = () => (_bubblesOnMana()
-    ? Math.floor(getMana() / BUBBLE_MANA_COST)
+    ? Math.floor(getMana() / _bubbleManaCost())
     : Math.max(0, Math.floor(statsState.bubbles || 0)));
   const ensureBubbleMesh = () => {
     if (bubbleMesh) return bubbleMesh;
@@ -4054,18 +4073,25 @@ async function initCore(runtimeContext) {
     if (playerDead || isPlayerBubbleActive()) return false;
     if (duelMode?.isActive() && !(_matchLoadout && matchMode?.isFighting())) return false; // battles only in Multiplayer
     if (getBubbleCount() <= 0) return false;
-    if (_bubblesOnMana()) setStat('mana', getMana() - BUBBLE_MANA_COST, { skipSave: true });
+    if (_bubblesOnMana()) setStat('mana', getMana() - _bubbleManaCost(), { skipSave: true });
     else setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     bubbleActiveUntil = Date.now() + BUBBLE_DURATION_MS;
     ensureBubbleMesh().visible = true;
+    // Cast from the hand: the left hand goes out and the bow / shield can't be used meanwhile
+    // (anything else is held in the right hand alone — playerModel.js `bubbleCast`)
+    _bubbleCast = true;
+    _bubbleDropTwoHanded();
     audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'player-bubble', cooldownMs: 200 });
     updatePsBubbleButton();
     return true;
   };
   const deactivatePlayerBubble = () => {
     bubbleActiveUntil = 0;
+    _bubbleCast = false;
+    if (playerModel) playerModel.userData.bubbleCast = false;
     if (bubbleMesh) bubbleMesh.visible = false;
+    playerControls?.refreshActionButtons?.();
     updatePsBubbleButton();
   };
   let lastPsBubbleButtonLabel = '';
@@ -4083,7 +4109,28 @@ async function initCore(runtimeContext) {
     button.classList.toggle('ps-bubble-active', active);
     button.classList.toggle('ps-bubble-empty', !active && getBubbleCount() <= 0);
   };
+  const _bubbleMagicPalm = new THREE.Vector3();
+  const _bubbleMagicCenter = new THREE.Vector3();
+  let _bubbleMagicLastMs = 0;
+  const _updateBubbleMagic = () => {
+    const nowMs = performance.now();
+    const dt = _bubbleMagicLastMs ? (nowMs - _bubbleMagicLastMs) / 1000 : 0;
+    _bubbleMagicLastMs = nowMs;
+    const on = _bubbleHandOut();
+    if (playerModel) playerModel.userData.bubbleCast = on;
+    if (document.body.classList.contains('bubble-cast') !== on) document.body.classList.toggle('bubble-cast', on); // (Bow / Shield buttons dimmed)
+    if (!on && !_bubbleMagic) return;
+    _bubbleMagic ??= createBubbleMagic(scene);
+    const glb = playerModel?.userData?.qwopRig?.glbCharacter;
+    const hand = playerModel?.userData?.qwopRig?.floatingHands?.right;
+    if (glb?.getPalmWorldPosition) glb.getPalmWorldPosition('right', _bubbleMagicPalm);
+    else if (hand) hand.getWorldPosition(_bubbleMagicPalm);
+    else return;
+    getPlayerBubbleCenter(_bubbleMagicCenter);
+    _bubbleMagic.update(dt, on, _bubbleMagicPalm, _bubbleMagicCenter, BUBBLE_RADIUS);
+  };
   const updatePlayerBubble = () => {
+    _updateBubbleMagic();
     if (!bubbleMesh?.visible && !bubbleActiveUntil) {
       updatePsBubbleButton();
       return;
@@ -5091,7 +5138,7 @@ async function initCore(runtimeContext) {
     restoreIds.forEach((itemId) => unequipInventoryItem(itemId));
     playerControls?.refreshActionButtons?.();
     playerBombThrow = { restoreIds, startedAt: Date.now(), usesClip: !!glbCharacter, released: false };
-    glbCharacter?.playAction(glbCharacterConfig.throwClip);
+    glbCharacter?.playAction(glbCharacterConfig.throwClip, _bubbleHandOut() ? { keepIK: { right: true } } : undefined);
     updatePsBombButton();
     return true;
   };
@@ -6893,7 +6940,7 @@ async function initCore(runtimeContext) {
   let _wandShieldHold = false;
   const setWandShieldHold = (down) => {
     if (down) {
-      if (_wandShieldHold || !isWandEquipped()) return;
+      if (_wandShieldHold || !isWandEquipped() || _bubbleHandOut()) return;
       if (!((getInventory()?.[SHIELD_ITEM_ID]?.count ?? 0) > 0)) return;
       _wandShieldHold = true;
       equipInventoryItem(SHIELD_ITEM_ID);
@@ -6966,7 +7013,7 @@ async function initCore(runtimeContext) {
   const _ownsBow = () => (inventoryState.pistol?.count ?? 0) > 0;
   const _canDrawBow = () => !!playerControls?.enabled && !playerDead && !_gamePaused && !_classicMode && !story?.isActive()
     && !_mpSwordOnly() && !town?.inCanoe?.() && _ownsBow() && !playerRoll && !playerBombThrow
-    && !isPlayerFrozen() && !_wandShieldHold && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
+    && !isPlayerFrozen() && !_wandShieldHold && !_bubbleHandOut() && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
     && !(_matchLoadout && !matchMode?.isFighting());
   // Back to what was in hand before the draw (nothing: empty hands — Town)
   const _bowPutAway = () => {
@@ -8063,7 +8110,7 @@ async function initCore(runtimeContext) {
     // Bullets are only useful once the gun is owned
     { itemId: PISTOL_AMMO_KEY, has: () => !(inventoryState.pistol?.count > 0) || getPistolAmmoCount() > 0 },
     // Mana: once there isn't enough left for a spell (with the wand) / a bubble (it runs on mana)
-    { itemId: 'mana_potion', has: () => getMana() >= (hasMagicWand() ? WAND_MANA_COST : _bubblesOnMana() ? BUBBLE_MANA_COST : 0) }
+    { itemId: 'mana_potion', has: () => getMana() >= Math.max(hasMagicWand() ? WAND_MANA_COST : 0, _bubblesOnMana() ? _bubbleManaCost() : 0) }
   ];
   let psAutoBuyBusy = false;
   const psAutoBuyTick = async () => {
@@ -8076,10 +8123,12 @@ async function initCore(runtimeContext) {
       const merchant = await import('../characters/merchant.js');
       const stock = merchant.getMerchantInventory();
       const coins = appState.getCoins();
+      // Endless: no stock limit — the run's buys never sell the shop out
+      const unlimited = !!_endless;
       for (const { itemId } of needed) {
         const meta = merchant.getMerchantItemMeta(itemId);
-        if ((stock[itemId]?.count || 0) <= 0 || coins < meta.price) continue;
-        if (!await merchant.buyMerchantItem(itemId)) continue;
+        if ((!unlimited && (stock[itemId]?.count || 0) <= 0) || coins < meta.price) continue;
+        if (!await merchant.buyMerchantItem(itemId, { unlimited })) continue;
         showPickupToast(itemId, 1, '', {
           text: `Purchased ${meta.name} -${meta.price} coins`,
           icon: meta.icon
@@ -8523,6 +8572,7 @@ async function initCore(runtimeContext) {
     isPlayerBombBusy: () => !!playerBombThrow || (playerBombs?.activeCount ?? 0) > 0,
     getBubbleCount: () => getBubbleCount(),
     isBubbleActive: () => isPlayerBubbleActive(),
+    endBubble: () => deactivatePlayerBubble(), // (the bow lesson: the bubble's hand is free again)
     hasItem: (itemId) => (inventoryState[itemId]?.count || 0) > 0,
     getShieldCount: () => inventoryState[SHIELD_ITEM_ID]?.count || 0,
     isEquipped: (itemId) => isInventoryItemEquipped(itemId),

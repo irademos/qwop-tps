@@ -456,9 +456,11 @@ export class GLBCharacter {
    * Plays `url` once over the whole body (arm IK suspended), then crossfades back to
    * walk/idle. Ignored while dead; a later playDeath() cancels it.
    */
-  playAction(url, { fade = 0.1 } = {}) {
+  // `keepIK` ({ left?, right? }): those hands stay on the IK through the clip (the player's
+  // bomb throw with the bubble's hand held out — the game 'right' one)
+  playAction(url, { fade = 0.1, keepIK = null } = {}) {
     if (this._dead) return;
-    const action = { started: false };
+    const action = { started: false, keepIK };
     this._action = action;
     this._gaitClip = null;
     this._setArmIK(false);
@@ -575,7 +577,7 @@ export class GLBCharacter {
   _setArmIK(enabled) {
     for (const [hand, arm] of Object.entries(this.arms)) {
       if (!arm) continue;
-      const ik = enabled && this._ikHands[hand];
+      const ik = (enabled && this._ikHands[hand]) || (!this._dead && !!this._action?.keepIK?.[hand]);
       for (const b of [arm.upper, arm.fore, arm.hand]) {
         if (!ik && !b.matrixAutoUpdate) b.matrix.decompose(_v, b.quaternion, _v2);
         b.matrixAutoUpdate = !ik;
@@ -602,7 +604,8 @@ export class GLBCharacter {
   solveArm(hand, targetObject, { writeBack = true } = {}) {
     const arm = this.arms[hand];
     if (!arm || !targetObject) return;
-    if (this._dead || (this._action && !this._action.reaction && !this._action.armIK) || !this._armIK || !this._ikHands[hand]) {
+    const kept = !this._dead && !!this._action?.keepIK?.[hand];
+    if (!kept && (this._dead || (this._action && !this._action.reaction && !this._action.armIK) || !this._armIK || !this._ikHands[hand])) {
       // A clip owns the arm: just keep the floating hand (and anything held) on the palm
       if (writeBack && targetObject.parent) {
         targetObject.position.copy(targetObject.parent.worldToLocal(this.getPalmWorldPosition(hand, _v)));

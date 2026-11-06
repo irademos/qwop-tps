@@ -133,9 +133,11 @@ export const getMerchantItemMeta = (itemId) => {
   };
 };
 
-export const buyMerchantItem = async (itemId) => {
-  const item = merchantState.items?.[itemId];
-  if (!item || item.count <= 0) return false;
+// `unlimited`: ignore the shop's stock (Endless — its run's buys never sell the shop out)
+export const buyMerchantItem = async (itemId, { unlimited = false } = {}) => {
+  const item = merchantState.items?.[itemId] || (unlimited && merchantItemCatalog[itemId]
+    ? { count: 1, price: merchantItemCatalog[itemId].price } : null);
+  if (!item || (!unlimited && item.count <= 0)) return false;
   const catalogEntry = merchantItemCatalog[itemId] || {};
   const price = Number.isFinite(item.price) ? item.price : getMerchantItemMeta(itemId).price;
   const currentCoins = merchantAppState?.getCoins?.() ?? merchantAppState?.getPlayerStats?.()?.coins ?? 0;
@@ -156,6 +158,7 @@ export const buyMerchantItem = async (itemId) => {
     merchantAppState?.seedPistolAmmoIfNeeded?.();
   }
   merchantAppState?.addCoins?.(-price);
+  if (unlimited) return true;
   merchantState.items[itemId] = { ...item, count: item.count - 1 };
   await persistMerchantState();
   return true;
