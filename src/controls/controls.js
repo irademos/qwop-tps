@@ -1392,9 +1392,18 @@ export class PlayerControls {
     m.z += dz;
   }
 
+  /** A step this frame that only walks (stops at / slides along walls, never climbs) — backing off. */
+  queueStepMove(dx, dz) {
+    if (!Number.isFinite(dx) || !Number.isFinite(dz)) return;
+    const m = this._stepMove || (this._stepMove = { x: 0, z: 0 });
+    m.x += dx;
+    m.z += dz;
+  }
+
   processMovement() {
     if (!this.enabled) {
       this._autoMove = null;
+      this._stepMove = null;
       return;
     }
 
@@ -1447,6 +1456,8 @@ export class PlayerControls {
       // Auto-walk counts as full forward input along its direction for wall climbing
       const autoMove = this.holdStill ? null : this._autoMove;
       this._autoMove = null;
+      const stepMove = this.holdStill ? null : this._stepMove;
+      this._stepMove = null;
       let autoLen = autoMove ? Math.hypot(autoMove.x, autoMove.z) : 0;
       let climbInput = movement;
       if (autoLen > 1e-6) {
@@ -1482,6 +1493,7 @@ export class PlayerControls {
           movement.x * speed * deltaSeconds + (autoLen > 1e-6 ? autoMove.x : 0),
           movement.z * speed * deltaSeconds + (autoLen > 1e-6 ? autoMove.z : 0)
         );
+        if (stepMove && !roll && !this._climb) this._walkStep(stepMove.x, stepMove.z);
       }
       // (never inside a tree trunk — a roll, a climb's drift or a knock that ended up there)
       const outOfTrunk = pushOutOfObstacles(this.playerX, this.playerZ, this.playerY, TRUNK_PLAYER_RADIUS);
