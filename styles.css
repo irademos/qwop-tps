@@ -2865,12 +2865,13 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+  touch-action: none;
 }
+/* (no size / position change while held: the finger stays on it) */
 .ps-bow-btn.ps-bow-drawing {
   background: rgba(217, 160, 72, 0.92) !important;
   border-color: #fff !important;
   box-shadow: 0 0 16px rgba(251, 191, 36, 0.75);
-  transform: scale(0.94);
 }
 .ps-bow-btn.ps-bow-empty {
   opacity: 0.5;
