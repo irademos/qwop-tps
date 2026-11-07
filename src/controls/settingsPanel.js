@@ -781,6 +781,17 @@ function buildSwordGyroPanel() {
   };
   const localSensField = createSensField('sg-local-sensitivity', 'This Device', window.phoneSwordLocalSensitivity ?? 2);
   const phoneSensField = createSensField('sg-phone-sensitivity', 'Phone by QR Code', window.phoneSwordPhoneSensitivity ?? 1);
+  const createTiltField = (id, label, value) => {
+    const f = createRangeField({ id, label, min: -30, max: 60, step: 1 });
+    f.input.value = `${value}`;
+    f.valueLabel.textContent = `${Math.round(value)}°`;
+    return f;
+  };
+  const tiltSection = createElement('h3', 'settings-section-title', 'Sword Forward Tilt');
+  const localTiltField = createTiltField('sg-local-tilt', 'This Device', window.phoneSwordLocalTilt ?? 15);
+  const phoneTiltField = createTiltField('sg-phone-tilt', 'Phone by QR Code', window.phoneSwordPhoneTilt ?? 30);
+  const tiltHint = createElement('div', 'settings-muted');
+  tiltHint.textContent = 'How far the blade leans forward when the phone is held the way it was calibrated (straight up), so it is easier to reach enemies.';
   const gyroSensHint = createElement('div', 'settings-muted');
   gyroSensHint.textContent = 'How far the sword turns for each tilt of the phone. "This Device" is used when the game screen is also the sword — higher means smaller movements, so you can keep watching the screen.';
 
@@ -791,11 +802,19 @@ function buildSwordGyroPanel() {
     gyroSensSection,
     localSensField.field,
     phoneSensField.field,
-    gyroSensHint
+    gyroSensHint,
+    tiltSection,
+    localTiltField.field,
+    phoneTiltField.field,
+    tiltHint
   );
 
   elements.swordGyroFields = {
     recalBtn,
+    localTiltInput: localTiltField.input,
+    localTiltValue: localTiltField.valueLabel,
+    phoneTiltInput: phoneTiltField.input,
+    phoneTiltValue: phoneTiltField.valueLabel,
     localSensInput: localSensField.input,
     localSensValue: localSensField.valueLabel,
     phoneSensInput: phoneSensField.input,
@@ -1348,6 +1367,16 @@ function bindEvents() {
     };
     bindSensSlider(f.localSensInput, f.localSensValue, 'phoneSwordLocalSensitivity', 'sq:swordLocalSensitivity');
     bindSensSlider(f.phoneSensInput, f.phoneSensValue, 'phoneSwordPhoneSensitivity', 'sq:swordPhoneSensitivity');
+    const bindTiltSlider = (input, valueEl, globalKey, storageKey) => {
+      input.addEventListener('input', () => {
+        const v = parseFloat(input.value);
+        valueEl.textContent = `${Math.round(v)}°`;
+        window[globalKey] = v;
+        try { localStorage.setItem(storageKey, `${v}`); } catch (_) { /* ignore */ }
+      });
+    };
+    bindTiltSlider(f.localTiltInput, f.localTiltValue, 'phoneSwordLocalTilt', 'sq:swordLocalTilt');
+    bindTiltSlider(f.phoneTiltInput, f.phoneTiltValue, 'phoneSwordPhoneTilt', 'sq:swordPhoneTilt');
   }
 }
 

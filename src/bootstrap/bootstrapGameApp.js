@@ -939,24 +939,38 @@ async function initCore(runtimeContext) {
     const DEG = Math.PI / 180;
     return out.setFromEuler(_pswTmpEuler.set(beta * DEG, gamma * DEG, alpha * DEG, 'ZXY'));
   };
-  // Earth → game frame, with the forward heading taken from the calibration pose: the sum of
-  // the horizontal parts of the phone's back (-z, upright hold) and top (+y, flat hold).
+  // Earth → game frame, from the calibration pose. Heading: the horizontal part of the
+  // phone's back, plus its top's for a hold tipped forward toward flat (flat: top = forward)
+  // and minus it for one tipped back (lying down: top = behind the head) — so the heading
+  // never flips. Tipped back past upright (back above the horizon — reclined / lying down),
+  // the frame is pitched back with the phone: "up" = the way the top pointed, so turning the
+  // phone round the player's own up turns the sword left / right, not twists it.
   const _pswEarthToGame = (calibQ, out) => {
     const back = _pswTmpV.set(0, 0, -1).applyQuaternion(calibQ);
     const top = _pswTmpV2.set(0, 1, 0).applyQuaternion(calibQ);
-    let fx = back.x + top.x, fy = back.y + top.y;
+    const bz = THREE.MathUtils.clamp(back.z, -1, 1);
+    let fx = back.x - bz * top.x, fy = back.y - bz * top.y;
     const len = Math.hypot(fx, fy);
     if (len < 1e-4) { fx = 0; fy = 1; } else { fx /= len; fy /= len; }
+    const tilt = Math.asin(Math.max(0, bz)); // how far back past upright
+    const c = Math.cos(tilt), sn = Math.sin(tilt);
     // Rows = game X/Y/Z axes in earth coords: game +X = -right = (-fy, fx, 0),
-    // game +Y = earth up, game +Z = forward (fx, fy, 0).
+    // game +Y = up tipped back by tilt, game +Z = forward tipped up by tilt.
     _pswTmpM.set(
-      -fy, fx, 0, 0,
-        0,  0, 1, 0,
-       fx, fy, 0, 0,
-        0,  0, 0, 1
+      -fy,       fx,       0,  0,
+      -sn * fx, -sn * fy,  c,  0,
+       c * fx,   c * fy,   sn, 0,
+        0,        0,       0,  1
     );
     return out.setFromRotationMatrix(_pswTmpM);
   };
+  // Neutral forward tilt: the blade leans this far forward (degrees of phone tilt, before the
+  // sensitivity) when the phone is held the way it was calibrated — straight up is not the
+  // easiest hold to hit with. Settings → Sword Gyro, saved per device.
+  const PSW_NEUTRAL_TILT_PHONE_DEFAULT = 30;
+  const PSW_NEUTRAL_TILT_LOCAL_DEFAULT = 15;
+  const _pswTiltQ = new THREE.Quaternion();
+  const _PSW_X = new THREE.Vector3(1, 0, 0);
   // Yaw auto-recentre (see the phone-sword gyro loop): only yaw drifts — beta/gamma are
   // gravity-referenced on the phone — so during calm, non-fighting moments the sword's yaw
   // is pulled slowly back to "forward", faster the longer since the last manual calibration.
@@ -6567,6 +6581,16 @@ async function initCore(runtimeContext) {
   };
   window.phoneSwordLocalSensitivity = _loadSwordSensitivity('sq:swordLocalSensitivity', PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT);
   window.phoneSwordPhoneSensitivity = _loadSwordSensitivity('sq:swordPhoneSensitivity', PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT);
+  const _loadSwordTilt = (key, fallback) => {
+    try {
+      const raw = localStorage.getItem(key);
+      const saved = raw === null ? NaN : parseFloat(raw);
+      if (Number.isFinite(saved)) return saved;
+    } catch (_) { /* storage unavailable — keep the default */ }
+    return fallback;
+  };
+  window.phoneSwordLocalTilt = _loadSwordTilt('sq:swordLocalTilt', PSW_NEUTRAL_TILT_LOCAL_DEFAULT);
+  window.phoneSwordPhoneTilt = _loadSwordTilt('sq:swordPhoneTilt', PSW_NEUTRAL_TILT_PHONE_DEFAULT);
 
   // Recalibrate: snapshot current gyro as neutral AND clear cached base quaternions
   // so the gyro loop re-initializes them cleanly from the weapon's _holdRotation.
@@ -10814,6 +10838,15 @@ async function initCore(runtimeContext) {
               _rel.premultiply(_pswYawQ);
             }
           }
+        }
+
+        // Neutral forward tilt (as if calibrated with the phone tipped back that far)
+        const _tiltDeg = _g.localDevice
+          ? (window.phoneSwordLocalTilt ?? PSW_NEUTRAL_TILT_LOCAL_DEFAULT)
+          : (window.phoneSwordPhoneTilt ?? PSW_NEUTRAL_TILT_PHONE_DEFAULT);
+        if (_tiltDeg) {
+          _rel.multiply(_pswTiltQ.setFromAxisAngle(_PSW_X, _tiltDeg * DEG));
+          if (_rel.w < 0) { _rel.x = -_rel.x; _rel.y = -_rel.y; _rel.z = -_rel.z; _rel.w = -_rel.w; }
         }
 
         // Sensitivity: "Use This Device" (amplified so the screen stays visible) or QR phone.
