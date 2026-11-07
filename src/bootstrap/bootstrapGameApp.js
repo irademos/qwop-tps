@@ -5385,8 +5385,14 @@ async function initCore(runtimeContext) {
   const PS_RANGED_HOLD_DIST = 9;      // the auto-walk waits while one is within this
   const PS_RANGED_BACK_SPEED = 4.5;   // m/s, the hop back
   const PS_RANGED_BURST_S = 0.55;     // longest hop
-  const PS_RANGED_PAUSE_S = 1.6;      // standing still after it
-  const _psRangedBack = { until: 0, pauseUntil: 0 };
+  const PS_RANGED_PAUSE_S = 2.5;      // standing still after it
+  const _psRangedBack = { until: 0, pauseUntil: 0, runDir: 0 };
+  // The hop back plays the run clip (backwards when backing off while facing the enemy)
+  const _psRangedRun = (dir) => {
+    if (_psRangedBack.runDir === dir) return;
+    _psRangedBack.runDir = dir;
+    playerModel?.userData?.qwopRig?.glbCharacter?.setForcedRun?.(dir);
+  };
   const PS_ENEMY_SPEED = 1.0 / 3.0;   // enemy speed multiplier (1/3 of normal)
   const PS_SPAWN_TRIGGER_DIST = 18;    // spawn enemy when player gets within this distance
 
@@ -9165,6 +9171,9 @@ async function initCore(runtimeContext) {
 
   const _resetForMenu = () => {
     cancelBowDraw();
+    _psRangedBack.until = 0;
+    _psRangedBack.pauseUntil = 0;
+    _psRangedRun(0);
     _endlessStop();
     _birdsMode = false;
     birds.clear();
@@ -11280,6 +11289,8 @@ async function initCore(runtimeContext) {
 
     // ── Phone Sword: auto-walk + queue spawn (runs even when hordeEnemies is empty) ──
     const _tutorialActive = !!showdownTutorial?.isActive();
+    // (no stage running: the bow / wand hop's forced run is off)
+    if (!((_psStageActive || _tutorialActive) && !playerDead && !_classicCountdown)) _psRangedRun(0);
     if ((_psStageActive || _tutorialActive) && !playerDead && !_classicCountdown) {
       // Spawn queued enemies as player approaches their positions
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
@@ -11348,13 +11359,21 @@ async function initCore(runtimeContext) {
           _rb.until = _nowMs + PS_RANGED_BURST_S * 1000;
         }
         const _awayLen = Math.hypot(_awayX, _awayZ);
-        if (_rb.until && _awayLen > 1e-4) {
+        if (_rb.until && _awayLen > 1e-4 && !playerDead) {
           const _step = PS_RANGED_BACK_SPEED * frameDelta;
-          playerControls.queueStepMove((_awayX / _awayLen) * _step, (_awayZ / _awayLen) * _step);
+          const _ax = _awayX / _awayLen;
+          const _az = _awayZ / _awayLen;
+          playerControls.queueStepMove(_ax * _step, _az * _step);
+          // (the model faces +Z turned by its yaw: backing off = moving against that)
+          const _yaw = playerModel.rotation.y;
+          _psRangedRun(Math.sin(_yaw) * _ax + Math.cos(_yaw) * _az < 0 ? -1 : 1);
+        } else {
+          _psRangedRun(0);
         }
       } else {
         _psRangedBack.until = 0;
         _psRangedBack.pauseUntil = 0;
+        _psRangedRun(0);
       }
 
       // Auto-walk: pause when an enemy is actively attacking close by,

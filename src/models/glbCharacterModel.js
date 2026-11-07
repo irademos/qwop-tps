@@ -385,15 +385,30 @@ export class GLBCharacter {
     this._playGait();
   }
 
+  /**
+   * Plays the run clip whatever the measured speed: 1 = forward, -1 = played backwards (backing
+   * off while facing the other way — the player's bow / wand hop back), 0 = off (the gait goes
+   * back to the speed's).
+   */
+  setForcedRun(dir = 0) {
+    dir = dir > 0 ? 1 : dir < 0 ? -1 : 0;
+    if (dir === (this._forcedRun || 0)) return;
+    this._forcedRun = dir;
+    this._playGait();
+  }
+
   _playGait() {
     if (this._dead || this._action) return; // picked up by revive() / when the action clip ends
     const cfg = glbCharacterConfig;
-    const clip = !this._moving ? cfg.idleClip : this._running ? cfg.runClip : cfg.walkClip;
-    if (clip === this._gaitClip) return;
-    this._gaitClip = clip;
+    const forced = this._forcedRun || 0;
+    const clip = forced ? cfg.runClip : !this._moving ? cfg.idleClip : this._running ? cfg.runClip : cfg.walkClip;
+    const key = forced < 0 ? `${clip}#back` : clip;
+    if (key === this._gaitClip) return;
+    this._gaitClip = key;
     this.fluffy.play(clip, {
       inPlace: true,
       fade: cfg.clipFade,
+      speed: forced < 0 ? -1 : 1,
       excludeBones: this._armIK ? this._ikShoulders() : [],
     }).catch((e) => console.warn('[GLBCharacter] clip load failed:', e));
   }
