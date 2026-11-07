@@ -27,7 +27,7 @@
 
 import * as THREE from 'three';
 import { createWandModel, setWandGlow } from '../items/magicWand.js';
-import { setBowDraw } from '../items/bowModel.js';
+import { setBowDraw, setBowGlow } from '../items/bowModel.js';
 import { isBowDrawnNear, spellsSince, spellHeadsAt, latestSpellId } from '../combat/shieldThreats.js';
 
 export const PEMBERTON_SCALE = 1.5;
@@ -63,6 +63,7 @@ const SHOT_MS = [850, 1600];
 // once it has a clear shot, then draws for SHOT_AIM_MS (the camera turns to it, the others hold
 // their attacks) and looses; the next ask comes SHOT_TURN_MS after
 const SHOT_AIM_MS = 1400;
+const SHOT_TELL_MS = 650; // (no turns: the bow draws and glows this long before each shot — setBowGlow)
 const SHOT_TURN_MS = [1600, 2800];
 const SHOT_MAX_DIST = 16;
 const SHOT_SPREAD = 0.06;            // radians of aim error
@@ -406,6 +407,7 @@ export function createBossFighter(ctx) {
     if (held) {
       if (held.gunMesh) held.gunMesh.visible = next === 'gun';
       if (held.shieldMesh) held.shieldMesh.visible = next === 'shield';
+      setBowGlow(held.gunMesh, 0);
     }
     // (a block stance left over from the sword would still stop swings)
     enemy._attackPhase = next === 'sword' ? 'decide' : 'idle';
@@ -585,10 +587,12 @@ export function createBossFighter(ctx) {
         if (enemy.rangedTurn) {
           const k = Math.min(1, (now - enemy.rangedTurn) / SHOT_AIM_MS);
           setBowDraw(held?.gunMesh, k);
+          setBowGlow(held?.gunMesh, k, now);
           phaseUntil = Math.max(phaseUntil, enemy.rangedTurn + SHOT_AIM_MS + 300);
           if (k >= 1) {
             if (dist <= SHOT_MAX_DIST) shoot(target);
             setBowDraw(held?.gunMesh, 0);
+            setBowGlow(held?.gunMesh, 0);
             enemy.releaseRangedTurn();
             nextShotAt = now + randIn(SHOT_TURN_MS);
           }
@@ -598,8 +602,16 @@ export function createBossFighter(ctx) {
       } else if (phase === 'gun' && now >= nextShotAt) {
         nextShotAt = now + randIn(SHOT_MS);
         if (dist <= SHOT_MAX_DIST) shoot(target);
+        setBowDraw(held?.gunMesh, 0);
+        setBowGlow(held?.gunMesh, 0);
+      } else if (phase === 'gun' && !enemy.rangedTurns) {
+        // (the tell: drawing and glowing for the last SHOT_TELL_MS before the shot)
+        const k = dist <= SHOT_MAX_DIST ? 1 - (nextShotAt - now) / SHOT_TELL_MS : 0;
+        setBowDraw(held?.gunMesh, Math.max(0, k));
+        setBowGlow(held?.gunMesh, k, now);
       } else if (phase !== 'gun' && !enemy.wand && (enemy.rangedTurn || enemy.wantsRangedTurn)) {
         setBowDraw(held?.gunMesh, 0);
+        setBowGlow(held?.gunMesh, 0);
         enemy.releaseRangedTurn();
       }
       if (gear.bombs && phase !== 'shield' && now >= nextBombAt && ctx.holdAttacks?.()) {

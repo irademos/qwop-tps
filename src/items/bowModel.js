@@ -244,3 +244,69 @@ export function bowArrowTipWorld(group, draw, out = new THREE.Vector3()) {
   group.updateWorldMatrix(true, false);
   return group.localToWorld(out.set(0, 0, bowNockZ(draw) + ARROW_LENGTH));
 }
+
+// ── Draw glow (enemies' "about to shoot" tell) ────────────────────────────────
+// A glow on the nocked arrow's head + a soft halo round the bow, growing with `charge`
+// (0 … 1) and pulsing faster as it nears 1, yellow → red like a swordsman's swing telegraph.
+const GLOW_COLOR_START = new THREE.Color(0xffe04a);
+const GLOW_COLOR_END = new THREE.Color(0xff2a14);
+let _glowTexture = null;
+function glowTexture() {
+  if (_glowTexture) return _glowTexture;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(255,255,255,0.75)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  _glowTexture = new THREE.CanvasTexture(c);
+  return _glowTexture;
+}
+const glowSprite = (name) => {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), color: 0xffffff, transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, toneMapped: false,
+  }));
+  s.name = name;
+  s.renderOrder = 3;
+  s.visible = false;
+  return s;
+};
+const glowCache = new WeakMap();
+const glowOf = (group) => {
+  let gl = glowCache.get(group);
+  if (gl) return gl;
+  // (a clone of a bow that already had one shares its material: give it its own)
+  let tip = group.getObjectByName('bow-glow-tip');
+  let halo = group.getObjectByName('bow-glow-halo');
+  if (tip) tip.material = tip.material.clone(); else group.add(tip = glowSprite('bow-glow-tip'));
+  if (halo) halo.material = halo.material.clone(); else group.add(halo = glowSprite('bow-glow-halo'));
+  gl = { tip, halo };
+  glowCache.set(group, gl);
+  return gl;
+};
+
+/** The enemy's tell before loosing: `charge` 0 (off) … 1 (about to shoot). */
+export function setBowGlow(group, charge = 0, now = performance.now()) {
+  if (!group) return;
+  charge = THREE.MathUtils.clamp(charge, 0, 1);
+  if (charge <= 0 && !glowCache.has(group)) return;
+  const { tip, halo } = glowOf(group);
+  const on = charge > 0;
+  tip.visible = halo.visible = on;
+  if (!on) return;
+  const pulse = 0.75 + 0.25 * Math.sin(now * 0.001 * (8 + 22 * charge));
+  const draw = Math.max(0, partsOf(group).draw);
+  tip.position.set(0, 0, bowNockZ(draw) + ARROW_LENGTH);
+  tip.scale.setScalar((0.12 + 0.3 * charge) * pulse);
+  halo.position.set(0, 0, -BOW_STRING_REST * 0.5);
+  halo.scale.setScalar((0.35 + 0.6 * charge) * (0.9 + 0.1 * pulse));
+  const col = GLOW_COLOR_START.clone().lerp(GLOW_COLOR_END, charge * charge);
+  tip.material.color.copy(col);
+  halo.material.color.copy(col);
+  tip.material.opacity = Math.min(1, 0.5 + 0.5 * charge) * pulse;
+  halo.material.opacity = 0.25 * charge * pulse;
+}
