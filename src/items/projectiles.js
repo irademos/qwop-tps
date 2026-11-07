@@ -4,7 +4,8 @@ import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../player/healthU
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { spawnBulletImpact } from '../combat/bulletImpact.js';
-import { createArrowMesh } from './bowModel.js';
+import { createArrowMesh, ARROW_LENGTH } from './bowModel.js';
+import { createArrowTrail, pushArrowTrail, endArrowTrail, updateArrowTrails } from '../combat/arrowTrail.js';
 
 // Arrows (the bow — the weapon that was the gun): every shot in the game is one. A loosed
 // arrow's speed follows how far the bow was drawn (PlayerControls.fireArrow); it flies tip
@@ -105,11 +106,13 @@ const sweptHitsEnemy = (from, to, enemy) => {
 const _pvpProbe = { group: { position: null } };
 const _wallPoint = new THREE.Vector3();
 const _wallNormal = new THREE.Vector3();
+const _trailPoint = new THREE.Vector3();
 
 function removeProjectileAt(projectiles, index) {
   const projectile = projectiles[index];
   if (!projectile) return;
   const body = projectile.userData?.rb;
+  endArrowTrail(projectile.userData?.trail);
   disposeProjectileMesh(projectile);
   projectiles.splice(index, 1);
   if (body) {
@@ -160,6 +163,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.hostile = !!options.hostile;
   mesh.userData.shooter = options.shooter ?? null; // (a hostile shot's enemy — the bubble sends it back there)
   scene.add(mesh);
+  if (options.arrow) mesh.userData.trail = createArrowTrail(scene, mesh.userData.hostile);
   projectiles.push(mesh);
 }
 
@@ -191,6 +195,7 @@ export function updateProjectiles({
     removeProjectileAt(projectiles, index);
   };
   updateStuckArrows();
+  updateArrowTrails();
 
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const proj = projectiles[i];
@@ -209,6 +214,11 @@ export function updateProjectiles({
       continue;
     }
     const vel = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
+    // (the trail streams off the arrow's nock — its origin is the tip)
+    if (proj.userData.trail && vel.lengthSq() > 1e-4) {
+      _trailPoint.copy(vel).normalize().multiplyScalar(-ARROW_LENGTH * 0.85).add(proj.position);
+      pushArrowTrail(proj.userData.trail, _trailPoint, proj.userData.hostile);
+    }
 
     proj.userData.lifetime -= 16;
     if (proj.userData.lifetime <= 0) {
