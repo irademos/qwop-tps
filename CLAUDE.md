@@ -220,6 +220,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │
 ├── docs/
 │   ├── AI_AGENT_GUIDE.md       # Quick-start for AI agents
+│   ├── art/app-icon-options/   # Spare painted portraits (village boy ×2, pink monster, frog man) — the smiling village boy is the app icon (public/icons/); not served
 │   ├── archive/canoe-gyro-paddling.md # Reference only (not run): the earlier gyro-held canoe paddling — code + design notes
 │   └── asset-pipeline-compatibility.md  # glTF/FBX material + skinning notes
 │
