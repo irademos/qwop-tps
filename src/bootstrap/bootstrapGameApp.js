@@ -6828,6 +6828,36 @@ async function initCore(runtimeContext) {
     phoneSwordQrModal.classList.add('hidden');
   });
 
+  // "Use This Device": the screen is held tilted to aim (the bow / wand above all), which sets
+  // off the phone's auto-rotate (and the browser bar showing / hiding) — everything on screen
+  // jumps for a moment. So the page goes full screen and the orientation is locked to how it's
+  // held now (both need full screen on Android Chrome / Firefox; nothing happens where they
+  // aren't offered — iPhone). Leaving full screen (back gesture, switching apps) lets go of the
+  // lock; the next tap while still on This Device asks again.
+  let _localScreenRelock = false;
+  const _lockLocalDeviceScreen = () => {
+    _localScreenRelock = false;
+    const lockOrientation = () => {
+      const o = screen.orientation;
+      if (!o?.lock || !o.type) return;
+      o.lock(o.type).catch(() => {});
+    };
+    try {
+      const el = document.documentElement;
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        el.requestFullscreen({ navigationUI: 'hide' }).then(lockOrientation, () => {});
+      } else {
+        lockOrientation();
+      }
+    } catch (_) { /* not offered */ }
+  };
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && window.phoneSwordGyro?.localDevice) _localScreenRelock = true;
+  });
+  window.addEventListener('pointerdown', () => {
+    if (_localScreenRelock && window.phoneSwordGyro?.localDevice && !document.fullscreenElement) _lockLocalDeviceScreen();
+  }, true);
+
   // "Use This Device" — pipe the current device's own gyroscope into phoneSwordGyro
   let _localGyroHandler = null;
   document.getElementById('phone-sword-use-this-device')?.addEventListener('click', async () => {
@@ -6835,6 +6865,8 @@ async function initCore(runtimeContext) {
       alert('Gyroscope not available on this device.');
       return;
     }
+    // (before anything is awaited, while the tap still counts as one — full screen needs it)
+    if (window.matchMedia?.('(pointer: coarse)').matches) _lockLocalDeviceScreen();
     // iOS 13+ requires explicit permission from a user gesture
     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
       try {
@@ -7314,7 +7346,10 @@ async function initCore(runtimeContext) {
     if (prev && prev !== conn) { try { prev.close(); } catch (_) { /* ignore */ } }
     window.phoneSwordGyro.connected = true;
     _phoneReel.last = null;
-    // A separate phone took over — stop using this device's own gyro
+    // A separate phone took over — stop using this device's own gyro (and its screen lock)
+    if (window.phoneSwordGyro.localDevice) {
+      try { screen.orientation?.unlock?.(); } catch (_) { /* ignore */ }
+    }
     window.phoneSwordGyro.localDevice = false;
     let lastStatusJson = '';
     const sendStatus = () => {
