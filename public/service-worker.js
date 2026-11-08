@@ -1,4 +1,4 @@
-const SHELL_CACHE_VERSION = 'v11';
+const SHELL_CACHE_VERSION = 'v12';
 const STATIC_CACHE_VERSION = 'v20';
 const DYNAMIC_CACHE_VERSION = 'v4';
 const CDN_CACHE_VERSION = 'v2';
@@ -32,7 +32,11 @@ const CORE_ASSETS = [
   '/index.html',
   '/app.js',
   '/styles.css',
-  '/icons/zombie_icon.png'
+  '/manifest.webmanifest',
+  '/icons/favicon.png',
+  '/icons/apple-touch-icon.png',
+  '/icons/app_icon_192.png',
+  '/icons/app_icon_512.png'
 ];
 
 self.addEventListener('install', (event) => {
