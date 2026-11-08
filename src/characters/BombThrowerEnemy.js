@@ -23,6 +23,7 @@ import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js'
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { stylizeObject } from '../environment/artStyle.js';
 import { createIceEncasing, setIceEncasingLevel } from '../combat/magicBlast.js';
+import { DEATH_FADE_DELAY_MS } from './EnemyPlayer.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 const _homeDir = new THREE.Vector3();
@@ -771,18 +772,19 @@ export class BombThrowerEnemy {
     this._inWindup = false;
     this._glbCharacter?.playDeath();
 
-    // Fade out and destroy.
+    // Lie there DEATH_FADE_DELAY_MS, then fade out and destroy.
     // Switch the fur off first: its shells/shader don't survive material.clone().
     this._glbCharacter?.setFurEnabled(false);
     // Clone materials so the fade doesn't touch the character's shared materials
     this.group.traverse(obj => {
       if (obj.isMesh && obj.material) obj.material = obj.material.clone();
     });
-    const startMs = Date.now();
+    const startMs = Date.now() + DEATH_FADE_DELAY_MS;
     const fadeDur = 1800;
     const group = this.group;
     const tick = () => {
-      const t = Math.min(1, (Date.now() - startMs) / fadeDur);
+      if (this._destroyed) return; // (cleared meanwhile)
+      const t = Math.max(0, Math.min(1, (Date.now() - startMs) / fadeDur));
       group.traverse(obj => {
         if (obj.material) { obj.material.transparent = true; obj.material.opacity = 1 - t; }
       });
