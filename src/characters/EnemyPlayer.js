@@ -152,6 +152,8 @@ const SWING_GLOW_BLADE_START  = 0.08; // sword-local z where the glow starts (ju
 
 // Trail rendering for sword swings
 const TRAIL_DURATION_MS  = 380;  // how long trail history is kept (ms)
+// A dead enemy lies where it fell this long before it starts fading out
+export const DEATH_FADE_DELAY_MS = 3000;
 const TRAIL_FADE_MS      = 450;  // how long trail fades after swing (ms)
 const TRAIL_COLORS       = [0xff4986, 0xff79ab, 0xffaad0]; // three stacked lines
 
@@ -1836,7 +1838,7 @@ export class EnemyPlayer {
     // Keep rigid body alive so knockback applied after _die() still has something to push.
     // destroy() will remove it when the fade finishes.
 
-    // Fade out the group over 2 s then destroy.
+    // Lie there DEATH_FADE_DELAY_MS, then fade out the group over 2 s and destroy.
     // Switch the fur off first: its shells/shader don't survive material.clone().
     this._glbCharacter?.setFurEnabled(false);
     // Clone materials first so the fade doesn't corrupt shared material state
@@ -1846,12 +1848,13 @@ export class EnemyPlayer {
         obj.material = obj.material.clone();
       }
     });
-    const _startMs = Date.now();
+    const _startMs = Date.now() + DEATH_FADE_DELAY_MS;
     const _fadeDur = 2000;
     const _fadeGroup = this.group;
     const _fadeHp = this._hpPlane;
     const _tick = () => {
-      const t = Math.min(1, (Date.now() - _startMs) / _fadeDur);
+      if (this._destroyed) return; // (cleared meanwhile)
+      const t = Math.max(0, Math.min(1, (Date.now() - _startMs) / _fadeDur));
       const opacity = 1 - t;
       _fadeGroup.traverse(obj => {
         if (obj.material) {
