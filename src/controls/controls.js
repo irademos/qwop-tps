@@ -631,18 +631,38 @@ export class PlayerControls {
     this.psBowBtn.setAttribute('aria-label', 'Hold to draw the bow, let go to shoot');
     {
       let bowTouch = false;
+      // The finger holding the bow: followed on the window, so only that finger lifting lets go —
+      // nothing that happens to the button meanwhile (the bow coming out, the weapon buttons
+      // changing, the button's label redrawn under the finger) ends the draw
+      let bowTouchId = null;
       const down = (event) => {
         if (event) this.safePreventDefault(event);
         if (!this.enabled) return;
         if (getAppState()?.startBowDraw?.()) this.psBowBtn.classList.add('ps-bow-drawing');
       };
       const up = (cancel) => {
+        bowTouchId = null;
         this.psBowBtn.classList.remove('ps-bow-drawing');
         getAppState()?.releaseBowDraw?.(cancel);
       };
-      this.psBowBtn.addEventListener('touchstart', (e) => { bowTouch = true; this.lastTouchButtonTime = performance.now(); down(e); }, { passive: false });
-      this.psBowBtn.addEventListener('touchend', (e) => { this.safePreventDefault(e); up(false); }, { passive: false });
-      this.psBowBtn.addEventListener('touchcancel', () => up(true), { passive: false });
+      const touchOf = (e) => Array.from(e.changedTouches || []).find((t) => t.identifier === bowTouchId);
+      this.psBowBtn.addEventListener('touchstart', (e) => {
+        bowTouch = true;
+        this.lastTouchButtonTime = performance.now();
+        if (bowTouchId !== null) { this.safePreventDefault(e); return; } // (a second finger on it)
+        bowTouchId = e.changedTouches?.[0]?.identifier ?? null;
+        down(e);
+      }, { passive: false });
+      window.addEventListener('touchend', (e) => {
+        if (bowTouchId === null || !touchOf(e)) return;
+        if (e.target === this.psBowBtn || this.psBowBtn.contains(e.target)) this.safePreventDefault(e);
+        up(false);
+      }, { passive: false, capture: true });
+      // (the system taking the touch over: loose what's drawn rather than throw it away)
+      window.addEventListener('touchcancel', (e) => {
+        if (bowTouchId === null || !touchOf(e)) return;
+        up(false);
+      }, { passive: false, capture: true });
       this.psBowBtn.addEventListener('mousedown', (e) => {
         if (bowTouch || (performance.now() - this.lastTouchButtonTime) <= 550) return;
         down(e);
@@ -870,7 +890,9 @@ export class PlayerControls {
     const label = `🏹 ${arrows}`;
     if (btn.dataset.label !== label) { btn.dataset.label = label; btn.textContent = label; }
     btn.classList.toggle('ps-bow-empty', arrows <= 0);
-    btn.classList.toggle('ps-bow-drawing', !!appState?.isBowDrawing?.());
+    const drawing = !!appState?.isBowDrawing?.();
+    btn.classList.toggle('ps-bow-drawing', drawing);
+    if (!drawing && this._touchLayoutStale) this.layoutMobileActionButtons();
   }
 
   isTouchLayout() {
@@ -893,17 +915,28 @@ export class PlayerControls {
     // bubble / bomb beside it; the weapon buttons stack on top of both (the middle of the
     // screen stays clear for the interact buttons)
     if (this.isTouchLayout()) {
+      // (mid-draw the buttons stay where they are — the finger's on the bow; laid out again after)
+      const appState = appContext.uiState.appState ?? window.appState;
+      if (appState?.isBowDrawing?.() && this._touchLayout) {
+        for (const [b, slot] of this._touchLayout) this.applyMobileButtonPosition(b, slot);
+        this._touchLayoutStale = true;
+        return;
+      }
+      this._touchLayoutStale = false;
+      const placed = [];
+      this._touchLayout = placed;
+      const place = (b, slot) => { placed.push([b, slot]); this.applyMobileButtonPosition(b, slot); };
       const shown = (b) => !!b && b.style.display !== 'none' && getComputedStyle(b).display !== 'none';
       const gyro = document.getElementById('gyro-button');
       const rows = [shown(gyro) ? 2 : 1, 0];   // next free row: [jump column, bomb column]
-      if (shown(this.psBubbleBtn)) this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: rows[1]++ });
-      if (shown(this.psBombBtn)) this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: rows[1]++ });
-      if (shown(this.psBroomBtn)) this.applyMobileButtonPosition(this.psBroomBtn, { x: 1, y: rows[1]++ });
-      if (shown(this.psBoostBtn)) this.applyMobileButtonPosition(this.psBoostBtn, { x: 1, y: rows[1]++ });
+      if (shown(this.psBubbleBtn)) place(this.psBubbleBtn, { x: 1, y: rows[1]++ });
+      if (shown(this.psBombBtn)) place(this.psBombBtn, { x: 1, y: rows[1]++ });
+      if (shown(this.psBroomBtn)) place(this.psBroomBtn, { x: 1, y: rows[1]++ });
+      if (shown(this.psBoostBtn)) place(this.psBoostBtn, { x: 1, y: rows[1]++ });
       for (const b of [this.psBowBtn, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5]) {
         if (b === this.psBowBtn ? !shown(b) : !b.dataset.psWeaponId) continue;
         const col = rows[1] <= rows[0] ? 1 : 0;
-        this.applyMobileButtonPosition(b, { x: col, y: rows[col]++ });
+        place(b, { x: col, y: rows[col]++ });
       }
       return;
     }

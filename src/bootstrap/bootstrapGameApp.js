@@ -5376,10 +5376,23 @@ async function initCore(runtimeContext) {
     if (_classicMode) _classicUpdateScore();
   };
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
-  // Bow / wand out in Showdown / Endless: the player backs away from enemies closer than this…
+  // Bow / wand out in Showdown / Endless: an enemy closer than PS_RANGED_TRIGGER_DIST sends the
+  // player back in a quick hop (PS_RANGED_BACK_SPEED, until all are PS_RANGED_KEEP_DIST away or
+  // PS_RANGED_BURST_S is up), then they stand still PS_RANGED_PAUSE_S to aim — no slow
+  // continuous drift away (it kept the target moving)
+  const PS_RANGED_TRIGGER_DIST = 4.2;
   const PS_RANGED_KEEP_DIST = 6.5;
-  const PS_RANGED_HOLD_DIST = 9;      // …and the auto-walk waits while one is within this
-  const PS_RANGED_BACK_SPEED = 2.6;   // m/s at most, backing off
+  const PS_RANGED_HOLD_DIST = 9;      // the auto-walk waits while one is within this
+  const PS_RANGED_BACK_SPEED = 4.5;   // m/s, the hop back
+  const PS_RANGED_BURST_S = 0.55;     // longest hop
+  const PS_RANGED_PAUSE_S = 2.5;      // standing still after it
+  const _psRangedBack = { until: 0, pauseUntil: 0, runDir: 0 };
+  // The hop back plays the run clip (backwards when backing off while facing the enemy)
+  const _psRangedRun = (dir) => {
+    if (_psRangedBack.runDir === dir) return;
+    _psRangedBack.runDir = dir;
+    playerModel?.userData?.qwopRig?.glbCharacter?.setForcedRun?.(dir);
+  };
   const PS_ENEMY_SPEED = 1.0 / 3.0;   // enemy speed multiplier (1/3 of normal)
   const PS_SPAWN_TRIGGER_DIST = 18;    // spawn enemy when player gets within this distance
 
@@ -6815,6 +6828,36 @@ async function initCore(runtimeContext) {
     phoneSwordQrModal.classList.add('hidden');
   });
 
+  // "Use This Device": the screen is held tilted to aim (the bow / wand above all), which sets
+  // off the phone's auto-rotate (and the browser bar showing / hiding) — everything on screen
+  // jumps for a moment. So the page goes full screen and the orientation is locked to how it's
+  // held now (both need full screen on Android Chrome / Firefox; nothing happens where they
+  // aren't offered — iPhone). Leaving full screen (back gesture, switching apps) lets go of the
+  // lock; the next tap while still on This Device asks again.
+  let _localScreenRelock = false;
+  const _lockLocalDeviceScreen = () => {
+    _localScreenRelock = false;
+    const lockOrientation = () => {
+      const o = screen.orientation;
+      if (!o?.lock || !o.type) return;
+      o.lock(o.type).catch(() => {});
+    };
+    try {
+      const el = document.documentElement;
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        el.requestFullscreen({ navigationUI: 'hide' }).then(lockOrientation, () => {});
+      } else {
+        lockOrientation();
+      }
+    } catch (_) { /* not offered */ }
+  };
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && window.phoneSwordGyro?.localDevice) _localScreenRelock = true;
+  });
+  window.addEventListener('pointerdown', () => {
+    if (_localScreenRelock && window.phoneSwordGyro?.localDevice && !document.fullscreenElement) _lockLocalDeviceScreen();
+  }, true);
+
   // "Use This Device" — pipe the current device's own gyroscope into phoneSwordGyro
   let _localGyroHandler = null;
   document.getElementById('phone-sword-use-this-device')?.addEventListener('click', async () => {
@@ -6822,6 +6865,8 @@ async function initCore(runtimeContext) {
       alert('Gyroscope not available on this device.');
       return;
     }
+    // (before anything is awaited, while the tap still counts as one — full screen needs it)
+    if (window.matchMedia?.('(pointer: coarse)').matches) _lockLocalDeviceScreen();
     // iOS 13+ requires explicit permission from a user gesture
     if (typeof DeviceOrientationEvent.requestPermission === 'function') {
       try {
@@ -7060,10 +7105,18 @@ async function initCore(runtimeContext) {
       // (drawn again before it was put away: the bow stays out, the old item is still the one to go back to)
       _bowDraw.restoreAt = 0;
     } else {
+      // (the draw's state first, so the buttons laid out while the bow comes out already show
+      // what's coming back after — nothing moves under the finger)
       const before = getEquippedInventoryItemIdForHand('right');
-      equipInventoryItem('pistol');
-      if (!isInventoryItemEquipped('pistol')) return false;
       _bowDraw.prev = before;
+      _bowDraw.active = true;
+      equipInventoryItem('pistol');
+      if (!isInventoryItemEquipped('pistol')) {
+        _bowDraw.active = false;
+        _bowDraw.prev = null;
+        playerControls.refreshActionButtons?.();
+        return false;
+      }
     }
     _bowDraw.active = true;
     _bowDraw.startMs = performance.now();
@@ -7293,7 +7346,10 @@ async function initCore(runtimeContext) {
     if (prev && prev !== conn) { try { prev.close(); } catch (_) { /* ignore */ } }
     window.phoneSwordGyro.connected = true;
     _phoneReel.last = null;
-    // A separate phone took over — stop using this device's own gyro
+    // A separate phone took over — stop using this device's own gyro (and its screen lock)
+    if (window.phoneSwordGyro.localDevice) {
+      try { screen.orientation?.unlock?.(); } catch (_) { /* ignore */ }
+    }
     window.phoneSwordGyro.localDevice = false;
     let lastStatusJson = '';
     const sendStatus = () => {
@@ -8783,11 +8839,38 @@ async function initCore(runtimeContext) {
     }
     return pts.length >= 2 ? pts : null;
   };
-  // Onto the loop: from its start (teleport) or, coming round again, from the player's spot
-  // near its start (the last route ends close to the first one's start)
-  const _endlessStartLoop = ({ teleport = false } = {}) => {
+  // Each run starts at a random point along the loop: the loop is cut there (_endlessRunLoop —
+  // from that point round to the end, on from the first route's start and back to it), so
+  // coming round again carries on where the run began
+  let _endlessRunLoop = null;
+  let _endlessRunLoopNext = false; // (picked already for the next run — the player waits there)
+  const _endlessRandomLoop = () => {
     const pts = _endlessLoop();
-    if (!pts) { _psPath = null; _psAutoWalking = false; return false; }
+    if (!pts) return null;
+    const seg = [];
+    let total = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const len = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z);
+      seg.push(len);
+      total += len;
+    }
+    if (total < 1) return pts;
+    let d = Math.random() * total;
+    let i = 0;
+    while (i < seg.length - 1 && d > seg[i]) { d -= seg[i]; i++; }
+    const t = seg[i] > 1e-6 ? Math.min(1, d / seg[i]) : 0;
+    const start = { x: pts[i].x + (pts[i + 1].x - pts[i].x) * t, z: pts[i].z + (pts[i + 1].z - pts[i].z) * t };
+    const out = [start, ...pts.slice(i + 1), ...pts.slice(0, i + 1), { ...start }];
+    // (drop points on top of each other — the polyline needs a direction at the start)
+    return out.filter((p, k) => k === 0 || Math.hypot(p.x - out[k - 1].x, p.z - out[k - 1].z) > 0.05);
+  };
+  // Onto the loop: a new run (teleport) at a random point along it, or, coming round again,
+  // from the player's spot near the run's start
+  const _endlessStartLoop = ({ teleport = false } = {}) => {
+    if ((teleport && !_endlessRunLoopNext) || !_endlessRunLoop) _endlessRunLoop = _endlessRandomLoop();
+    if (teleport) _endlessRunLoopNext = false;
+    const pts = _endlessRunLoop;
+    if (!pts || pts.length < 2) { _psPath = null; _psAutoWalking = false; return false; }
     if (teleport) _teleportPlayer(pts[0].x, pts[0].z, Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
     const path = createPolyline(pts);
     _psPath = path;
@@ -9043,10 +9126,12 @@ async function initCore(runtimeContext) {
     _endlessToArena();
     _endlessShowPanel({ result });
   };
-  // Back to where a run starts: the first route's start (the arena with no routes)
+  // Back to where the next run starts: a random point along the routes (the arena with none)
   const _endlessToArena = () => {
-    const pts = _endlessLoop();
-    if (pts) _teleportPlayer(pts[0].x, pts[0].z, Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
+    _endlessRunLoop = _endlessRandomLoop();
+    _endlessRunLoopNext = !!_endlessRunLoop;
+    const pts = _endlessRunLoop;
+    if (pts && pts.length >= 2) _teleportPlayer(pts[0].x, pts[0].z, Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
     else _teleportPlayer(ARENA_LOCATION.x, ARENA_LOCATION.z, ARENA_LOCATION.yaw);
   };
 
@@ -9121,6 +9206,9 @@ async function initCore(runtimeContext) {
 
   const _resetForMenu = () => {
     cancelBowDraw();
+    _psRangedBack.until = 0;
+    _psRangedBack.pauseUntil = 0;
+    _psRangedRun(0);
     _endlessStop();
     _birdsMode = false;
     birds.clear();
@@ -11236,6 +11324,8 @@ async function initCore(runtimeContext) {
 
     // ── Phone Sword: auto-walk + queue spawn (runs even when hordeEnemies is empty) ──
     const _tutorialActive = !!showdownTutorial?.isActive();
+    // (no stage running: the bow / wand hop's forced run is off)
+    if (!((_psStageActive || _tutorialActive) && !playerDead && !_classicCountdown)) _psRangedRun(0);
     if ((_psStageActive || _tutorialActive) && !playerDead && !_classicCountdown) {
       // Spawn queued enemies as player approaches their positions
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
@@ -11270,14 +11360,16 @@ async function initCore(runtimeContext) {
         _psStartBossTalk(_psBoss);
       }
 
-      // Bow / wand out (Showdown / Endless): back away from enemies closer than
-      // PS_RANGED_KEEP_DIST, and hold the auto-walk while one is within PS_RANGED_HOLD_DIST
+      // Bow / wand out (Showdown / Endless): an enemy within PS_RANGED_TRIGGER_DIST → a quick hop
+      // back, then a pause to aim (_psRangedBack); the auto-walk holds while one is within
+      // PS_RANGED_HOLD_DIST
       let _psRangedHold = false;
       const _psRangedOut = _psStageActive && !_tutorialActive && !_classicMode && !_psBossTalking
         && (_wandActive || _bowDraw.active || pistol?.holder === playerControls);
       if (_psRangedOut) {
         let _awayX = 0;
         let _awayZ = 0;
+        let _nearest = Infinity;
         for (const _re of hordeEnemies) {
           if (_re.isDead || (_psBoss && _re === _psBoss.enemy && !_psBoss.isStarted())) continue;
           const _rdx = playerModel.position.x - _re.group.position.x;
@@ -11285,17 +11377,38 @@ async function initCore(runtimeContext) {
           const _rd = Math.hypot(_rdx, _rdz);
           if (_rd >= PS_RANGED_HOLD_DIST) continue;
           _psRangedHold = true;
+          _nearest = Math.min(_nearest, _rd);
           if (_rd >= PS_RANGED_KEEP_DIST || _rd < 1e-3) continue;
-          const _w = (PS_RANGED_KEEP_DIST - _rd) / PS_RANGED_KEEP_DIST; // (the closer, the harder)
+          const _w = (PS_RANGED_KEEP_DIST - _rd) / PS_RANGED_KEEP_DIST; // (the closer, the more it counts)
           _awayX += (_rdx / _rd) * _w;
           _awayZ += (_rdz / _rd) * _w;
         }
-        const _awayLen = Math.hypot(_awayX, _awayZ);
-        if (_awayLen > 1e-4) {
-          const _k = Math.min(1, _awayLen * 2);
-          const _step = PS_RANGED_BACK_SPEED * _k * frameDelta;
-          playerControls.queueStepMove((_awayX / _awayLen) * _step, (_awayZ / _awayLen) * _step);
+        const _nowMs = performance.now();
+        const _rb = _psRangedBack;
+        if (_rb.until && (_nowMs >= _rb.until || _nearest >= PS_RANGED_KEEP_DIST)) {
+          // hop done: stand and aim for a while
+          _rb.until = 0;
+          _rb.pauseUntil = _nowMs + PS_RANGED_PAUSE_S * 1000;
         }
+        if (!_rb.until && _nowMs >= _rb.pauseUntil && _nearest < PS_RANGED_TRIGGER_DIST) {
+          _rb.until = _nowMs + PS_RANGED_BURST_S * 1000;
+        }
+        const _awayLen = Math.hypot(_awayX, _awayZ);
+        if (_rb.until && _awayLen > 1e-4 && !playerDead) {
+          const _step = PS_RANGED_BACK_SPEED * frameDelta;
+          const _ax = _awayX / _awayLen;
+          const _az = _awayZ / _awayLen;
+          playerControls.queueStepMove(_ax * _step, _az * _step);
+          // (the model faces +Z turned by its yaw: backing off = moving against that)
+          const _yaw = playerModel.rotation.y;
+          _psRangedRun(Math.sin(_yaw) * _ax + Math.cos(_yaw) * _az < 0 ? -1 : 1);
+        } else {
+          _psRangedRun(0);
+        }
+      } else {
+        _psRangedBack.until = 0;
+        _psRangedBack.pauseUntil = 0;
+        _psRangedRun(0);
       }
 
       // Auto-walk: pause when an enemy is actively attacking close by,
