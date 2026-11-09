@@ -7,15 +7,16 @@ import * as THREE from 'three';
 
 // Per kind: freeze seconds, shake amplitude (m), shake seconds
 export const HIT_FEEL = {
-  light: { freeze: 0.03, amp: 0.025, dur: 0.12 },  // chop, town hit, blocked swing
-  hit: { freeze: 0.06, amp: 0.045, dur: 0.16 },    // a sword hit
-  heavy: { freeze: 0.09, amp: 0.07, dur: 0.22 },   // a strong swing
-  kill: { freeze: 0.12, amp: 0.09, dur: 0.26 },    // the killing blow
-  hurt: { freeze: 0, amp: 0.06, dur: 0.2 },        // the player was hit (shake only)
+  light: { freeze: 0.07, amp: 0.08, dur: 0.22 },   // chop, town hit, blocked swing
+  hit: { freeze: 0.14, amp: 0.16, dur: 0.3 },      // a sword hit
+  heavy: { freeze: 0.2, amp: 0.24, dur: 0.38 },    // a strong swing
+  kill: { freeze: 0.26, amp: 0.32, dur: 0.45 },    // the killing blow
+  hurt: { freeze: 0, amp: 0.2, dur: 0.32 },        // the player was hit (shake only)
 };
 // (a long frame can't hold the freeze longer than this)
-const MAX_FREEZE_S = 0.15;
-const SHAKE_FREQ = 38; // Hz — fast jitter, not a sway
+const MAX_FREEZE_S = 0.3;
+const SHAKE_FREQ = 32; // Hz — fast jitter, not a sway
+const ROLL_PER_M = 0.12; // radians of camera roll per metre of shake amplitude
 const STORAGE_KEY = 'sq:hitFeel';
 
 export const isHitFeelEnabled = () => {
@@ -33,6 +34,7 @@ export function createHitFeel() {
   const right = new THREE.Vector3();
   const up = new THREE.Vector3();
   let applied = false;
+  let roll = 0;
 
   const impact = (kind = 'hit', { freeze = true } = {}) => {
     if (!isHitFeelEnabled()) return;
@@ -52,7 +54,7 @@ export function createHitFeel() {
     shakeT += Math.min(dt || 0, 0.05);
     if (shakeT >= shakeDur) { shakeDur = 0; return; }
     const fade = 1 - shakeT / shakeDur;
-    const a = shakeAmp * fade * fade;
+    const a = shakeAmp * Math.pow(fade, 1.3);
     const t = (seed + shakeT) * SHAKE_FREQ;
     // two out-of-step waves per axis — jittery without random jumps
     const sx = Math.sin(t * 1.0) * 0.6 + Math.sin(t * 2.3 + 1.7) * 0.4;
@@ -61,6 +63,8 @@ export function createHitFeel() {
     up.set(0, 1, 0).applyQuaternion(camera.quaternion);
     offset.copy(right).multiplyScalar(sx * a).addScaledVector(up, sy * a);
     camera.position.add(offset);
+    roll = Math.sin(t * 1.7 + 0.9) * a * ROLL_PER_M;
+    camera.rotateZ(roll);
     camera.updateMatrixWorld();
     applied = true;
   };
@@ -68,6 +72,7 @@ export function createHitFeel() {
   const restoreShake = (camera) => {
     if (!applied || !camera) return;
     camera.position.sub(offset);
+    camera.rotateZ(-roll);
     camera.updateMatrixWorld();
     applied = false;
   };
