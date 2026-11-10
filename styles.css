@@ -3130,6 +3130,38 @@ body.boss-talking #action-buttons,
 body.boss-talking #joystick-container,
 body.boss-talking #jump-button { visibility: hidden; }
 
+/* ── Sword combo attack hint (src/combat/swordCombo.js via bootstrapGameApp.js) ── */
+.sword-combo-hint {
+  position: fixed;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%) scale(0.92);
+  z-index: 900;
+  pointer-events: none;
+  opacity: 0;
+  padding: 6px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hud);
+  border: 1px solid var(--accent-ring);
+  color: var(--accent-hi);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 16px;
+  white-space: nowrap;
+  text-shadow: 0 0 12px rgba(251, 191, 36, 0.5);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.sword-combo-hint.is-shown { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.sword-combo-hint.is-ready { animation: sword-combo-pulse 0.6s ease-in-out infinite alternate; }
+.sword-combo-hint.is-attack {
+  font-size: 28px;
+  background: none;
+  border-color: transparent;
+  text-shadow: 0 0 18px rgba(251, 191, 36, 0.8), 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+@keyframes sword-combo-pulse { to { box-shadow: 0 0 18px var(--accent-ring); } }
+body.classic-mode .sword-combo-hint, body.story-cut .sword-combo-hint { display: none; }
+
 /* ── Sword Showdown: combo meter (src/combat/comboMeter.js) ─────────────────── */
 .combo-meter {
   position: fixed;
