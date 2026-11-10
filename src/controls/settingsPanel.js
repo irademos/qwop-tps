@@ -3,6 +3,7 @@ import {
   loadDraftRoutes, discardDraftRoutes, formatRoutes, isUsingDraftRoutes, setUsingDraftRoutes,
 } from '../map/stageRoutes.js';
 import { clearCacheAndReload } from '../core/appUpdate.js';
+import { isHitFeelEnabled, setHitFeelEnabled } from '../combat/hitFeel.js';
 const TAB_KEY = 'settings:lastTab';
 
 const TABS = [
@@ -381,6 +382,18 @@ function buildDisplayPanel() {
   const highContrastHint = createElement('div', 'settings-muted');
   highContrastHint.textContent = 'Boosts object contrast and lighting for better daytime phone visibility.';
   highContrastGroup.append(highContrastLabel, highContrastToggle, highContrastHint);
+  // Hit shake & freeze (src/combat/hitFeel.js — saved straight to localStorage `sq:hitFeel`)
+  const hitFeelGroup = createElement('div', 'settings-field');
+  const hitFeelLabel = createElement('label', 'settings-label', 'Hit Shake & Freeze');
+  hitFeelLabel.setAttribute('for', 'settings-display-hit-feel');
+  const hitFeelToggle = createElement('input', 'settings-checkbox');
+  hitFeelToggle.id = 'settings-display-hit-feel';
+  hitFeelToggle.type = 'checkbox';
+  hitFeelToggle.checked = isHitFeelEnabled();
+  hitFeelToggle.addEventListener('change', () => setHitFeelEnabled(hitFeelToggle.checked));
+  const hitFeelHint = createElement('div', 'settings-muted');
+  hitFeelHint.textContent = 'A screen shake and a few frozen frames when a bomb or a fire blast goes off near you.';
+  hitFeelGroup.append(hitFeelLabel, hitFeelToggle, hitFeelHint);
 
   const createRangeField = ({ id, label, min, max, step }) => {
     const field = createElement('div', 'settings-field');
@@ -452,6 +465,7 @@ function buildDisplayPanel() {
     gyroGroup,
     gyroRecalGroup,
     highContrastGroup,
+    hitFeelGroup,
     cameraSectionTitle,
     ...CAMERA_CONTROLS.map(({ key }) => cameraFields[key].field),
     cameraActions,

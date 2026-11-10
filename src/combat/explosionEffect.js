@@ -132,9 +132,14 @@ function makeSprite(texture, blending, color, opacity) {
  * @param {number}  [options.groundY] height of the ground under the blast (defaults to position.y)
  * @param {number}  [options.scale]   overall size multiplier (1 ≈ a 2.8 m bomb blast)
  */
+// Told about every explosion (bombs, fire blasts): fn(position, scale) — the game's hit feel
+let _explosionListener = null;
+export function setExplosionListener(fn) { _explosionListener = typeof fn === 'function' ? fn : null; }
+
 export function spawnExplosion(scene, position, options = {}) {
   if (!scene || !position) return;
   const scale = THREE.MathUtils.clamp(options.scale ?? 1, 0.3, 4);
+  try { _explosionListener?.(position, scale); } catch (e) { console.warn('explosion listener', e); }
   const groundY = Number.isFinite(options.groundY) ? options.groundY : position.y;
 
   const root = new THREE.Group();

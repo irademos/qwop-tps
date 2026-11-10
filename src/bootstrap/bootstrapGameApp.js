@@ -4,7 +4,7 @@ import { setupOfflineCache } from '../core/offlineCache.js';
 import QRCode from 'qrcode';
 import * as THREE from "three";
 import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/bloodEffect.js";
-import { updateExplosionEffects } from "../combat/explosionEffect.js";
+import { updateExplosionEffects, setExplosionListener } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl, startBlockedStagger, isBlockedStaggered, playHitReaction } from "../models/playerModel.js";
 import { glbCharacterConfig, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
@@ -54,6 +54,7 @@ import { createPlayerBombs } from '../combat/playerBomb.js';
 import { createHeartBubbles } from '../combat/heartBubbles.js';
 import { createStageChests } from '../combat/stageChests.js';
 import { createComboMeter } from '../combat/comboMeter.js';
+import { createHitFeel } from '../combat/hitFeel.js';
 import { createDeathCarry } from '../combat/deathCarry.js';
 import {
   createMagicBlasts, bladeBlocksBlast, createIceEncasing, setIceEncasingLevel, shakeIceEncasing, MAGIC_ELEMENTS
@@ -3946,6 +3947,14 @@ async function initCore(runtimeContext) {
 
   // Sword Showdown combo meter: consecutive sword hits; ends (and pays that many coins)
   // when the player is hurt, presses Block or has a swing blocked (src/combat/comboMeter.js)
+  // Hit feel: hit-stop (a few frozen frames) + a camera shake when a bomb or a fire blast goes off,
+  // weaker the further it is from the player (src/combat/hitFeel.js)
+  const hitFeel = createHitFeel();
+  window.hitFeel = hitFeel;
+  setExplosionListener((pos, scale) => {
+    if (!playerModel || !pos) return;
+    hitFeel.explosion(scale < 0.7 ? 'magic' : 'bomb', playerModel.position.distanceTo(pos));
+  });
   const comboMeter = createComboMeter({
     onCashOut: (coins) => {
       const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + coins;
@@ -9206,6 +9215,7 @@ async function initCore(runtimeContext) {
 
   const _resetForMenu = () => {
     cancelBowDraw();
+    hitFeel.cancel();
     _psRangedBack.until = 0;
     _psRangedBack.pauseUntil = 0;
     _psRangedRun(0);
@@ -10719,6 +10729,15 @@ async function initCore(runtimeContext) {
       playerBombs.delay(pausedMs);
       for (const _he of hordeEnemies) _he._bombs?.forEach((b) => { b.spawnTime += pausedMs; });
     }
+    // Hit-stop: a sword impact freezes the world for a few frames (the time is dropped, not
+    // caught up — clock.getDelta above already took it); the camera still shakes
+    if (hitFeel.frozen()) {
+      _syncSkyGlow();
+      hitFeel.applyShake(camera, frameDelta);
+      renderer.render(scene, camera);
+      hitFeel.restoreShake(camera);
+      return;
+    }
     frameIndex += 1;
     accumulateBucketDeltas(frameDelta);
     physicsAccumulator += frameDelta;
@@ -12187,7 +12206,9 @@ async function initCore(runtimeContext) {
       audioManager.setListener(playerModel.position, m[0], m[2]);
     }
     _syncSkyGlow();
+    hitFeel.applyShake(camera, frameDelta);
     renderer.render(scene, camera);
+    hitFeel.restoreShake(camera);
     const frameTotalMs = performance.now() - frameStartMs;
     if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
       frameOverrunStreak += 1;
