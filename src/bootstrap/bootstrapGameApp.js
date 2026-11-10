@@ -54,6 +54,8 @@ import { createPlayerBombs } from '../combat/playerBomb.js';
 import { createHeartBubbles } from '../combat/heartBubbles.js';
 import { createStageChests } from '../combat/stageChests.js';
 import { createComboMeter } from '../combat/comboMeter.js';
+import { createSwordCombo, HIT_MIN_GAP_S as SWORD_HIT_MIN_GAP_S } from '../combat/swordCombo.js';
+import { createSwordTrail } from '../combat/swordTrail.js';
 import { createHitFeel } from '../combat/hitFeel.js';
 import { createDeathCarry } from '../combat/deathCarry.js';
 import {
@@ -3964,6 +3966,53 @@ async function initCore(runtimeContext) {
       showPickupToast('coins', coins, '', { text: `${coins} hit combo: +${coins} coins` });
     },
   });
+  // Sword swings + combo attacks (src/combat/swordCombo.js): each swing can hit a target once,
+  // so quick swings land one after the other; 3 quick hits charge a combo attack picked by the
+  // next swing's direction (down = Ground Pound, across = Spin Attack, up = Sky Slash). The
+  // blade's swing trail = src/combat/swordTrail.js.
+  const swordTrail = createSwordTrail(scene);
+  const _swordComboHint = document.createElement('div');
+  _swordComboHint.className = 'sword-combo-hint';
+  document.body.appendChild(_swordComboHint);
+  let _swordComboHintTimer = null;
+  const swordCombo = createSwordCombo({
+    scene,
+    getPlayer: () => (playerDead ? null : playerModel),
+    getTargets: () => {
+      const list = hordeEnemies.filter((e) => !e._tutorial);
+      return town?.isActive() ? [...list, ...town.getWeaponTargets()] : list;
+    },
+    getPvpTargets: () => (_wandActive || _rodActive || _oarActive ? [] : _getPvpTargets()),
+    canCombo: () => !_classicMode && !playerDead && !_psBossTalking && !isPlayerFrozen()
+      && !showdownTutorial?.isActive?.() && !(town?.isActive() && town.isIndoors?.()),
+    onTargetHit: (t) => { if (_psStageActive && !t._tutorial) comboMeter.hit(); },
+    onPvpHit: (o) => {
+      if (!o.ownBlood && o.model) playHitReaction(o.model);
+      if (!o.ownBlood) spawnBloodBurst(scene, o.center, { groundY: o.position.y, intensity: 0.8 });
+    },
+    onImpact: (kind, pos) => {
+      const at = pos?.clone?.();
+      if (kind === 'pound') {
+        hitFeel.explosion('combo', 0);
+        audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.35, { cooldownKey: 'sword-combo', cooldownMs: 150 });
+        audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.7, { cooldownKey: 'sword-combo-hit', cooldownMs: 150 });
+      } else {
+        hitFeel.explosion('comboLight', 0);
+        audioManager?.playSynth?.('comboWhoosh', kind === 'slice' ? 0.9 : 0.75);
+      }
+      void at;
+    },
+    onState: (text, kind) => {
+      clearTimeout(_swordComboHintTimer);
+      if (kind === 'ready') audioManager?.playSynth?.('comboReady', 0.6);
+      _swordComboHint.textContent = text || '';
+      _swordComboHint.classList.toggle('is-ready', kind === 'ready');
+      _swordComboHint.classList.toggle('is-attack', kind === 'attack');
+      _swordComboHint.classList.toggle('is-shown', !!text);
+      if (kind === 'attack') _swordComboHintTimer = setTimeout(() => _swordComboHint.classList.remove('is-shown'), 900);
+    },
+  });
+  window.swordCombo = swordCombo;
 
   const playerBloodOrigin = new THREE.Vector3();
   const triggerPlayerHurtBlood = (previousHealth, nextHealth) => {
@@ -4428,6 +4477,11 @@ async function initCore(runtimeContext) {
   // Knockback velocity applied directly to player position in the game loop
   const _playerKnockback = { vx: 0, vy: 0, vz: 0, endTime: 0 };
   const _pvpLastSwordHitAt = new Map(); // per duel opponent / battle enemy: last time our sword hit or was blocked
+  const _pvpLastSwordSwing = new Map(); // …and with which swing (swordCombo.swingId — once per swing)
+  const _swordTrailBase = new THREE.Vector3();
+  const _swordTrailTip = new THREE.Vector3();
+  const SWORD_TRAIL_MIN_SPEED = 4; // m/s of the tip for the swing trail to draw
+  let _swordTrailFed = false; // (the trail was fed a blade this frame — else it just fades)
   const _noPvpTargets = [];
   // Everyone the local sword can hit besides Showdown enemies: the duel opponent or the
   // battle's enemies (each { id, position, center, bladePoints, bladeDir, hasBlade, blocking,
@@ -9216,6 +9270,8 @@ async function initCore(runtimeContext) {
   const _resetForMenu = () => {
     cancelBowDraw();
     hitFeel.cancel();
+    swordCombo.clear();
+    swordTrail.clear();
     _psRangedBack.until = 0;
     _psRangedBack.pauseUntil = 0;
     _psRangedRun(0);
@@ -11112,6 +11168,19 @@ async function initCore(runtimeContext) {
       const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
       const _playerMovingFast = !_blockingNow && !_blockToggleSettling &&
         _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
+      // Swings (each target is hit once per swing — quick swings land one after the other) +
+      // the combo attack a 3-hit combo charges (src/combat/swordCombo.js)
+      const _swingId = swordCombo.frame(_tipWorld, _psw.prevTipWorld, _playerMovingFast && !_wandOut && !playerDead, _nowSecPS);
+      // The blade's swing trail (src/combat/swordTrail.js): from down the blade to its tip
+      if (!_wandOut && !playerDead && foamSword.mesh.visible !== false) {
+        const _ts = foamSword.mesh.scale.z || 1;
+        _swordTrailBase.set(0, 0, 0.22 * _ts).applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position);
+        _swordTrailTip.set(0, 0, 0.72 * _ts).applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position);
+        const _lastTip = _psw.tipHistory[_psw.tipHistory.length - 1];
+        const _tipSpeed = _lastTip ? _colSweepDist / Math.max(1 / 240, _nowSecPS - _lastTip.t) : 0; // m/s
+        swordTrail.update(_swordTrailBase, _swordTrailTip, _tipSpeed >= SWORD_TRAIL_MIN_SPEED && !_blockingNow && !_blockToggleSettling, swordCombo.isReady());
+        _swordTrailFed = true;
+      }
       // Blocked swing: knock the player's sword sideways (snap, hold, return to live gyro) —
       // to the sword hand's side (the game 'left' hand, local -X), held in that hand alone:
       // the other hand is flung out the other way and the blocked stagger plays
@@ -11161,7 +11230,8 @@ async function initCore(runtimeContext) {
           const _reachesBody = _tipWorld.distanceTo(_enemyCenter) < (_he.bodyHitRadius ?? 0.65);
           const _nowMsPS = Date.now();
           if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
-          if ((_reachesBody || _swordCollision) && _nowMsPS - _he._playerSwordLastHit > 1000 && _psw.prevTipWorld) {
+          if ((_reachesBody || _swordCollision) && _he._playerSwordSwing !== _swingId
+            && _nowMsPS - _he._playerSwordLastHit > SWORD_HIT_MIN_GAP_S * 1000 && _psw.prevTipWorld) {
             const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
             const _sweepDist = _sweepVec.length();
             const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
@@ -11177,6 +11247,7 @@ async function initCore(runtimeContext) {
                 if (_he.applyBlockImpact) _he.applyBlockImpact(_swingDir.clone().normalize());
                 else _he.applySwordBounce?.();
                 if (!_he._tutorial) comboMeter.end();
+                swordCombo.breakChain();
                 audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
                 _startSwordBounce();
                 // Small step forward into the blocked swing (instead of the miss lunge)
@@ -11192,6 +11263,7 @@ async function initCore(runtimeContext) {
                 }
                 _swingHitOccurred = true; // blocked swing doesn't lunge
                 _he._playerSwordLastHit = _nowMsPS; // this swing is spent
+                _he._playerSwordSwing = _swingId;
               } else if (_reachesBody) {
                 const _sweepDir = _sweepVec.clone().normalize();
                 _sweepDir.y = 0;
@@ -11199,6 +11271,7 @@ async function initCore(runtimeContext) {
                 _sweepDir.normalize();
                 const _killingBlow = _he.applyDamage(1);
                 if (!_he._tutorial && _psStageActive) comboMeter.hit();
+                if (!_he._tutorial) swordCombo.noteHit(_nowSecPS);
                 if (_killingBlow) {
                   // Full knockback on killing hit
                   _he.applyDirectKnockback({
@@ -11220,8 +11293,9 @@ async function initCore(runtimeContext) {
                   });
                 }
                 _swingHitOccurred = true;
-                audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
+                audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 120 });
                 _he._playerSwordLastHit = _nowMsPS;
+                _he._playerSwordSwing = _swingId;
               }
             }
           }
@@ -11244,7 +11318,8 @@ async function initCore(runtimeContext) {
             }
           }
           const _pvpReachesBody = _tipWorld.distanceTo(_opp.center) < 0.65;
-          if (!(_pvpReachesBody || _pvpSwordCollision) || _nowMsD - (_pvpLastSwordHitAt.get(_opp.id) || 0) <= 1000) continue;
+          if (!(_pvpReachesBody || _pvpSwordCollision) || _pvpLastSwordSwing.get(_opp.id) === _swingId
+            || _nowMsD - (_pvpLastSwordHitAt.get(_opp.id) || 0) <= SWORD_HIT_MIN_GAP_S * 1000) continue;
           const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
           const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
           const _minSweepSpd = window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000;
@@ -11262,8 +11337,10 @@ async function initCore(runtimeContext) {
             window._pswShowBlockFlash?.('enemy');
             _startSwordBounce();
             _opp.onBlocked();
+            swordCombo.breakChain();
             _swingHitOccurred = true;
             _pvpLastSwordHitAt.set(_opp.id, _nowMsD);
+            _pvpLastSwordSwing.set(_opp.id, _swingId);
             break; // the swing is spent
           } else if (_pvpReachesBody) {
             const _sweepDir = _sweepVec.clone().setY(0);
@@ -11273,9 +11350,11 @@ async function initCore(runtimeContext) {
             _opp.onHit(1, _sweepDir);
             if (!_opp.ownBlood && _opp.model) playHitReaction(_opp.model); // (bots react themselves)
             if (!_opp.ownBlood) spawnBloodBurst(scene, _opp.center, { groundY: _opp.position.y, intensity: 0.8 });
-            audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
+            audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 120 });
+            swordCombo.noteHit(_nowSecPS);
             _swingHitOccurred = true;
             _pvpLastSwordHitAt.set(_opp.id, _nowMsD);
+            _pvpLastSwordSwing.set(_opp.id, _swingId);
           }
         }
       }
@@ -11294,7 +11373,9 @@ async function initCore(runtimeContext) {
         const _townSwingDir = _psw.tipHistory.length
           ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
           : new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
-        if (town.trySwordHit(_tipWorld, _townSwingDir)) _swingHitOccurred = true;
+        const _townHit = town.trySwordHit(_tipWorld, _townSwingDir, _swingId);
+        if (_townHit) _swingHitOccurred = true;
+        if (_townHit === 'hit') swordCombo.noteHit(_nowSecPS);
       }
       // Story: a swing at a tree / log chops it (Town's townTrees.js — wood for the canoe)
       if (!_wandOut && !playerDead && story?.isActive() && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld
@@ -11327,6 +11408,10 @@ async function initCore(runtimeContext) {
       _psw.tipHistory.push({ pos: _psw.prevTipWorld, t: _nowSecPS });
       while (_psw.tipHistory.length && _nowSecPS - _psw.tipHistory[0].t > 0.12) _psw.tipHistory.shift();
     }
+    // (no blade fed this frame — put away, no gyro — the trail just fades out)
+    if (!_swordTrailFed) swordTrail.update(null);
+    _swordTrailFed = false;
+    swordCombo.update(frameDelta);
     // Heart bubbles: drift to the player and pop on touching them (+1 health)
     _popHeartBubbles(heartBubbles.update(frameDelta, {
       playerModel: playerDead ? null : playerModel,

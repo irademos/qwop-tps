@@ -933,19 +933,21 @@ export function createTownMode(ctx) {
 
   // The player's sword swing reached `tip` (world), moving along swingDir: hits the
   // townsperson it passes through (those fighting are EnemyPlayers — the stage code hits
-  // them), or chops the tree / log it's in (townTrees.js)
-  const trySwordHit = (tip, swingDir) => {
+  // them), or chops the tree / log it's in (townTrees.js). 'hit' = a townsperson, true = a chop.
+  const trySwordHit = (tip, swingDir, swingId = null) => {
     if (!T.active || !T.ready || T.sequence || T.inRoom) return false;
     for (const n of T.npcs) {
       if (!n.alive || !n.body || n.fighter || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
-      if (T.simT - n.lastHitAt < 0.7) continue;
+      // (once per swing — swordCombo.js' swingId — so quick swings each land)
+      if (T.simT - n.lastHitAt < 0.18 || (swingId != null && n.lastSwing === swingId)) continue;
       const cy = T.groundY(n) + 0.55 * heightScale(n.url);
       if (Math.hypot(tip.x - n.x, tip.y - cy, tip.z - n.z) > 0.7) continue;
       const dir = _v2.set(swingDir.x, 0, swingDir.z);
       if (dir.lengthSq() < 1e-6) dir.set(n.x - T.playerPos().x, 0, n.z - T.playerPos().z);
       dir.normalize();
+      n.lastSwing = swingId;
       T.hurt(n, { x: dir.x, z: dir.z });
-      return true;
+      return 'hit';
     }
     return T.tryChop(tip);
   };

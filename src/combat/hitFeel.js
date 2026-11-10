@@ -11,6 +11,9 @@ import * as THREE from 'three';
 export const HIT_FEEL = {
   bomb: { freeze: 0.2, amp: 0.32, dur: 0.5, near: 4, far: 26, freezeDist: 12 },
   magic: { freeze: 0.12, amp: 0.2, dur: 0.36, near: 3, far: 18, freezeDist: 8 },
+  // the sword's combo attacks (swordCombo.js): Ground Pound / Spin Attack + Sky Slash
+  combo: { freeze: 0.14, amp: 0.3, dur: 0.45, near: 4, far: 20, freezeDist: 12 },
+  comboLight: { freeze: 0.05, amp: 0.1, dur: 0.25, near: 4, far: 20, freezeDist: 12 },
 };
 // (a long frame can't hold the freeze longer than this)
 const MAX_FREEZE_S = 0.3;

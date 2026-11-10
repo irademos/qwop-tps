@@ -237,6 +237,38 @@ export class AudioManager {
       src.connect(hp).connect(ng).connect(out);
       src.start(t);
       src.stop(t + 0.35);
+    } else if (kind === 'comboWhoosh' || kind === 'comboReady') {
+      // comboWhoosh: a big sword whoosh (swordCombo.js' combo attacks) — band-passed noise
+      // sweeping down; comboReady: a short bright chime (two notes up)
+      if (kind === 'comboWhoosh') {
+        const src = noise(0.55);
+        const band = ctx.createBiquadFilter();
+        band.type = 'bandpass';
+        band.Q.value = 1.2;
+        band.frequency.setValueAtTime(3200, t);
+        band.frequency.exponentialRampToValueAtTime(500, t + 0.5);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.5, t + 0.05);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.52);
+        src.connect(band).connect(g).connect(out);
+        src.start(t);
+        src.stop(t + 0.55);
+      } else {
+        [880, 1320].forEach((f, i) => {
+          const osc = ctx.createOscillator();
+          osc.type = 'sine';
+          osc.frequency.value = f;
+          const og = ctx.createGain();
+          const t0 = t + i * 0.08;
+          og.gain.setValueAtTime(0.0001, t0);
+          og.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
+          og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+          osc.connect(og).connect(out);
+          osc.start(t0);
+          osc.stop(t0 + 0.32);
+        });
+      }
     }
     setTimeout(() => { try { out.disconnect(); } catch (_) { /* ignore */ } }, 1200);
   }
