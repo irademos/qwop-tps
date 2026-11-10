@@ -4553,7 +4553,7 @@ async function initCore(runtimeContext) {
   // (src/characters/pembertonBoss.js). His bullets / bombs hit only the player.
   const PEMBERTON_BULLET_DAMAGE = 1;
   const PEMBERTON_BOMB_DAMAGE = 2;
-  const PEMBERTON_BULLET_SPEED = 13;  // m/s — slow enough to see coming (the player's: 28)
+  const PEMBERTON_BULLET_SPEED = 9;   // m/s — slow enough to see coming and swing at (a parry — _swordParry)
   const PEMBERTON_WALK_STOP_DIST = 3; // m — the auto-walk closes in this far on a fighting boss
   // The stage's boss fighter (pembertonBoss.js) while it's in the stage: Pemberton, or the
   // final enemy of any other stage (createStageBoss — talks first, then fights)
@@ -4579,6 +4579,35 @@ async function initCore(runtimeContext) {
     }
     audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'boss-hit-player', cooldownMs: 150 });
   };
+  // ── Sword parries: a swing timed as an arrow (any way) or an enemy wand blast (along the
+  // blast's line, like a block) gets to the player knocks it back at whoever sent it ──
+  const SWORD_PARRY_WINDOW_S = 0.4;       // s after the last fast frame of a swing it still counts
+  const SWORD_PARRY_ARROW_RADIUS = 1.25;  // m round the chest an arrow is met by the swing
+  const SWORD_PARRY_BLAST_RADIUS = 1.1;   // m round the body a blast is met
+  const SWORD_PARRY_BLAST_MAX_DEG = 45;   // the swing within this of the blast's line
+  const _swordParry = { t: -Infinity, dir: new THREE.Vector3() };
+  const _swordParryStep = new THREE.Vector3();
+  const _swordParryCenter = new THREE.Vector3();
+  // A swing on now (or just now) with the sword in hand → its direction (world), else null
+  const _swordParryDir = () => {
+    if (playerDead || isPlayerFrozen() || !window.phoneSwordGyro?.connected || foamSword?.holder !== playerControls
+      || _wandActive || _rodActive || _oarActive || _playerBlockHeld() || _psBossTalking) return null;
+    if (performance.now() / 1000 - _swordParry.t > SWORD_PARRY_WINDOW_S) return null;
+    return _swordParry.dir.lengthSq() > 1e-8 ? _swordParry.dir : null;
+  };
+  const _playParrySfx = () => {
+    audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.7, { cooldownKey: 'sword-parry-shot', cooldownMs: 90 });
+    window._pswShowBlockFlash?.('player');
+  };
+  // Back at an arrow's shooter (a little above its feet), else back the way it came
+  const _shotBackDir = (proj, vel) => {
+    const shooter = proj.userData.shooter;
+    const dir = shooter?.group && !shooter.isDead
+      ? shooter.group.position.clone().setY(shooter.group.position.y + 0.9 * (shooter.group.scale.y || 1)).sub(proj.position)
+      : vel.clone().negate();
+    return dir.lengthSq() < 1e-6 ? null : dir.normalize();
+  };
+
   // What his bullets can hit (updateProjectiles' localTarget) and his bombs can blast
   const _pembertonShotTarget = {
     get position() { return playerModel.position; },
@@ -4586,13 +4615,19 @@ async function initCore(runtimeContext) {
     // The bubble sends an arrow back at whoever loosed it (its shooter, else back the way it came)
     reflect: (proj, vel) => {
       if (playerDead || !isPlayerBubbleActive()) return null;
-      const shooter = proj.userData.shooter;
-      const dir = shooter?.group && !shooter.isDead
-        ? shooter.group.position.clone().setY(shooter.group.position.y + 0.9 * (shooter.group.scale.y || 1)).sub(proj.position)
-        : vel.clone().negate();
-      if (dir.lengthSq() < 1e-6) return null;
+      const dir = _shotBackDir(proj, vel);
+      if (!dir) return null;
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.55, { cooldownKey: 'bubble-reflect', cooldownMs: 120 });
-      return dir.normalize();
+      return dir;
+    },
+    // A timed sword swing (any direction) sends it back too
+    get parryCenter() { return _swordParryCenter.copy(playerModel.position).setY(playerModel.position.y + 1.0); },
+    parryRadius: SWORD_PARRY_ARROW_RADIUS,
+    parry: (proj, vel) => {
+      if (!_swordParryDir()) return null;
+      const dir = _shotBackDir(proj, vel);
+      if (dir) _playParrySfx();
+      return dir;
     },
   };
   const _pembertonBombTargets = [{
@@ -4967,6 +5002,20 @@ async function initCore(runtimeContext) {
         : blast.forward.clone().negate().setY(0);
       if (dir.lengthSq() < 1e-6) return null;
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.55, { cooldownKey: 'bubble-reflect', cooldownMs: 120 });
+      return dir.normalize();
+    },
+    // A sword swing timed as it arrives, along the blast's line (like a block — either way
+    // along it), sends it back at its caster
+    parryRadius: SWORD_PARRY_BLAST_RADIUS,
+    parry: (blast) => {
+      const swing = _swordParryDir();
+      if (!swing || !bladeBlocksBlast(swing, blast.line, blast.forward, SWORD_PARRY_BLAST_MAX_DEG)) return null;
+      const c = blast.caster;
+      const dir = c?.group && !c.isDead
+        ? c.group.position.clone().sub(playerModel.position).setY(0)
+        : blast.forward.clone().negate().setY(0);
+      if (dir.lengthSq() < 1e-6) return null;
+      _playParrySfx();
       return dir.normalize();
     },
     // Bubble, a shield facing the blast, or a sword / wand block along the blast's line
@@ -5558,6 +5607,22 @@ async function initCore(runtimeContext) {
       pick.rangedTurn = now;
       _psRangedTurn = pick;
     }
+  }
+
+  // ── Walking up to an archer / wand caster (the auto-walk, Showdown / Endless): while the camera
+  // is locked on one — its ranged turn, or the closest enemy (_psCamTarget, no hand camera) — the
+  // player walks toward it until PS_RANGED_APPROACH_STOP away (a bow shot, not a sword's reach) ──
+  const PS_RANGED_APPROACH_STOP = 8.5;  // m — stops this far off
+  const PS_RANGED_APPROACH_START = 10.5; // m — and sets off again past this
+  let _psRangedApproaching = false;
+  const _psIsRangedFoe = (e) => !!e && !e.isDead && !!e.ranged && !(e instanceof BombThrowerEnemy)
+    && !!e.group?.parent && hordeEnemies.includes(e) && !e._tutorial
+    && !(_psBoss && e === _psBoss.enemy && !_psBoss.isStarted());
+  function _psRangedApproachTarget() {
+    if (!_psStageActive || _classicMode || showdownTutorial?.isActive() || _psBossTalking || !playerModel) return null;
+    if (_psIsRangedFoe(_psRangedTurn)) return _psRangedTurn;
+    if (performance.now() >= _psCamManualUntil && !_weaponAim.active && _psIsRangedFoe(_psCamTarget)) return _psCamTarget;
+    return null;
   }
 
   // Phone Sword: time-of-day choice ('random', 'day', 'night') and current stage night flag
@@ -7157,6 +7222,44 @@ async function initCore(runtimeContext) {
     if (isInventoryItemEquipped('pistol')) unequipInventoryItem('pistol');
     playerControls?.refreshActionButtons?.();
   };
+  // The press turns the camera once (BOW_SNAP_S) to the nearest archer / wand caster within
+  // BOW_SNAP_RANGE, else the closest enemy; after that the aiming is the player's
+  const BOW_SNAP_RANGE = 35;  // m
+  const BOW_SNAP_S = 0.35;
+  const BOW_SNAP_RATE = 14;   // 1/s
+  let _bowSnap = null;        // { enemy, until }
+  const _startBowSnap = () => {
+    _bowSnap = null;
+    if (!playerModel || _weaponAim.active) return;
+    const pp = playerModel.position;
+    let ranged = null;
+    let rangedD = BOW_SNAP_RANGE * BOW_SNAP_RANGE;
+    let any = null;
+    let anyD = Infinity;
+    for (const e of hordeEnemies) {
+      if (e.isDead || !e.group?.parent || e._tutorial && !showdownTutorial?.isActive()) continue;
+      if (_psBoss && e === _psBoss.enemy && !_psBoss.isStarted()) continue; // (still waiting to talk)
+      const d = e.group.position.distanceToSquared(pp);
+      const isRanged = (!!e.ranged || !!e.wand) && !(e instanceof BombThrowerEnemy);
+      if (isRanged && d < rangedD) { rangedD = d; ranged = e; }
+      if (d < anyD) { anyD = d; any = e; }
+    }
+    const enemy = ranged ?? any;
+    if (enemy) _bowSnap = { enemy, until: performance.now() + BOW_SNAP_S * 1000 };
+  };
+  const _updateBowSnap = (dt) => {
+    const snap = _bowSnap;
+    if (!snap) return;
+    if (!_bowDraw.active || playerDead || snap.enemy.isDead || !playerControls || playerControls.cameraTouchId !== null
+      || performance.now() >= snap.until) { _bowSnap = null; return; }
+    const tp = snap.enemy.group.position;
+    const dx = tp.x - playerModel.position.x;
+    const dz = tp.z - playerModel.position.z;
+    if (Math.hypot(dx, dz) > 0.5) {
+      playerControls.yaw += wrapDeltaRad(Math.atan2(dx, dz) - playerControls.yaw) * Math.min(1, dt * BOW_SNAP_RATE);
+    }
+    _aimCameraPitchAt(tp, dt * (BOW_SNAP_RATE / CAM_AIM_PITCH_SPEED));
+  };
   const startBowDraw = () => {
     if (_bowDraw.active) return false;
     if (!_canDrawBow()) return false;
@@ -7183,6 +7286,7 @@ async function initCore(runtimeContext) {
     }
     _bowDraw.active = true;
     _bowDraw.startMs = performance.now();
+    _startBowSnap();
     pistol.nocked = true;
     playerControls.bowAiming = true;
     audioManager?.playSynth?.('bowDraw', 0.5);
@@ -11171,6 +11275,13 @@ async function initCore(runtimeContext) {
       // Swings (each target is hit once per swing — quick swings land one after the other) +
       // the combo attack a 3-hit combo charges (src/combat/swordCombo.js)
       const _swingId = swordCombo.frame(_tipWorld, _psw.prevTipWorld, _playerMovingFast && !_wandOut && !playerDead, _nowSecPS);
+      // A swing to knock arrows / blasts back with (_swordParryDir — the parries below)
+      if (_playerMovingFast && !_wandOut && !playerDead && _psw.prevTipWorld) {
+        _swordParryStep.subVectors(_tipWorld, _psw.prevTipWorld);
+        if (_nowSecPS - _swordParry.t > SWORD_PARRY_WINDOW_S) _swordParry.dir.set(0, 0, 0); // (a new swing)
+        _swordParry.dir.multiplyScalar(0.6).add(_swordParryStep);
+        _swordParry.t = _nowSecPS;
+      }
       // The blade's swing trail (src/combat/swordTrail.js): from down the blade to its tip
       if (!_wandOut && !playerDead && foamSword.mesh.visible !== false) {
         const _ts = foamSword.mesh.scale.z || 1;
@@ -11531,16 +11642,35 @@ async function initCore(runtimeContext) {
           // A boss fighting (Pemberton / a stage boss after its talk): walk toward it (it may
           // back off to shoot / cast) instead of a path end
           const _bossPos = _psBoss?.isStarted() && !_psBoss.enemy.isDead ? _psBoss.enemy.group.position : null;
+          // The camera locked on an archer / wand caster (its ranged turn, or the closest enemy):
+          // walk up to it — to a bow shot's distance — instead of on along the path
+          const _rangedFoe = _bossPos ? null : _psRangedApproachTarget();
+          if (!_rangedFoe) _psRangedApproaching = false;
           // Along the path: a little ahead of the player's spot on it (the last point = the end)
           let _walkTo = _bossPos ?? _psPathEnd;
-          if (!_bossPos && _psPath) {
+          if (_rangedFoe) {
+            const _rp = _rangedFoe.group.position;
+            const _rd = Math.hypot(_rp.x - playerModel.position.x, _rp.z - playerModel.position.z);
+            const _stopAt = _psRangedApproaching ? PS_RANGED_APPROACH_STOP : PS_RANGED_APPROACH_START;
+            _psRangedApproaching = _rd > _stopAt;
+            if (_psRangedApproaching) {
+              _psAutoWalkDir.set((_rp.x - playerModel.position.x) / _rd, 0, (_rp.z - playerModel.position.z) / _rd);
+              const _moveStep = PS_SPEED * frameDelta;
+              playerControls.queueAutoMove(_psAutoWalkDir.x * _moveStep, _psAutoWalkDir.z * _moveStep);
+              playerControls.isMoving = true;
+            } else {
+              playerControls.isMoving = false;
+            }
+          } else if (!_bossPos && _psPath) {
             const _ahead = _psPath.at(_psPathProgress + PS_PATH_LOOKAHEAD);
             _walkTo = _psPathAheadPoint.set(_ahead.x, 0, _ahead.z);
           }
           const _ddx = _walkTo.x - playerModel.position.x;
           const _ddz = _walkTo.z - playerModel.position.z;
           const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);
-          if (_bossPos) {
+          if (_rangedFoe) {
+            // (walking up to it — above)
+          } else if (_bossPos) {
             if (_distToEnd > PEMBERTON_WALK_STOP_DIST) {
               _psAutoWalkDir.set(_ddx / _distToEnd, 0, _ddz / _distToEnd);
               const _moveStep = PS_SPEED * frameDelta;
@@ -11620,7 +11750,8 @@ async function initCore(runtimeContext) {
       }
 
       // ── Phone Sword: camera auto-aim at closest enemy (not while the phone aims a gun / shield) ──
-      if (playerControls && hordeEnemies.length > 0 && !_weaponAim.active) {
+      // (not while the bow is drawn: the press turned it once — _bowSnap — the aiming is the player's)
+      if (playerControls && hordeEnemies.length > 0 && !_weaponAim.active && !_bowDraw.active) {
         const _now = performance.now();
 
         // Detect manual camera movement: if yaw changed and we didn't set it, player moved camera
@@ -11712,6 +11843,9 @@ async function initCore(runtimeContext) {
         }
       }
     }
+
+    // ── Bow pressed: the camera turns once to the nearest archer / wand caster (else the closest enemy) ──
+    _updateBowSnap(frameDelta);
 
     // ── Town: in a talk, the camera turns to whoever's talking to the player ──
     const _townTalker = town?.isActive() && playerControls && !playerDead ? town.talkFocus() : null;

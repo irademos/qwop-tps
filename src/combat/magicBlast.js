@@ -232,6 +232,8 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
    * Moves the blasts and resolves hits. `getTargets(blast)` returns what the blast can hit:
    * [{ center: Vector3, radius, reflect?(blast) → Vector3 | null, blocks?(blast) → bool, onBlocked?(blast), onHit(blast) }].
    * `reflect` (the player's bubble): a direction sends the blast back that way as the player's.
+   * `parry?(blast)` → Vector3 | null + `parryRadius` (a timed sword swing): checked first, on a
+   * wider sphere, so a swing meets the blast just before it reaches the body.
    */
   const update = (dt, getTargets) => {
     for (let i = blasts.length - 1; i >= 0; i--) {
@@ -256,17 +258,37 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
       const half = b.length / 2;
       const segLen = from.distanceTo(to);
       const dir = segLen > 1e-6 ? _d.subVectors(to, from).divideScalar(segLen) : _d.copy(b.forward);
-      for (const t of (getTargets?.(b) || [])) {
-        if (!t?.center) continue;
-        const r = t.radius ?? 0.45;
-        const along = _q.subVectors(t.center, from).dot(dir);
-        if (along < -r || along > segLen + r) continue;
+      // (how far along this frame's sweep the blast reaches a sphere of radius r round `center`, or null)
+      const sweepAlong = (center, r) => {
+        const along = _q.subVectors(center, from).dot(dir);
+        if (along < -r || along > segLen + r) return null;
         const k = THREE.MathUtils.clamp(along, 0, segLen);
-        const d = _q.copy(t.center).sub(from).addScaledVector(dir, -k);
+        const d = _q.copy(center).sub(from).addScaledVector(dir, -k);
         const a = d.dot(b.line);
-        if (Math.abs(a) > half + r * 0.5) continue;
+        if (Math.abs(a) > half + r * 0.5) return null;
         d.addScaledVector(b.line, -a);
-        if (d.length() > r) continue;
+        return d.length() > r ? null : along;
+      };
+      const targets = getTargets?.(b) || [];
+      // A timed sword swing along the blast's line knocks it back (`parry`, a little out from the body)
+      let parried = null;
+      for (const t of targets) {
+        if (!t?.center || !t.parry) continue;
+        const along = sweepAlong(t.center, t.parryRadius ?? 1);
+        if (along == null) continue;
+        const back = t.parry(b);
+        if (back) { parried = { back, along }; break; }
+      }
+      if (parried) {
+        const p = from.clone().addScaledVector(dir, THREE.MathUtils.clamp(parried.along, 0, segLen));
+        reflectBlast(b, p, parried.back);
+        burst(p, b.element, 14);
+        continue;
+      }
+      for (const t of targets) {
+        if (!t?.center) continue;
+        const along = sweepAlong(t.center, t.radius ?? 0.45);
+        if (along == null) continue;
         if (along < hitT) { hitT = along; hit = t; }
       }
       // The map stops it (only up to the target's distance)
