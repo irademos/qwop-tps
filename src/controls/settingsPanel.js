@@ -392,7 +392,7 @@ function buildDisplayPanel() {
   hitFeelToggle.checked = isHitFeelEnabled();
   hitFeelToggle.addEventListener('change', () => setHitFeelEnabled(hitFeelToggle.checked));
   const hitFeelHint = createElement('div', 'settings-muted');
-  hitFeelHint.textContent = 'A tiny screen shake and a few frozen frames when your sword lands a hit.';
+  hitFeelHint.textContent = 'A screen shake and a few frozen frames when a bomb or a fire blast goes off near you.';
   hitFeelGroup.append(hitFeelLabel, hitFeelToggle, hitFeelHint);
 
   const createRangeField = ({ id, label, min, max, step }) => {

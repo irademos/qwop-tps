@@ -4,7 +4,7 @@ import { setupOfflineCache } from '../core/offlineCache.js';
 import QRCode from 'qrcode';
 import * as THREE from "three";
 import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/bloodEffect.js";
-import { updateExplosionEffects } from "../combat/explosionEffect.js";
+import { updateExplosionEffects, setExplosionListener } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl, startBlockedStagger, isBlockedStaggered, playHitReaction } from "../models/playerModel.js";
 import { glbCharacterConfig, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
@@ -3947,9 +3947,14 @@ async function initCore(runtimeContext) {
 
   // Sword Showdown combo meter: consecutive sword hits; ends (and pays that many coins)
   // when the player is hurt, presses Block or has a swing blocked (src/combat/comboMeter.js)
-  // Hit feel: hit-stop (a few frozen frames) + a tiny camera shake on sword impacts (src/combat/hitFeel.js)
+  // Hit feel: hit-stop (a few frozen frames) + a camera shake when a bomb or a fire blast goes off,
+  // weaker the further it is from the player (src/combat/hitFeel.js)
   const hitFeel = createHitFeel();
   window.hitFeel = hitFeel;
+  setExplosionListener((pos, scale) => {
+    if (!playerModel || !pos) return;
+    hitFeel.explosion(scale < 0.7 ? 'magic' : 'bomb', playerModel.position.distanceTo(pos));
+  });
   const comboMeter = createComboMeter({
     onCashOut: (coins) => {
       const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + coins;
@@ -3970,7 +3975,6 @@ async function initCore(runtimeContext) {
     playerBloodOrigin.y += 0.85;
     const intensity = THREE.MathUtils.clamp((previousHealth - nextHealth) / 2, 0.6, 2);
     spawnBloodBurst(scene, playerBloodOrigin, { groundY, intensity });
-    hitFeel.impact('hurt');
     if (nextHealth <= 0) audioManager?.playOuch('playerDeath', 'ouch-player');
     else {
       audioManager?.playOuch('player', 'ouch-player');
@@ -11175,7 +11179,6 @@ async function initCore(runtimeContext) {
                 if (!_he._tutorial) comboMeter.end();
                 audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
                 _startSwordBounce();
-                hitFeel.impact('light');
                 // Small step forward into the blocked swing (instead of the miss lunge)
                 if (_swingStepAllowed()) {
                   const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
@@ -11195,7 +11198,6 @@ async function initCore(runtimeContext) {
                 if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
                 _sweepDir.normalize();
                 const _killingBlow = _he.applyDamage(1);
-                hitFeel.impact(_killingBlow ? 'kill' : 'hit');
                 if (!_he._tutorial && _psStageActive) comboMeter.hit();
                 if (_killingBlow) {
                   // Full knockback on killing hit
@@ -11260,7 +11262,6 @@ async function initCore(runtimeContext) {
             window._pswShowBlockFlash?.('enemy');
             _startSwordBounce();
             _opp.onBlocked();
-            hitFeel.impact('light');
             _swingHitOccurred = true;
             _pvpLastSwordHitAt.set(_opp.id, _nowMsD);
             break; // the swing is spent
@@ -11270,7 +11271,6 @@ async function initCore(runtimeContext) {
             if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
             _sweepDir.normalize();
             _opp.onHit(1, _sweepDir);
-            hitFeel.impact('hit');
             if (!_opp.ownBlood && _opp.model) playHitReaction(_opp.model); // (bots react themselves)
             if (!_opp.ownBlood) spawnBloodBurst(scene, _opp.center, { groundY: _opp.position.y, intensity: 0.8 });
             audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
@@ -11294,13 +11294,13 @@ async function initCore(runtimeContext) {
         const _townSwingDir = _psw.tipHistory.length
           ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
           : new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
-        if (town.trySwordHit(_tipWorld, _townSwingDir)) { _swingHitOccurred = true; hitFeel.impact('light'); }
+        if (town.trySwordHit(_tipWorld, _townSwingDir)) _swingHitOccurred = true;
       }
       // Story: a swing at a tree / log chops it (Town's townTrees.js — wood for the canoe)
       if (!_wandOut && !playerDead && story?.isActive() && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld
         && _tipWorld.distanceTo(_psw.prevTipWorld) > (window.phoneSwordSwingCfg?.minSweepDist ?? 0.015)
         && (window._pswDebugSpeed ?? 0) >= (window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000)) {
-        if (story.trySwordHit(_tipWorld)) { _swingHitOccurred = true; hitFeel.impact('light'); }
+        if (story.trySwordHit(_tipWorld)) _swingHitOccurred = true;
       }
       // Hidden stage chest: a sword swipe through it opens it (a random prize)
       if (!_wandOut && !playerDead && stageChests.trySwordHit(_playerBladePoints, _playerMovingFast)) {
@@ -11937,8 +11937,7 @@ async function initCore(runtimeContext) {
             const _str = _psw.swingStrength || 2;
             const _dmg = _str === 1 ? 1 : _str === 3 ? 4 : 2;
             const _kbSpeed = _str === 1 ? _baseKB.horizSpeed * 0.4 : _str === 3 ? _baseKB.horizSpeed * 1.6 : _baseKB.horizSpeed;
-            const _killed = _he.applyDamage(_dmg);
-            hitFeel.impact(_killed ? 'kill' : _str === 3 ? 'heavy' : _str === 1 ? 'light' : 'hit');
+            _he.applyDamage(_dmg);
             _he.applyDirectKnockback({ direction: _hitDir, ..._baseKB, horizSpeed: _kbSpeed });
             audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
             _he._playerSwordLastHit = _nowMs2;

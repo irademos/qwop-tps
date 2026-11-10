@@ -1,17 +1,16 @@
-// Hit feel: hit-stop (the world freezes for a few frames on impact) + a tiny camera shake.
-// `impact(kind)` from a hit; the game loop asks `frozen()` each frame (true → render only, no
-// simulation) and wraps `renderer.render` in `applyShake(camera, dt)` / `restoreShake(camera)`,
-// so the shake is an offset on top of wherever the camera was put — it never builds up.
-// Off with localStorage `sq:hitFeel` = '0' (Settings → Display → Hit Shake & Freeze).
+// Hit feel: hit-stop (the world freezes for a few frames) + a camera shake on explosions —
+// bombs and fire blasts (`explosion(kind, dist)`, from spawnExplosion's listener; weaker the
+// further from the player, nothing past `far`). The game loop asks `frozen()` each frame (true →
+// render only, no simulation) and wraps `renderer.render` in `applyShake(camera, dt)` /
+// `restoreShake(camera)`, so the shake is an offset on top of wherever the camera was put — it
+// never builds up. Off with localStorage `sq:hitFeel` = '0' (Settings → Display → Hit Shake & Freeze).
 import * as THREE from 'three';
 
-// Per kind: freeze seconds, shake amplitude (m), shake seconds
+// Per kind: freeze seconds, shake amplitude (m), shake seconds, at full strength within `near` m,
+// fading to nothing at `far` m; the freeze only happens within `freezeDist` m
 export const HIT_FEEL = {
-  light: { freeze: 0.07, amp: 0.08, dur: 0.22 },   // chop, town hit, blocked swing
-  hit: { freeze: 0.14, amp: 0.16, dur: 0.3 },      // a sword hit
-  heavy: { freeze: 0.2, amp: 0.24, dur: 0.38 },    // a strong swing
-  kill: { freeze: 0.26, amp: 0.32, dur: 0.45 },    // the killing blow
-  hurt: { freeze: 0, amp: 0.2, dur: 0.32 },        // the player was hit (shake only)
+  bomb: { freeze: 0.2, amp: 0.32, dur: 0.5, near: 4, far: 26, freezeDist: 12 },
+  magic: { freeze: 0.12, amp: 0.2, dur: 0.36, near: 3, far: 18, freezeDist: 8 },
 };
 // (a long frame can't hold the freeze longer than this)
 const MAX_FREEZE_S = 0.3;
@@ -36,14 +35,21 @@ export function createHitFeel() {
   let applied = false;
   let roll = 0;
 
-  const impact = (kind = 'hit', { freeze = true } = {}) => {
+  // An explosion `dist` m from the player
+  const explosion = (kind = 'bomb', dist = 0) => {
     if (!isHitFeelEnabled()) return;
-    const k = HIT_FEEL[kind] || HIT_FEEL.hit;
-    const now = performance.now();
-    if (freeze && k.freeze > 0) freezeUntil = Math.max(freezeUntil, now + Math.min(k.freeze, MAX_FREEZE_S) * 1000);
+    const k = HIT_FEEL[kind] || HIT_FEEL.bomb;
+    const d = Number.isFinite(dist) ? dist : 0;
+    const f = THREE.MathUtils.clamp(1 - (d - k.near) / (k.far - k.near), 0, 1);
+    if (f <= 0) return;
+    if (k.freeze > 0 && d <= k.freezeDist) {
+      const s = Math.min(k.freeze * Math.min(1, 0.4 + f), MAX_FREEZE_S);
+      freezeUntil = Math.max(freezeUntil, performance.now() + s * 1000);
+    }
+    const amp = k.amp * f;
     // A bigger shake replaces a smaller one still going; a smaller one doesn't cut a big one short
     const left = shakeDur > 0 ? shakeAmp * (1 - shakeT / shakeDur) : 0;
-    if (k.amp >= left) { shakeAmp = k.amp; shakeDur = k.dur; shakeT = 0; seed = Math.random() * 100; }
+    if (amp >= left) { shakeAmp = amp; shakeDur = k.dur; shakeT = 0; seed = Math.random() * 100; }
   };
 
   const frozen = () => performance.now() < freezeUntil;
@@ -79,5 +85,5 @@ export function createHitFeel() {
 
   const cancel = () => { freezeUntil = 0; shakeDur = 0; };
 
-  return { impact, frozen, applyShake, restoreShake, cancel };
+  return { explosion, frozen, applyShake, restoreShake, cancel };
 }
