@@ -364,6 +364,7 @@ export function updateProjectiles({
           const damage = getDamage(proj);
           const dir = vel.clone().normalize();
           const killed = enemy.applyDamage(Math.max(1, Math.round(damage)));
+          if (!enemy._tutorial) window._phoneBuzz?.(killed ? 'kill' : 'hit'); // (the phone buzzes)
           if (killed) {
             enemy.applyDirectKnockback({ direction: dir, horizSpeed: 9, upVelocity: 3.5, torqueMag: 70, ragdoll: true });
           } else {

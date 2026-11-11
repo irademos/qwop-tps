@@ -204,6 +204,7 @@ const FREEZE_SHAKE_RATE = 1.6;           // …and melts this many extra seconds
 // Wand-casting enemies: a rising share of the swordsmen, from the stage after the first boss
 // with a wand (FIRST_WAND_BOSS_STAGE, the wizard)
 const PS_WAND_ENEMY_FROM_STAGE = FIRST_WAND_BOSS_STAGE + 1;
+const PHONE_BUZZ_BOMB_DIST = 14; // m: a bomb going off this near the player buzzes the phone (_phoneBuzz)
 const WAND_ENEMY_RANGE = { min: 6, max: 11 };
 
 const ROAD_LIGHT_GRID_SIZE = 3;
@@ -1029,6 +1030,7 @@ async function initCore(runtimeContext) {
   };
   // Block flash helper — called with 'player' (green) or 'enemy' (gray)
   window._pswShowBlockFlash = function(who) {
+    window._phoneBuzz?.('block');
     const id = who === 'player' ? 'sword-block-flash-player' : 'sword-block-flash-enemy';
     const svgId = who === 'player' ? 'sword-block-svg-player' : 'sword-block-svg-enemy';
     const el = document.getElementById(id);
@@ -3955,7 +3957,9 @@ async function initCore(runtimeContext) {
   window.hitFeel = hitFeel;
   setExplosionListener((pos, scale) => {
     if (!playerModel || !pos) return;
-    hitFeel.explosion(scale < 0.7 ? 'magic' : 'bomb', playerModel.position.distanceTo(pos));
+    const dist = playerModel.position.distanceTo(pos);
+    hitFeel.explosion(scale < 0.7 ? 'magic' : 'bomb', dist);
+    if (scale >= 0.7 && dist <= PHONE_BUZZ_BOMB_DIST) window._phoneBuzz?.('bomb');
   });
   const comboMeter = createComboMeter({
     onCashOut: (coins) => {
@@ -3985,7 +3989,10 @@ async function initCore(runtimeContext) {
     getPvpTargets: () => (_wandActive || _rodActive || _oarActive ? [] : _getPvpTargets()),
     canCombo: () => !_classicMode && !playerDead && !_psBossTalking && !isPlayerFrozen()
       && !showdownTutorial?.isActive?.() && !(town?.isActive() && town.isIndoors?.()),
-    onTargetHit: (t) => { if (_psStageActive && !t._tutorial) comboMeter.hit(); },
+    onTargetHit: (t) => {
+      if (_psStageActive && !t._tutorial) comboMeter.hit();
+      window._phoneBuzz?.(t.isDead ? 'kill' : 'hit');
+    },
     onPvpHit: (o) => {
       if (!o.ownBlood && o.model) playHitReaction(o.model);
       if (!o.ownBlood) spawnBloodBurst(scene, o.center, { groundY: o.position.y, intensity: 0.8 });
@@ -4019,6 +4026,7 @@ async function initCore(runtimeContext) {
     if (!Number.isFinite(previousHealth) || !Number.isFinite(nextHealth)) return;
     if (nextHealth >= previousHealth || !playerModel?.parent) return;
     comboMeter.end();
+    window._phoneBuzz?.(nextHealth <= 0 ? 'kill' : 'hit');
     playerModel.getWorldPosition(playerBloodOrigin);
     const groundY = playerBloodOrigin.y;
     playerBloodOrigin.y += 0.85;
@@ -4543,6 +4551,22 @@ async function initCore(runtimeContext) {
       if (Number.isFinite(opts.yaw)) enemy.group.rotation.y = opts.yaw;
       if (opts.pemberton) _psSpawnPemberton(enemy);
       else if (opts.stageBoss) _psSpawnStageBoss(enemy, opts.stageBoss);
+      else if (opts.archer) {
+        // An archer (always a tree creature): the bow only — the boss fighter logic with a gun
+        const fighter = createBossFighter({
+          ..._bossFighterCtx(enemy), name: '', hud: false, glow: false, bowOnly: true,
+          gear: { gun: true, bombs: !!opts.archer.bombs },
+        });
+        enemy.onAfterUpdate = () => fighter.update();
+      } else if (opts.wand && opts.wandBubble) {
+        // A wizard's bubble (the wizards are the only enemies with one): now and then after a hit
+        const fighter = createBossFighter({
+          ..._bossFighterCtx(enemy), name: '', hud: false, glow: false, bubbleOnly: true,
+          gear: { bubble: true },
+          bubbleChance: opts.wandBubble.chance, bubbleCooldownMs: opts.wandBubble.cooldownMs,
+        });
+        enemy.onAfterUpdate = () => fighter.update();
+      }
     }
     hordeEnemies.push(enemy);
     return enemy;
@@ -4674,7 +4698,7 @@ async function initCore(runtimeContext) {
   const _psSpawnStageBoss = (enemy, { stage, key }) => {
     _psBoss?.dispose();
     const talk = stageBossTalk(stage, MATCH_CHARACTERS[key], { afterStory: stage > PEMBERTON_STAGE, key });
-    const boss = createStageBoss({ ..._bossFighterCtx(enemy), name: talk.name, gear: stageBossGear(stage) });
+    const boss = createStageBoss({ ..._bossFighterCtx(enemy), name: talk.name, gear: stageBossGear(stage, key) });
     boss.talk = talk;
     enemy.onCast = (cast) => _castEnemySpell(enemy, cast); // (its wand spells)
     _psTrackBoss(boss, enemy);
@@ -4841,7 +4865,10 @@ async function initCore(runtimeContext) {
   // stageBoss.js): used while still locked (else, with others still locked, a random locked one)
   // — or always when an earlier stage has that character too (the frog fisher at 4, Wren at 8)
   const PS_STORY_BOSSES = { 2: 'pumpkin', 3: 'gemhorn', 4: 'frog', 5: 'tree', 7: 'antler', 8: 'antler' };
-  const PS_WAND_ENEMY_CHARACTER = 'wizard'; // wand casters are always wizards
+  const PS_WAND_ENEMY_CHARACTER = 'wizard'; // wand casters are always wizards (and only wizards)
+  const PS_ARCHER_CHARACTER = 'tree';       // archers are always tree creatures (and only tree creatures)
+  // A wizard's bubble after a hit (Showdown stages: PS_WAND_BUBBLE; Endless: stronger by the wave — _endlessWandBubble)
+  const PS_WAND_BUBBLE = { chance: 0.35, cooldownMs: [12000, 18000] };
   const PS_BOSS_HEARTS = 3;          // stage 1 boss; +1 every PS_BOSS_HEARTS_EVERY stages
   const PS_BOSS_HEARTS_EVERY = 3;
   const PS_BOSS_MAX_HEARTS = 10;
@@ -4989,6 +5016,7 @@ async function initCore(runtimeContext) {
     }
     enemy.magicHits = (enemy.magicHits || 0) + 1;
     if (!enemy._tutorial && _psStageActive) comboMeter.hit();
+    window._phoneBuzz?.(enemy.isDead ? 'kill' : 'hit');
   };
   const _playerBlastTarget = {
     center: new THREE.Vector3(),
@@ -5786,7 +5814,13 @@ async function initCore(runtimeContext) {
     // Point `t` (0–1) of the way along the stage proper (after the walk out of the village)
     const _stageAt = (t) => path.at(lead + pathLen * t);
     _psEnemyQueue = [];
-    const _charPool = _psEnemyCharacterPool();
+    // (swordsmen / bombers: not the wizards — wand casters — nor the tree creatures — archers)
+    const _fullPool = _psEnemyCharacterPool();
+    const _charPool = _fullPool.filter((k) => k !== PS_WAND_ENEMY_CHARACTER && k !== PS_ARCHER_CHARACTER);
+    if (!_charPool.length) _charPool.push(PS_ENEMY_BASE_CHARACTER);
+    // Archers (tree creatures) once the tree creature is won, a rising share
+    const _archerChance = !_classicMode && _fullPool.includes(PS_ARCHER_CHARACTER)
+      ? Math.min(0.2, 0.08 + Math.max(0, stage - 5) * 0.012) : 0;
     if (!_classicMode && (!_psStageBoss || _psStageBoss.stage !== stage)) _psStageBoss = _psPickBoss(stage);
     if (_psStageBoss) _psStageBoss.spared = false; // (a retry: talks again)
     // The final stage is Pemberton alone, right where he stood (no coins or heart bubbles)
@@ -5825,8 +5859,10 @@ async function initCore(runtimeContext) {
         ? Math.min(0.25, 0.08 + (stage - PS_WAND_ENEMY_FROM_STAGE) * 0.015) : 0;
       const _bomber = !isBoss && Math.random() < _btChance;
       const _wand = !isBoss && !_bomber && Math.random() < _wandChance;
+      const _archer = !isBoss && !_bomber && !_wand && Math.random() < _archerChance;
       const charKey = isBoss ? _psStageBoss.key
         : _wand ? PS_WAND_ENEMY_CHARACTER
+        : _archer ? PS_ARCHER_CHARACTER
         : _charPool[Math.floor(Math.random() * _charPool.length)];
       // (a roam quest's final enemy is Pemberton — _psStageBoss.key 'villager')
       const _roamPemberton = isBoss && !!_psRoamQuest;
@@ -5836,6 +5872,7 @@ async function initCore(runtimeContext) {
         triggerDist: lead + pathLen * t - 10,
         bombThrower: _bomber,
         wand: _wand,
+        archer: _archer,
         characterUrl: _classicMode ? _classicMiiUrl() : MATCH_CHARACTERS[charKey].url,
         boss: isBoss,
         bossKey: isBoss ? charKey : null,
@@ -6060,7 +6097,7 @@ async function initCore(runtimeContext) {
       boss: _final
         ? `Pemberton (${PEMBERTON_HEARTS} ❤️)`
         : `Final enemy: ${_boss.label} (${_psBossHearts(stage)} ❤️`
-          + (stage === SPARED_STAGE ? ')' : ` ${stageBossGearIcons(stage)})`)
+          + (stage === SPARED_STAGE ? ')' : ` ${stageBossGearIcons(stage, _psStageBoss.key)})`)
           + (_psStageBoss.unlocks && stage !== SPARED_STAGE ? ' — beat it to unlock!' : ''),
       finalBoss: _final,
       intro: stage === 1 && !_psIntroSeen,
@@ -7507,6 +7544,40 @@ async function initCore(runtimeContext) {
   // a new connection while the old one may not have noticed it's dead yet: the new one wins,
   // and the old one closing later must not mark the phone as disconnected.
   let _phoneSwordConn = null;
+  // ── Phone buzz (vibration) on combat: a very short one on every hit, a little harder on a
+  // kill, harder on a bomb going off near the player (PHONE_BUZZ_BOMB_DIST), a double tap on a
+  // block. Sent to the phone controller (`buzz` message → navigator.vibrate in phone-sword.html),
+  // or played here with "Use This Device". A buzz doesn't cut off a stronger one still going.
+  const PHONE_BUZZ = {
+    hit: { pattern: [18], level: 1 },
+    block: { pattern: [14, 50, 14], level: 1 },
+    kill: { pattern: [55], level: 2 },
+    bomb: { pattern: [150, 40, 90], level: 3 },
+  };
+  let _phoneBuzzUntil = 0;
+  let _phoneBuzzLevel = 0;
+  let _phoneBuzzKind = null;
+  const _phoneBuzz = (kind) => {
+    const b = PHONE_BUZZ[kind];
+    if (!b) return;
+    const gyro = window.phoneSwordGyro;
+    const toPhone = !!(_phoneSwordConn?.open && gyro?.connected && !gyro?.localDevice);
+    const local = !!gyro?.localDevice && typeof navigator.vibrate === 'function';
+    if (!toPhone && !local) return;
+    const now = performance.now();
+    // (still buzzing: only a stronger one, or a block over a hit, takes over)
+    if (now < _phoneBuzzUntil && (b.level < _phoneBuzzLevel
+      || (b.level === _phoneBuzzLevel && (kind === _phoneBuzzKind || kind !== 'block')))) return;
+    _phoneBuzzUntil = now + b.pattern.reduce((t, ms) => t + ms, 0) + 30;
+    _phoneBuzzLevel = b.level;
+    _phoneBuzzKind = kind;
+    if (toPhone) {
+      try { _phoneSwordConn.send({ type: 'buzz', pattern: b.pattern }); } catch (_) { /* ignore */ }
+    } else {
+      try { navigator.vibrate(b.pattern); } catch (_) { /* ignore */ }
+    }
+  };
+  window._phoneBuzz = _phoneBuzz;
   const _attachPhoneSwordConn = (conn) => {
     const prev = _phoneSwordConn;
     _phoneSwordConn = conn;
@@ -8916,7 +8987,15 @@ async function initCore(runtimeContext) {
   };
   const _endlessKindCount = (kind, w) => (w < ENDLESS_FROM[kind] ? 0
     : Math.min(ENDLESS_KIND_GROWTH[kind].max, 1 + Math.floor((w - ENDLESS_FROM[kind]) / ENDLESS_KIND_GROWTH[kind].every)));
-  const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'tree'];
+  // (swordsmen / bombers / shield bearers: wand casters are wizards, archers tree creatures;
+  // a champion can be any of them)
+  const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn'];
+  const ENDLESS_CHAMPION_CHARACTERS = [...ENDLESS_CHARACTERS, 'tree', 'wizard'];
+  // A wizard's bubble in Endless: more often, and sooner again, the harder the wave
+  const _endlessWandBubble = (w) => ({
+    chance: Math.min(0.85, 0.35 + 0.04 * (w - ENDLESS_FROM.wand)),
+    cooldownMs: [Math.max(5000, 12000 - 500 * w), Math.max(8000, 18000 - 700 * w)],
+  });
   const _endlessWave = (w) => ({
     count: Math.min(40, 5 + 2 * w),
     maxAlive: Math.min(12, 3 + Math.floor(w / 2)),
@@ -9172,8 +9251,10 @@ async function initCore(runtimeContext) {
     const W = e.def;
     // (the next of the wave's line-up — taken off it once it's really spawned)
     const kind = champion ? 'champion' : (e.kinds?.[e.kinds.length - 1] ?? 'sword');
+    const pool = champion ? ENDLESS_CHAMPION_CHARACTERS : ENDLESS_CHARACTERS;
     const charKey = kind === 'wand' ? PS_WAND_ENEMY_CHARACTER
-      : ENDLESS_CHARACTERS[Math.floor(Math.random() * ENDLESS_CHARACTERS.length)];
+      : kind === 'archer' ? PS_ARCHER_CHARACTER
+      : pool[Math.floor(Math.random() * pool.length)];
     const url = MATCH_CHARACTERS[charKey].url;
     if (!isCharacterModelSettled(url)) { preloadCharacterModel(url); return false; }
     const pos = _endlessSpawnSpot();
@@ -9182,13 +9263,15 @@ async function initCore(runtimeContext) {
     const enemy = _spawnHordeEnemy({
       position: pos, hearts, speedScale: W.speed,
       bombThrower: kind === 'bomber', wand: kind === 'wand', characterUrl: url,
+      wandBubble: kind === 'wand' ? _endlessWandBubble(e.wave) : null,
+      archer: kind === 'archer' ? { bombs: e.wave >= ENDLESS_FROM.gearBombs && Math.random() < 0.3 } : null,
       champion,
       swingChance: champion ? Math.min(0.75, _psSwingChance(W.diff) + PS_BOSS_SWING_BONUS) : undefined,
     });
     enemy.group.rotation.y = Math.atan2(playerModel.position.x - pos.x, playerModel.position.z - pos.z);
     if (!champion) enemy.chaseVia = _psEnemyChaseVia; // (keep to the walk when chasing from a way off)
     if (champion) {
-      const gear = stageBossGear(1 + e.wave / ENDLESS_CHAMPION_EVERY);
+      const gear = stageBossGear(1 + e.wave / ENDLESS_CHAMPION_EVERY, charKey);
       const boss = createBossFighter({
         ..._bossFighterCtx(enemy), name: `Champion of wave ${e.wave}`, gear,
         scale: STAGE_BOSS_SCALE, swordScale: 1.12, bodyHitRadius: 0.75, bodyHitCenterY: 0.95,
@@ -9196,14 +9279,9 @@ async function initCore(runtimeContext) {
       if (gear.wand) enemy.onCast = (cast) => _castEnemySpell(enemy, cast);
       _psBoss?.dispose();
       _psTrackBoss(boss, enemy);
-    } else if (kind === 'archer' || kind === 'shield') {
-      const gear = kind === 'archer'
-        ? { gun: true, bombs: e.wave >= ENDLESS_FROM.gearBombs && Math.random() < 0.3 }
-        : { shield: true, bombs: e.wave >= ENDLESS_FROM.gearBombs && Math.random() < 0.3 };
-      const fighter = createBossFighter({
-        ..._bossFighterCtx(enemy), name: '', gear, hud: false, glow: false,
-        ...(kind === 'archer' ? { bowOnly: true } : {}),
-      });
+    } else if (kind === 'shield') {
+      const gear = { shield: true, bombs: e.wave >= ENDLESS_FROM.gearBombs && Math.random() < 0.3 };
+      const fighter = createBossFighter({ ..._bossFighterCtx(enemy), name: '', gear, hud: false, glow: false });
       enemy.onAfterUpdate = () => fighter.update();
     }
     return true;
@@ -9334,7 +9412,7 @@ async function initCore(runtimeContext) {
     _endlessFreshLoadout();
     setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected]?.url ?? glbCharacterConfig.villageBoyUrl);
     _endlessToArena();
-    [...ENDLESS_CHARACTERS, PS_WAND_ENEMY_CHARACTER].forEach((k) => preloadCharacterModel(MATCH_CHARACTERS[k].url));
+    [...ENDLESS_CHAMPION_CHARACTERS].forEach((k) => preloadCharacterModel(MATCH_CHARACTERS[k].url));
     _endlessStats = _endlessMergeStats(_endlessStats, _endlessLoadLocal());
     _endlessShowPanel();
     // (the profile's best, when the network answers: the card updates if it's still up)
@@ -11381,6 +11459,7 @@ async function initCore(runtimeContext) {
                 if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
                 _sweepDir.normalize();
                 const _killingBlow = _he.applyDamage(1);
+                window._phoneBuzz?.(_killingBlow ? 'kill' : 'hit');
                 if (!_he._tutorial && _psStageActive) comboMeter.hit();
                 if (!_he._tutorial) swordCombo.noteHit(_nowSecPS);
                 if (_killingBlow) {
@@ -11459,6 +11538,7 @@ async function initCore(runtimeContext) {
             if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
             _sweepDir.normalize();
             _opp.onHit(1, _sweepDir);
+            window._phoneBuzz?.('hit');
             if (!_opp.ownBlood && _opp.model) playHitReaction(_opp.model); // (bots react themselves)
             if (!_opp.ownBlood) spawnBloodBurst(scene, _opp.center, { groundY: _opp.position.y, intensity: 0.8 });
             audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 120 });
@@ -11486,7 +11566,7 @@ async function initCore(runtimeContext) {
           : new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
         const _townHit = town.trySwordHit(_tipWorld, _townSwingDir, _swingId);
         if (_townHit) _swingHitOccurred = true;
-        if (_townHit === 'hit') swordCombo.noteHit(_nowSecPS);
+        if (_townHit === 'hit') { swordCombo.noteHit(_nowSecPS); window._phoneBuzz?.('hit'); }
       }
       // Story: a swing at a tree / log chops it (Town's townTrees.js — wood for the canoe)
       if (!_wandOut && !playerDead && story?.isActive() && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld
@@ -11551,6 +11631,8 @@ async function initCore(runtimeContext) {
           const _psSpawned = _spawnHordeEnemy({
             position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower,
             wand: _qe.wand,
+            wandBubble: _qe.wand && !_tutorialActive ? PS_WAND_BUBBLE : null,
+            archer: _qe.archer ? {} : null,
             characterUrl: _qe.characterUrl,
             nameTag: _qe.nameTag,
             swordDamage: _classicMode ? CLASSIC_ENEMY_SWORD_DAMAGE : undefined,

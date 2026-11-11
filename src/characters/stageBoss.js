@@ -12,17 +12,21 @@
 // pembertonBoss.js) with more gear every stage (stageBossGear).
 
 // Gear added stage by stage: stage 1 sword only, stage 2 + shield, stage 3 + bubble, …
+// The bubble is the wizards' alone (BUBBLE_CHARACTER): other bosses skip it.
 export const STAGE_BOSS_GEAR_ORDER = ['shield', 'bubble', 'bombs', 'gun', 'wand'];
+export const BUBBLE_CHARACTER = 'wizard';
 const GEAR_ICONS = { shield: '🛡️', bubble: '🫧', bombs: '💣', gun: '🏹', wand: '🪄' };
-export function stageBossGear(stage) {
+// characterKey: the boss's MATCH_CHARACTERS key (the bubble only for a wizard)
+export function stageBossGear(stage, characterKey = null) {
   const n = Math.max(0, Math.min(STAGE_BOSS_GEAR_ORDER.length, Math.floor(stage) - 1));
   const gear = {};
   STAGE_BOSS_GEAR_ORDER.forEach((k, i) => { gear[k] = i < n; });
+  if (characterKey !== BUBBLE_CHARACTER) gear.bubble = false;
   return gear;
 }
 /** "🗡️🛡️🫧" — what the stage's boss fights with (village banner). */
-export function stageBossGearIcons(stage) {
-  const gear = stageBossGear(stage);
+export function stageBossGearIcons(stage, characterKey = null) {
+  const gear = stageBossGear(stage, characterKey);
   return `🗡️${STAGE_BOSS_GEAR_ORDER.filter((k) => gear[k]).map((k) => GEAR_ICONS[k]).join('')}`;
 }
 /** First stage whose boss has the wand (the wizard; wand enemies come after it). */

@@ -949,6 +949,10 @@ Boost</button>
 
         myConn.on('data', (data) => {
           if (data && data.type === 'status') applyStatus(data);
+          // A buzz from the game: a hit, a kill, a bomb going off near, a block (_phoneBuzz)
+          else if (data && data.type === 'buzz' && Array.isArray(data.pattern) && navigator.vibrate) {
+            try { navigator.vibrate(data.pattern.slice(0, 8).map((ms) => Math.max(0, Math.min(400, Number(ms) || 0)))); } catch (_) { /* ignore */ }
+          }
         });
 
         myConn.on('open', () => {
