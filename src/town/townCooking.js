@@ -89,6 +89,7 @@ export function installTownCooking(T, ctx) {
     if (T.cooking || !canMake(r)) return;
     const p = T.playerPos();
     T.cooking = { recipe: r, left: r.secs, x: p.x, z: p.z };
+    ctx.playSfx?.('match');
     T.feedLine(`${GOODS[r.id].label} on the fire…`);
   };
   const stopCooking = () => { T.cooking = null; };

@@ -433,6 +433,7 @@ export function installTownLaw(T, ctx) {
     if (!T.jail || T.lockpick.isOpen()) return;
     T.lockpick.start((success) => {
       if (!T.jail) return;
+      ctx.playSfx?.(success ? 'unlock' : 'locked');
       if (success) {
         endJail('Click. The door swings open…');
         T.law.stars = Math.max(T.law.stars, 1);

@@ -575,6 +575,7 @@ export function createStoryMode(ctx) {
     tracker.render(quest(view()));
   };
   installTownFishing(F, {
+    playSfx: (kind, at) => ctx.playSfx?.(kind, at),
     scene: ctx.scene,
     getPlayerModel: ctx.getPlayerModel,
     getRodModel: ctx.getRodModel,

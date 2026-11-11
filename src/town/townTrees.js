@@ -324,6 +324,7 @@ export function installTownTrees(T, ctx) {
         if (T.bagRoom() <= 0) { ctx.playSfx('chop'); T.bagFullNote(); return true; }
         splitLog(t, log);
         T.gain('wood');
+        ctx.playSfx?.('wood');
         T.feedLine(`+1 Wood (${T.goods.wood})`);
         if (T.net && T.netMode !== 'off' && T.netMode !== 'joining') T.net.broadcast({ w: 1, op: 'tree', t: String(t.id), a: 'log', k: log.k });
         return true;

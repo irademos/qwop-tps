@@ -81,6 +81,7 @@ export function installTownCanoe(T, ctx) {
     if (T.held) T.dropHeld();
     canoe.aboard = true;
     canoe.stop();
+    ctx.playSfx?.('splash');
     unregisterFloor ??= registerTerrainHeightOverride(floorAt);
     const s = canoe.standPoint();
     ctx.teleport(s.x, s.z, canoe.yaw);

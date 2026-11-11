@@ -30,6 +30,33 @@ const MEDIA_GESTURE_EVENTS = ['click', 'touchend', 'keydown'];
 // A tiny silent WAV, played once inside a gesture to unlock the music element
 const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
 
+// Named one-shot sounds (public/assets/audio/SFX/Foley/) — audioManager.playSound(name, opts):
+// [file, default volume, cooldown ms (repeats closer than that are dropped)]
+export const GAME_SOUNDS = {
+  coin: ['coin_jingle_small.ogg', 0.45, 70],        // coins gained (pickups, rewards, gifts)
+  chestPrize: ['gem_collect.ogg', 0.5, 300],         // a mystery / hidden chest's prize
+  buy: ['coin_jingle_small.ogg', 0.6, 120],          // a purchase
+  doorOpen: ['creaky_door_short.ogg', 0.45, 400],    // Town: walking in through a door
+  doorClose: ['door_close.ogg', 0.45, 400],          // Town: walking out of a room
+  knock: ['door_knock.ogg', 0.6, 600],               // Town: knocking on a door
+  unlock: ['lock_unlock.ogg', 0.6, 300],             // a lock picked / jail let out
+  locked: ['lock_quick.ogg', 0.55, 500],             // a locked door tried / a slipped pick
+  eat: ['munching_food.ogg', 0.6, 400],              // eating food
+  drink: ['drink_slurp.ogg', 0.55, 400],             // a potion
+  splash: ['water_splashing.ogg', 0.45, 300],        // a fish landed / stepping into the canoe
+  wood: ['wood_small_gather.ogg', 0.55, 150],        // a log split for wood / gathering
+  match: ['light_match.ogg', 0.5, 600],              // cooking started over the fire
+  book: ['map_open.ogg', 0.5, 300],                  // Town book opened
+  equip: ['weapon_equip.ogg', 0.4, 120],             // bow / shield out
+  pickup: ['weapon_pick_up.ogg', 0.5, 120],          // a battle pickup
+  swing: ['swipe.ogg', 0.28, 220],                   // a sword swing
+  roll: ['whoosh_1.ogg', 0.5, 200],                  // a dodge roll
+  twang: ['elastic_twang.ogg', 0.45, 80],            // the bow loosing an arrow
+  thud: ['harsh_thud.ogg', 0.7, 400],                // a tree hitting the ground
+  clang: ['metal_clang.ogg', 0.5, 120],              // a shield taking a hit
+  punch: ['punch.ogg', 0.55, 150],                   // townsfolk brawling
+};
+
 export class AudioManager {
   constructor(options = {}) {
     this.background = null;
@@ -350,7 +377,8 @@ export class AudioManager {
       'SFX/Explosions/Explosion 1.ogg',
       'SFX/Spells/Spell Impact 1.ogg',
       'SFX/Spells/Waterspray 1.ogg',
-      ...this.ouchSounds
+      ...this.ouchSounds,
+      ...['coin', 'swing', 'roll', 'twang', 'clang'].map((n) => `SFX/Foley/${GAME_SOUNDS[n][0]}`)
     ];
     await Promise.allSettled(common.map(path => this.loadBuffer(path)));
   }
@@ -430,6 +458,14 @@ export class AudioManager {
   cleanupEndedNode(entry) {
     if (!entry) return;
     this.activeSFXNodes.delete(entry);
+  }
+
+  // A GAME_SOUNDS sound: opts { volume (× its default), at, falloff, cooldownMs }
+  playSound(name, { volume = 1, at = null, falloff, cooldownMs } = {}) {
+    const def = GAME_SOUNDS[name];
+    if (!def) return null;
+    const [file, vol, cd] = def;
+    return this.playSFX(`SFX/Foley/${file}`, vol * volume, { cooldownKey: `snd-${name}`, cooldownMs: cooldownMs ?? cd, at, falloff });
   }
 
   async playSFX(path, volume = 0.7, options = {}) {
