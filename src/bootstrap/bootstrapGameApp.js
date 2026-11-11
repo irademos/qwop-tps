@@ -4559,7 +4559,7 @@ async function initCore(runtimeContext) {
         });
         enemy.onAfterUpdate = () => fighter.update();
       } else if (opts.wand && opts.wandBubble) {
-        // A wizard's bubble (the wizards are the only enemies with one): now and then after a hit
+        // A wizard's bubble (among regular enemies only the wizards have one; bosses / champions too): now and then after a hit
         const fighter = createBossFighter({
           ..._bossFighterCtx(enemy), name: '', hud: false, glow: false, bubbleOnly: true,
           gear: { bubble: true },
@@ -4698,7 +4698,7 @@ async function initCore(runtimeContext) {
   const _psSpawnStageBoss = (enemy, { stage, key }) => {
     _psBoss?.dispose();
     const talk = stageBossTalk(stage, MATCH_CHARACTERS[key], { afterStory: stage > PEMBERTON_STAGE, key });
-    const boss = createStageBoss({ ..._bossFighterCtx(enemy), name: talk.name, gear: stageBossGear(stage, key) });
+    const boss = createStageBoss({ ..._bossFighterCtx(enemy), name: talk.name, gear: stageBossGear(stage) });
     boss.talk = talk;
     enemy.onCast = (cast) => _castEnemySpell(enemy, cast); // (its wand spells)
     _psTrackBoss(boss, enemy);
@@ -6097,7 +6097,7 @@ async function initCore(runtimeContext) {
       boss: _final
         ? `Pemberton (${PEMBERTON_HEARTS} ❤️)`
         : `Final enemy: ${_boss.label} (${_psBossHearts(stage)} ❤️`
-          + (stage === SPARED_STAGE ? ')' : ` ${stageBossGearIcons(stage, _psStageBoss.key)})`)
+          + (stage === SPARED_STAGE ? ')' : ` ${stageBossGearIcons(stage)})`)
           + (_psStageBoss.unlocks && stage !== SPARED_STAGE ? ' — beat it to unlock!' : ''),
       finalBoss: _final,
       intro: stage === 1 && !_psIntroSeen,
@@ -9271,7 +9271,7 @@ async function initCore(runtimeContext) {
     enemy.group.rotation.y = Math.atan2(playerModel.position.x - pos.x, playerModel.position.z - pos.z);
     if (!champion) enemy.chaseVia = _psEnemyChaseVia; // (keep to the walk when chasing from a way off)
     if (champion) {
-      const gear = stageBossGear(1 + e.wave / ENDLESS_CHAMPION_EVERY, charKey);
+      const gear = stageBossGear(1 + e.wave / ENDLESS_CHAMPION_EVERY);
       const boss = createBossFighter({
         ..._bossFighterCtx(enemy), name: `Champion of wave ${e.wave}`, gear,
         scale: STAGE_BOSS_SCALE, swordScale: 1.12, bodyHitRadius: 0.75, bodyHitCenterY: 0.95,
