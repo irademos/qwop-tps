@@ -12,6 +12,7 @@
 // pembertonBoss.js) with more gear every stage (stageBossGear).
 
 // Gear added stage by stage: stage 1 sword only, stage 2 + shield, stage 3 + bubble, …
+// (bosses and champions of any character; among regular enemies only the wizards have a bubble)
 export const STAGE_BOSS_GEAR_ORDER = ['shield', 'bubble', 'bombs', 'gun', 'wand'];
 const GEAR_ICONS = { shield: '🛡️', bubble: '🫧', bombs: '💣', gun: '🏹', wand: '🪄' };
 export function stageBossGear(stage) {

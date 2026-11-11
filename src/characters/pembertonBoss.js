@@ -222,7 +222,10 @@ export function createStageBoss(ctx) {
  *  autoStart                      — false: waits for start() (see createStageBoss)
  *  hud / glow                     — false: no health bar across the top / no red glow (battle bots)
  *  swordMs                        — [min, max] ms of each sword spell (default SWORD_MS)
- *  bowOnly                        — true (with gear.gun): only ever the bow, never the sword (Endless archers)
+ *  bowOnly                        — true (with gear.gun): only ever the bow, never the sword (archers)
+ *  bubbleOnly                     — true: only the bubble (gear.bubble) — the enemy keeps its own AI
+ *                                   (the wizard wand casters: EnemyPlayer's wand AI, no phases here)
+ *  bubbleChance / bubbleCooldownMs — after a hit: how often a bubble comes up / [min, max] ms before the next
  *  wandRange                      — { min, max } kept from the player while casting
  *  getTarget() → THREE.Object3D|null — the player model (null while dead)
  *  getWeaponGear() → { gun, shield } | null — as matchCtx.getWeaponGear (Multiplayer battles)
@@ -304,7 +307,7 @@ export function createBossFighter(ctx) {
     }
     bubble.visible = true;
     bubbleUntil = now + BUBBLE_MS;
-    nextBubbleAt = bubbleUntil + randIn(BUBBLE_COOLDOWN_MS);
+    nextBubbleAt = bubbleUntil + randIn(ctx.bubbleCooldownMs ?? BUBBLE_COOLDOWN_MS);
     window.audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'boss-bubble', cooldownMs: 200 });
   };
 
@@ -320,7 +323,7 @@ export function createBossFighter(ctx) {
     }
     const killed = baseApplyDamage(amount);
     const now = performance.now();
-    if (gear.bubble && !enemy.isDead && now >= nextBubbleAt && Math.random() < BUBBLE_CHANCE
+    if (gear.bubble && !enemy.isDead && now >= nextBubbleAt && Math.random() < (ctx.bubbleChance ?? BUBBLE_CHANCE)
       && (!ctx.useBubble || ctx.useBubble())) raiseBubble(now);
     return killed;
   };
@@ -456,6 +459,7 @@ export function createBossFighter(ctx) {
   function start() {
     if (started || disposed) return;
     started = true;
+    if (ctx.bubbleOnly) { growFrom = performance.now() - GROW_MS; nextBubbleAt = 0; return; }
     enemy.script = null;
     enemy._attackPhase = 'decide';
     if (ctx.bodyHitRadius != null) enemy.bodyHitRadius = ctx.bodyHitRadius;
@@ -517,9 +521,9 @@ export function createBossFighter(ctx) {
       if (disposed || !started) return;
       const now = performance.now();
       const grow = Math.min(1, (now - growFrom) / GROW_MS);
-      if (grow < 1 || enemy.group.scale.y !== scale) applySize(grow);
+      if (!ctx.bubbleOnly && (grow < 1 || enemy.group.scale.y !== scale)) applySize(grow);
       // Glow once the character has loaded (sized for the character at scale 1: grows with it)
-      if (!glow && ctx.glow !== false && enemy._glbCharacter) glow = addRedGlow(enemy.group, { height: enemy.group.scale.y });
+      if (!glow && ctx.glow !== false && !ctx.bubbleOnly && enemy._glbCharacter) glow = addRedGlow(enemy.group, { height: enemy.group.scale.y });
       glow?.update(now / 1000);
       setHud(Math.max(0, enemy.hearts) / Math.max(1, enemy.maxHearts));
       if (bubble) {
@@ -531,6 +535,7 @@ export function createBossFighter(ctx) {
           bubble.material.opacity = left < 1000 && Math.floor(left / 150) % 2 === 0 ? 0.1 : 0.3;
         }
       }
+      if (ctx.bubbleOnly) return; // (its own AI does the rest)
       if (enemy.isDead) {
         if (held) {
           if (held.gunMesh) held.gunMesh.visible = false;
