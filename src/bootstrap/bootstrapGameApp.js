@@ -3711,6 +3711,7 @@ async function initCore(runtimeContext) {
       shield.mesh.visible = false;
       shield.localHoldOrigin = 'inventory';
       shield.holder = playerControls;
+      audioManager?.playSound('equip');
       updateShieldHealthHUD(entry[SHIELD_HEALTH_KEY], entry[SHIELD_MAX_HEALTH_KEY], entry.count);
       updateSettingsUI();
       return;
@@ -3753,6 +3754,7 @@ async function initCore(runtimeContext) {
       pistol.localHoldOrigin = 'inventory';
       pistol.holder = playerControls;
       setPlayerWeaponType(playerControls, pistol.type);
+      if (!_bowDraw.active) audioManager?.playSound('equip'); // (a draw has its own creak)
       playerControls.updateAmmoUI?.(true);
       playerControls.setAmmo?.(
         getPistolAmmoCount(),
@@ -3979,6 +3981,7 @@ async function initCore(runtimeContext) {
   _swordComboHint.className = 'sword-combo-hint';
   document.body.appendChild(_swordComboHint);
   let _swordComboHintTimer = null;
+  let _swingSoundId = 0; // (the last swing that whooshed)
   const swordCombo = createSwordCombo({
     scene,
     getPlayer: () => (playerDead ? null : playerModel),
@@ -4447,6 +4450,7 @@ async function initCore(runtimeContext) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     showCoinPopup(statsState.coins);
     showPickupToast('coins', value);
+    if (value > 0) audioManager?.playSound('coin');
   }
 
   playerControls = new PlayerControls({
@@ -5394,6 +5398,7 @@ async function initCore(runtimeContext) {
     playerControls.refreshActionButtons?.();
     playerRoll = { restoreIds };
     glbCharacter?.playAction(glbCharacterConfig.rollClip);
+    audioManager?.playSound('roll');
     return true;
   };
   playerControls.onSwipe = (dx, dy) => { tryPlayerRoll(dx, dy); };
@@ -7344,6 +7349,7 @@ async function initCore(runtimeContext) {
       if (dir && dir.lengthSq() > 1e-4 && playerControls.fireArrow(power, tip, dir.normalize())) {
         pistol.nocked = false;
         audioManager?.playSynth?.('bowRelease', 0.6 + 0.4 * power);
+        audioManager?.playSound('twang', { volume: 0.6 + 0.4 * power });
       }
     }
     pistol.draw = 0;
@@ -8095,6 +8101,7 @@ async function initCore(runtimeContext) {
       setStat('coins', nextCoins, { skipSave: true });
       showCoinPopup(statsState.coins);
       showPickupToast('coins', safeDelta);
+      if (safeDelta > 0) audioManager?.playSound('coin');
     },
     // Sword Showdown shop upgrades that are capped: true once the player can't buy more
     isShopItemMaxed: (itemId) => {
@@ -8133,8 +8140,10 @@ async function initCore(runtimeContext) {
         updatePsBombButton();
       } else if (itemId === 'life_potion') {
         setStat('health', statsState.maxHealthSegments, { skipSave: true });
+        audioManager?.playSound('drink');
       } else if (itemId === 'mana_potion') {
         setStat('mana', MAX_MANA, { skipSave: true });
+        audioManager?.playSound('drink');
       } else if (itemId === MAGIC_WAND_ITEM_ID) {
         addToInventory(MAGIC_WAND_ITEM_ID, 1);
         updateManaUI();
@@ -8312,6 +8321,7 @@ async function initCore(runtimeContext) {
     const prize = prizes.find((p) => (r -= p.w) < 0) || prizes[0];
     const text = prize.give();
     _villageSaved();
+    audioManager?.playSound('chestPrize');
     showPickupToast('coins', 1, '', { text: `${free ? 'Hidden Chest' : 'Mystery Chest'}: ${text}` });
     return { ok: true, emoji: prize.emoji, text };
   };
@@ -8343,6 +8353,7 @@ async function initCore(runtimeContext) {
       const meta = _villageMerchant.getMerchantItemMeta(itemId);
       if (!await _villageMerchant.buyMerchantItem(itemId)) return { ok: false };
       _villageSaved();
+      audioManager?.playSound('buy');
       showPickupToast(itemId, 1, '', { text: `Purchased ${meta.name} -${meta.price} coins`, icon: meta.icon });
       return { ok: true };
     },
@@ -9715,7 +9726,7 @@ async function initCore(runtimeContext) {
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'duel-hurt', cooldownMs: 200 });
     },
     onShieldHit: () => {
-      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.55, { cooldownKey: 'shield-hit', cooldownMs: 120 });
+      audioManager?.playSound('clang');
     },
     // Our block stopped the opponent's swing
     // (`attackerModel`: the other player whose swing it was — their blocked stagger)
@@ -9971,7 +9982,7 @@ async function initCore(runtimeContext) {
       updatePsBombButton();
       updatePsBubbleButton();
       updateManaUI();
-      audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.55, { cooldownKey: 'match-pickup', cooldownMs: 120 });
+      audioManager?.playSound('pickup');
       showPickupToast(_matchToastIcon[type] || type, 1, '', { text });
     },
     // Most Kills: back on our feet at `pose`, full health, sword only, a spawn bubble
@@ -10222,7 +10233,7 @@ async function initCore(runtimeContext) {
     else if (kind === 'shield') items.shield = MATCH_SHIELD_HEALTH;
     else if (kind === 'bomb') items.bombs += n;
     else if (kind === 'wand') { items.wand = true; items.mana = MAX_MANA; }
-    else if (kind === 'mana') { if (items.mana >= MAX_MANA) return false; items.mana = Math.min(MAX_MANA, items.mana + TOWN_MANA_REFILL); }
+    else if (kind === 'mana') { if (items.mana >= MAX_MANA) return false; items.mana = Math.min(MAX_MANA, items.mana + TOWN_MANA_REFILL); audioManager?.playSound('drink'); }
     else return false;
     const held = _heldWeaponId();
     _setTownItems(items);
@@ -10406,13 +10417,15 @@ async function initCore(runtimeContext) {
     _psWinHideTimer = setTimeout(() => _psWinOverlay.classList.add('hidden'), ms);
   };
   // Town's sound effects (also Story's — it reuses Town's chopping, fishing…)
+  // (kinds without a line here are GAME_SOUNDS names — src/audio/audioManager.js)
   const _townSfx = (kind, at = null) => {
     if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: at ? 'town-hit' : 'psw-hit', cooldownMs: 200, at });
     else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 300, at });
     else if (kind === 'fell') { // (a tree hitting the ground: a low boom under a thump)
       audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.12, { cooldownKey: 'town-fell', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
-      audioManager?.playSFX('SFX/Footsteps/Dirt/Dirt Walk 1.ogg', 0.9, { cooldownKey: 'town-fell-thud', cooldownMs: 600, at, falloff: { ref: 6, max: 60 } });
+      audioManager?.playSound('thud', { at, falloff: { ref: 6, max: 60 } });
     } else if (kind === 'unsheath') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.5);
+    else audioManager?.playSound(kind, { at });
   };
   town = createTownMode({
     net: townNet,
@@ -10542,7 +10555,7 @@ async function initCore(runtimeContext) {
     },
     spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
     // (`at`: where it happened — quieter further off, audioManager's distance falloff; none = the player's own)
-    playSfx: (kind, at = null) => _townSfx(kind, at), // (no coin sound: the coin pop-up shows)
+    playSfx: (kind, at = null) => _townSfx(kind, at),
     dropCoins: (pos, n) => {
       for (let i = 0; i < n; i++) {
         spawnCoinPickup(pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0, (Math.random() - 0.5) * 1.2)));
@@ -11353,6 +11366,11 @@ async function initCore(runtimeContext) {
       // Swings (each target is hit once per swing — quick swings land one after the other) +
       // the combo attack a 3-hit combo charges (src/combat/swordCombo.js)
       const _swingId = swordCombo.frame(_tipWorld, _psw.prevTipWorld, _playerMovingFast && !_wandOut && !playerDead, _nowSecPS);
+      // (a whoosh as each new swing starts)
+      if (_playerMovingFast && !_wandOut && !playerDead && _swingId != null && _swingId !== _swingSoundId) {
+        _swingSoundId = _swingId;
+        audioManager?.playSound('swing');
+      }
       // A swing to knock arrows / blasts back with (_swordParryDir — the parries below)
       if (_playerMovingFast && !_wandOut && !playerDead && _psw.prevTipWorld) {
         _swordParryStep.subVectors(_tipWorld, _psw.prevTipWorld);

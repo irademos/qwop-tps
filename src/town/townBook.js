@@ -136,7 +136,7 @@ export function installTownBook(T, ctx) {
     overlay.classList.toggle('hidden', !open);
     btn.classList.toggle('is-active', open);
     document.body.classList.toggle('town-book-open', open);
-    if (open) { T.toggleLog?.(false); showPage(page); } else restart();
+    if (open) { T.toggleLog?.(false); showPage(page); ctx.playSfx?.('book'); } else restart();
   };
   window.addEventListener('keydown', (e) => {
     if (!T.active || e.target?.closest?.('input, textarea, select')) return;

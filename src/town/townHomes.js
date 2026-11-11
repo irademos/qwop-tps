@@ -294,6 +294,7 @@ export function installTownHomes(T, ctx) {
   const lockedNote = (key, a) => {
     if (T.simT - (noteAt[key] ?? -1e9) < 4) return;
     noteAt[key] = T.simT;
+    if (a.why !== 'forSale') ctx.playSfx?.('locked');
     if (a.why === 'forSale') T.feedLine(`Your house — for sale, ${HOUSE_PRICE} coins. Buy it here at the door.`);
     else if (a.why === 'player') T.feedLine(`${a.owner.n || 'Another player'}'s home — locked.`);
     else if (a.why === 'kept') T.feedLine(`This house is kept for ${a.owner.n || 'another player'}.`);
@@ -304,6 +305,7 @@ export function installTownHomes(T, ctx) {
     T.knock = { key, at: T.simT };
     T.knockedAt[key] = T.simT;
     T.feedLine('Knock knock…');
+    ctx.playSfx?.('knock');
     T.actsAt = 0;
   };
   // Someone at home answers the door
@@ -352,7 +354,8 @@ export function installTownHomes(T, ctx) {
     T.actsAt = 0;
     T.lockpick.start((success) => {
       T.doorPick = null;
-      if (!success) { T.feedLine('Snap — the lock-pick broke.'); T.save(); return; }
+      if (!success) { ctx.playSfx?.('locked'); T.feedLine('Snap — the lock-pick broke.'); T.save(); return; }
+      ctx.playSfx?.('unlock');
       const victim = residents(homeOfRoom(key))[0] ?? null;
       T.crime('theft', victim);
       if (T.law.stars > 0) { T.feedLine('The lock gave — but you were seen.'); T.save(); return; }

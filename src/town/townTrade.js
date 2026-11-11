@@ -33,6 +33,7 @@ export function installTownTrade(T, ctx) {
     if (health >= max) { T.feedLine('You\'re not hungry.'); return; }
     T.goods[g] -= 1;
     ctx.heal(GOODS[g].heal);
+    ctx.playSfx?.('eat');
     T.renderGoods();
     T.feedLine(`Ate a ${GOODS[g].label.toLowerCase()}. +${GOODS[g].heal} health`);
   };
@@ -116,6 +117,7 @@ export function installTownTrade(T, ctx) {
     }
     const access = T.doorAccess(key);
     if (!access.open && !forced) { T.lockedNote(key, access); return; }
+    ctx.playSfx?.('doorOpen');
     T.fishing = null;
     T.stopFishingRig?.();
     T.dropHeld?.({ quiet: true });
@@ -141,6 +143,7 @@ export function installTownTrade(T, ctx) {
     ctx.setPositionConstraint(null);
     T.inRoom = null;
     rooms.setInside(null);
+    ctx.playSfx?.('doorClose');
     // (facing out of the room the way the player faced its doorway)
     ctx.teleportTurned(r.door.x, r.door.z, r.exitYaw);
     // (not straight back in: the door walks in again once the player has stepped away from it)
@@ -292,9 +295,10 @@ export function installTownTrade(T, ctx) {
     getState: stallItemState,
     buy: (key, id) => {
       if (!canShop(key) || stallItemState(key, id).blocked) return null;
-      if (key === 'shop' && GOODS[id]) return { ok: buyGood(id) };
-      if (id === 'chest') return openChest();
-      return { ok: buyGear(key, id) };
+      const res = key === 'shop' && GOODS[id] ? { ok: buyGood(id) }
+        : id === 'chest' ? openChest() : { ok: buyGear(key, id) };
+      if (res?.ok) ctx.playSfx?.(id === 'chest' ? 'chestPrize' : 'buy');
+      return res;
     },
     getPlayerPosition: () => ctx.getPlayerPosition(),
     setPlayerHidden: (hidden) => ctx.setPlayerHidden?.(hidden),
@@ -384,6 +388,7 @@ export function installTownTrade(T, ctx) {
       const { health, max } = ctx.getHealth();
       if (health >= max) return false;
       ctx.heal(max);
+      ctx.playSfx?.('drink');
     } else if (!ctx.grantItem(item.kind, item.n ?? 1)) return false;
     ctx.addCoins(-item.price);
     const k = keeperOf(key);
