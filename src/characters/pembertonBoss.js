@@ -222,6 +222,7 @@ export function createStageBoss(ctx) {
  *  autoStart                      — false: waits for start() (see createStageBoss)
  *  hud / glow                     — false: no health bar across the top / no red glow (battle bots)
  *  swordMs                        — [min, max] ms of each sword spell (default SWORD_MS)
+ *  bowOnly                        — true (with gear.gun): only ever the bow, never the sword (Endless archers)
  *  wandRange                      — { min, max } kept from the player while casting
  *  getTarget() → THREE.Object3D|null — the player model (null while dead)
  *  getWeaponGear() → { gun, shield } | null — as matchCtx.getWeaponGear (Multiplayer battles)
@@ -394,23 +395,27 @@ export function createBossFighter(ctx) {
   };
 
   const setPhase = (next, now) => {
+    if (ctx.bowOnly && gear.gun && next === 'sword') next = 'gun';
     if ((next === 'gun' || next === 'shield' || next === 'wand') && !gear[next]) next = 'sword';
     if ((next === 'gun' || next === 'shield') && !ensureHeld(next)) next = 'sword';
     phase = next;
     phaseUntil = now + (next === 'shield' ? Math.max(0, guardUntil - now)
       : randIn(next === 'gun' ? GUN_MS : next === 'wand' ? WAND_MS : swordMs));
+    // (bow only, but the bow isn't in hand yet — no gear models: try again shortly, sword sheathed)
+    const bowWait = ctx.bowOnly && gear.gun && next === 'sword';
+    if (bowWait) phaseUntil = now + 300;
     enemy.ranged = next === 'gun' ? GUN_RANGE : next === 'shield' ? SHIELD_RANGE
       : next === 'wand' ? (ctx.wandRange ?? GUN_RANGE) : null;
     enemy.gripTarget = next === 'gun' ? held.gripGun : next === 'shield' ? held.gripShield : null;
     if (gear.wand || wandModel) setWandOut(next === 'wand');
-    enemy._swordGroup.visible = next === 'sword' || next === 'wand';
+    enemy._swordGroup.visible = !bowWait && (next === 'sword' || next === 'wand');
     if (held) {
       if (held.gunMesh) held.gunMesh.visible = next === 'gun';
       if (held.shieldMesh) held.shieldMesh.visible = next === 'shield';
       setBowGlow(held.gunMesh, 0);
     }
     // (a block stance left over from the sword would still stop swings)
-    enemy._attackPhase = next === 'sword' ? 'decide' : 'idle';
+    enemy._attackPhase = next === 'sword' && !bowWait ? 'decide' : 'idle';
     if (next === 'gun') {
       nextShotAt = now + 500; // (gun up first)
     }
@@ -459,6 +464,7 @@ export function createBossFighter(ctx) {
     growFrom = ctx.autoStart === false ? now : now - GROW_MS;
     phase = 'sword';
     phaseUntil = now + randIn(swordMs);
+    if (ctx.bowOnly) setPhase('gun', now);
     nextBombAt = now + randIn(BOMB_MS);
     nextBubbleAt = 0;
     if (hud) {

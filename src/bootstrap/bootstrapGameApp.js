@@ -9202,7 +9202,7 @@ async function initCore(runtimeContext) {
         : { shield: true, bombs: e.wave >= ENDLESS_FROM.gearBombs && Math.random() < 0.3 };
       const fighter = createBossFighter({
         ..._bossFighterCtx(enemy), name: '', gear, hud: false, glow: false,
-        ...(kind === 'archer' ? { swordMs: [1500, 3200] } : {}),
+        ...(kind === 'archer' ? { bowOnly: true } : {}),
       });
       enemy.onAfterUpdate = () => fighter.update();
     }
