@@ -607,6 +607,32 @@ body.has-mana.match-loadout #shield-health-display { top: 106px; }
 /* Multiplayer: no mana outside battles (a picked-up wand brings it — body.match-loadout) */
 body.multiplayer-mode:not(.match-loadout) #mana-bar { display: none; }
 
+/* Hurt: a brief red glow round the screen's edges (.is-hit, flashHurtVignette in bootstrapGameApp.js);
+   a steady pulsing one at low health (body.player-low-health, updateHealthUI) */
+#hurt-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 999;
+  opacity: 0;
+  box-shadow: inset 0 0 120px 36px rgba(220, 20, 20, 0.75);
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(200, 0, 0, 0.35) 100%);
+}
+body.player-low-health #hurt-vignette { animation: hurt-vignette-low 1.4s ease-in-out infinite; }
+#hurt-vignette.is-hit,
+body.player-low-health #hurt-vignette.is-hit { animation: hurt-vignette-flash 0.6s ease-out; }
+@keyframes hurt-vignette-flash {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes hurt-vignette-low {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.65; }
+}
+@media (prefers-reduced-motion: reduce) {
+  body.player-low-health #hurt-vignette { animation: none; opacity: 0.45; }
+}
+
 /* Frozen in ice (magic blast): icy screen edge + "shake your phone" prompt */
 #frozen-overlay {
   position: fixed;

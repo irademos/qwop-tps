@@ -747,6 +747,8 @@ function createArcadeOverlay(startOverlay) {
 // Swing detection is ignored this long after Block is pressed or released (the stance change
 // moves the sword abruptly and would otherwise count as a swing + forward lunge).
 const PSW_BLOCK_TOGGLE_IGNORE_S = 0.35;
+// Red screen edges stay on (pulsing) at this many health segments or fewer (updateHealthUI)
+const HURT_LOW_HEALTH_SEGMENTS = 2;
 const SWORD_SHOWDOWN_BGS = 'Interior Day/Inside Day.ogg';
 const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
 // Sword gyro sensitivity: gyro angles are multiplied by window.phoneSwordLocalSensitivity
@@ -3871,6 +3873,10 @@ async function initCore(runtimeContext) {
     if (healthLabel) {
       healthLabel.textContent = 'Health';
     }
+    // Red screen edges: steady (pulsing) while down to the last bars — HURT_LOW_HEALTH_SEGMENTS,
+    // 1 with 3 or fewer (Classic) — see #hurt-vignette in styles.css
+    const lowAt = maxSegments <= 3 ? 1 : HURT_LOW_HEALTH_SEGMENTS;
+    document.body.classList.toggle('player-low-health', currentSegments > 0 && currentSegments <= lowAt);
     // Classic mode HUD: one heart per remaining hit (bottom left)
     const classicHearts = document.getElementById('classic-hearts');
     if (classicHearts) {
@@ -4025,9 +4031,21 @@ async function initCore(runtimeContext) {
   window.swordCombo = swordCombo;
 
   const playerBloodOrigin = new THREE.Vector3();
+  // A brief red glow round the screen's edges when hurt (#hurt-vignette, restarted each hit)
+  const _hurtVignette = document.getElementById('hurt-vignette');
+  const flashHurtVignette = () => {
+    if (!_hurtVignette) return;
+    _hurtVignette.classList.remove('is-hit');
+    void _hurtVignette.offsetWidth; // restart the animation
+    _hurtVignette.classList.add('is-hit');
+  };
+  _hurtVignette?.addEventListener('animationend', (e) => {
+    if (e.animationName === 'hurt-vignette-flash') _hurtVignette.classList.remove('is-hit');
+  });
   const triggerPlayerHurtBlood = (previousHealth, nextHealth) => {
     if (!Number.isFinite(previousHealth) || !Number.isFinite(nextHealth)) return;
     if (nextHealth >= previousHealth || !playerModel?.parent) return;
+    flashHurtVignette();
     comboMeter.end();
     window._phoneBuzz?.(nextHealth <= 0 ? 'kill' : 'hit');
     playerModel.getWorldPosition(playerBloodOrigin);
