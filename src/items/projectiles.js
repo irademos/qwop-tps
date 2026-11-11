@@ -11,10 +11,11 @@ import { createArrowTrail, pushArrowTrail, endArrowTrail, updateArrowTrails } fr
 // arrow's speed follows how far the bow was drawn (PlayerControls.fireArrow); it flies tip
 // first (`faceVelocity`, turned by the physics sync in bootstrapGameApp.js), drops a little
 // (`gravityScale`) and sticks in what it hits for a while.
-export const ARROW_SPEED_MIN = 16;       // m/s, a quick tap
-export const ARROW_SPEED_MAX = 44;       // m/s, fully drawn
-export const ARROW_GRAVITY_SCALE = 0.22; // of the world's gravity
-export const BOT_ARROW_SPEED = 28;       // battle bots' / bosses' (level, like the old bullets)
+export const ARROW_SPEED_MIN = 11;       // m/s, a quick tap
+export const ARROW_SPEED_MAX = 28;       // m/s, fully drawn
+export const ARROW_GRAVITY_SCALE = 0.14; // of the world's gravity
+export const BOT_ARROW_SPEED = 14;       // battle bots' / bosses' / archers' (level) — slow enough to swing at
+
 const ARROW_RADIUS = 0.05;
 const ARROW_STICK_S = 6;                 // s an arrow stays stuck in a wall / the ground
 const ARROW_STICK_MAX = 24;
@@ -121,6 +122,17 @@ function removeProjectileAt(projectiles, index) {
   }
 }
 
+const _segAB = new THREE.Vector3();
+const _segAP = new THREE.Vector3();
+// Closest distance from point `p` to the segment a → b
+function segmentPointDistance(a, b, p) {
+  _segAB.subVectors(b, a);
+  _segAP.subVectors(p, a);
+  const len2 = _segAB.lengthSq();
+  const t = len2 > 1e-9 ? THREE.MathUtils.clamp(_segAP.dot(_segAB) / len2, 0, 1) : 0;
+  return _segAP.addScaledVector(_segAB, -t).length();
+}
+
 export function spawnProjectile(scene, projectiles, position, direction, shooterId, options = {}) {
   const size = 0.5;
   const half = size / 2;
@@ -174,7 +186,7 @@ export function updateProjectiles({
   hordeEnemies,
   pvpTargets = null,
   pvpAlsoEnemies = false, // (Town: a shot that misses the players can still hit the townsfolk)
-  localTarget = null   // { position, onHit(dir, from), reflect?(proj, vel) → new direction | null } — what hostile shots can hit
+  localTarget = null   // { position, onHit(dir, from), reflect?(proj, vel) → new direction | null (bubble), parry?(proj, vel) / parryCenter / parryRadius (a timed sword swing) } — what hostile shots can hit
 }) {
   const localId = multiplayer?.getId?.() ?? 'local'; // 'local' = single player (see PlayerControls)
   const getStrengthDamage = baseDamage => {
@@ -254,21 +266,29 @@ export function updateProjectiles({
     // Hostile shots (the Showdown final boss): only the local player, then the map
     if (proj.userData.hostile) {
       if (localTarget && leftShooter) {
+        // (flies back the other way as the player's own shot — hits enemies)
+        const sendBack = (back) => {
+          const v = back.clone().multiplyScalar(Math.max(8, vel.length()));
+          rb.setLinvel({ x: v.x, y: v.y, z: v.z }, true);
+          proj.userData.hostile = false;
+          proj.userData.shooterId = 'reflected';
+          proj.userData.reflected = true; // (only enemies now — never another player)
+          proj.userData.spawnPosition = proj.position.clone();
+          proj.userData.lifetime = Math.max(proj.userData.lifetime, 2000);
+          (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
+        };
+        // A timed sword swing knocks it back (`parry`, within `parryRadius` of `parryCenter`,
+        // a little before it would reach the body)
+        if (localTarget.parry && localTarget.parryCenter
+          && segmentPointDistance(prevPos, segEnd, localTarget.parryCenter) <= (localTarget.parryRadius ?? 1.2)) {
+          const back = localTarget.parry(proj, vel);
+          if (back) { sendBack(back); continue; }
+        }
         _pvpProbe.group.position = localTarget.position;
         if (sweptHitsEnemy(prevPos, segEnd, _pvpProbe)) {
-          // (the player's bubble: it flies back the other way as the player's own shot — hits enemies)
+          // (the player's bubble)
           const back = localTarget.reflect?.(proj, vel);
-          if (back) {
-            const v = back.clone().multiplyScalar(Math.max(8, vel.length()));
-            rb.setLinvel({ x: v.x, y: v.y, z: v.z }, true);
-            proj.userData.hostile = false;
-            proj.userData.shooterId = 'reflected';
-            proj.userData.reflected = true; // (only enemies now — never another player)
-            proj.userData.spawnPosition = proj.position.clone();
-            proj.userData.lifetime = Math.max(proj.userData.lifetime, 2000);
-            (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
-            continue;
-          }
+          if (back) { sendBack(back); continue; }
           localTarget.onHit(vel.clone().setY(0).normalize(), proj.userData.spawnPosition);
           removeProjectile(i);
           continue;
