@@ -510,8 +510,11 @@ function buildCreditsMarkup(entries) {
   const blocks = entries.map((entry) => {
     const sourceText = escapeHtml(entry.source);
     const licenseText = escapeHtml(entry.licenseLabel);
+    const sourceLine = entry.source
+      ? `<br>Source: <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer noopener">${sourceText}</a>`
+      : '';
     return `“${escapeHtml(entry.title)}” by ${escapeHtml(entry.author)}
-  <br>Source: <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer noopener">${sourceText}</a>
+  ${sourceLine}
   <br>License: <a href="${escapeHtml(entry.license)}" target="_blank" rel="noreferrer noopener">${licenseText}</a>`;
   });
 
@@ -527,7 +530,7 @@ function normalizeCredits(entries) {
       const source = typeof entry.source === 'string' ? entry.source.trim() : '';
       const author = typeof entry.author === 'string' ? entry.author.trim() : '';
       const license = typeof entry.license === 'string' ? entry.license.trim() : '';
-      if (!title || !source || !author || !license) return null;
+      if (!title || !author || !license) return null; // source is optional
       return {
         title,
         source,
