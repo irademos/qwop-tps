@@ -59,7 +59,9 @@ export function createCharacterChooser({ renderer, roster, isUnlocked }) {
     new THREE.PlaneGeometry(1, 1),
     new THREE.MeshBasicMaterial({
       map: radialTexture([[0, 'rgba(18,22,34,0.94)'], [0.65, 'rgba(14,17,26,0.86)'], [0.98, 'rgba(10,12,18,0)']]),
-      transparent: true, depthWrite: false, depthTest: false, toneMapped: false,
+      // (depth-tested: transparent things draw after the characters whatever their renderOrder,
+      // so it must lose to them on depth — it sits far behind them)
+      transparent: true, depthWrite: false, depthTest: true, toneMapped: false,
     }),
   );
   backdrop.renderOrder = -10;
