@@ -5590,8 +5590,9 @@ async function initCore(runtimeContext) {
   }
 
   /**
-   * Closest in-flight enemy bomb or enemy magic blast heading toward the player (bombs: not yet
-   * deflected; both: horizontal velocity pointing at the player) — its position, or null.
+   * Closest in-flight enemy bomb, enemy magic blast or enemy arrow heading toward the player (bombs:
+   * not yet deflected; all: horizontal velocity pointing at the player) — its position (an arrow:
+   * its archer's), or null.
    * While one exists the camera tracks it and sword / wand enemies hold their attacks.
    */
   function _psFindIncomingThreat() {
@@ -5616,6 +5617,23 @@ async function initCore(runtimeContext) {
     for (const b of magicBlasts.list()) {
       if (b.side !== 'enemy') continue;
       consider(b.group.position, b.forward.x, b.forward.z);
+    }
+    // Enemy arrows in flight: the camera stays on the archer who loosed it (so the player can
+    // see it coming and block / parry) until it has reached them, missed past or been sent back
+    for (const p of projectiles) {
+      const u = p?.userData;
+      if (!u?.hostile || !u.arrow) continue;
+      const rb = u.rb && window.rapierWorld?.getRigidBody(u.rb.handle);
+      if (!rb) continue;
+      const v = rb.linvel();
+      const dx = pp.x - p.position.x;
+      const dz = pp.z - p.position.z;
+      if (v.x * dx + v.z * dz <= 0) continue;
+      const d = Math.hypot(dx, dz);
+      if (d >= closestDist) continue;
+      closestDist = d;
+      const s = u.shooter;
+      closest = (s && !s.isDead && s.group?.parent) ? s.group.position : p.position;
     }
     return closest;
   }
