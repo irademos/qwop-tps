@@ -5478,13 +5478,51 @@ async function initCore(runtimeContext) {
     return s;
   };
   // EnemyPlayer / BombThrowerEnemy `chaseVia`: walking toward the player from a way off, they
-  // keep to the path (a point a little along it from their own spot, toward the player's)
+  // keep to the path (a point a little along it from their own spot, toward the player's).
+  // Each enemy's spot on the path is tracked (`_psEnemyPathS`, keyed by its position vector) and
+  // only looked for near where it was: an unbounded projection snaps to whichever stretch is
+  // nearest, and Endless's loop of every route crosses itself — an enemy put on a far-off stretch
+  // would walk along it away from the player (backwards, facing them) until it got close.
+  // Endless's loop is closed (`path.cyclic`): distances along it wrap round.
+  const PS_ENEMY_PATH_FIND = 40;       // m along the path either side of the player to first look for an enemy's spot
+  const PS_ENEMY_PATH_TRACK = 4;       // m either side of its last spot to look for it after that
+  const PS_ENEMY_PATH_LOST = 6;        // m: further than this from its spot on the path → look again round the player
+  const _psEnemyPathS = new WeakMap();
+  const _psEnemyPathFor = new WeakMap(); // (which path that spot is on)
+  const _psProjectWin = (path, x, z, lo, hi) => {
+    const L = path.length;
+    if (!path.cyclic || (lo >= 0 && hi <= L)) return path.project(x, z, lo, hi);
+    if (hi - lo >= L) return path.project(x, z);
+    // (the window crosses the loop's join: look on both sides of it)
+    const a = ((lo % L) + L) % L;
+    const b = ((hi % L) + L) % L;
+    const s1 = path.project(x, z, a, L);
+    const s2 = path.project(x, z, 0, b);
+    const p1 = path.at(s1);
+    const p2 = path.at(s2);
+    return Math.hypot(p1.x - x, p1.z - z) <= Math.hypot(p2.x - x, p2.z - z) ? s1 : s2;
+  };
   const _psEnemyChaseVia = (pos, target, out) => {
     if (!_psPath || !_psStageActive) return null;
     if (Math.hypot(target.x - pos.x, target.z - pos.z) < PS_ENEMY_PATH_DIRECT_DIST) return null;
-    const se = _psPath.project(pos.x, pos.z);
-    const sp = _psPath.project(target.x, target.z, _psPathProgress - PS_PATH_BACKTRACK);
-    const p = _psPath.at(se + Math.sign(sp - se) * Math.min(Math.abs(sp - se), PS_ENEMY_PATH_LOOKAHEAD));
+    const path = _psPath;
+    const L = path.length;
+    const sp = _psProjectWin(path, target.x, target.z,
+      _psPathProgress - PS_PATH_BACKTRACK, _psPathProgress + PS_PATH_BACKTRACK);
+    let se = _psEnemyPathFor.get(pos) === path ? _psEnemyPathS.get(pos) : undefined;
+    if (se !== undefined) {
+      se = _psProjectWin(path, pos.x, pos.z, se - PS_ENEMY_PATH_TRACK, se + PS_ENEMY_PATH_TRACK);
+      const q = path.at(se);
+      if (Math.hypot(q.x - pos.x, q.z - pos.z) > PS_ENEMY_PATH_LOST) se = undefined; // (knocked off it)
+    }
+    if (se === undefined) se = _psProjectWin(path, pos.x, pos.z, sp - PS_ENEMY_PATH_FIND, sp + PS_ENEMY_PATH_FIND);
+    _psEnemyPathS.set(pos, se);
+    _psEnemyPathFor.set(pos, path);
+    let d = sp - se;
+    if (path.cyclic && Math.abs(d) > L / 2) d -= Math.sign(d) * L;
+    let sv = se + Math.sign(d) * Math.min(Math.abs(d), PS_ENEMY_PATH_LOOKAHEAD);
+    if (path.cyclic) sv = ((sv % L) + L) % L;
+    const p = path.at(sv);
     if (Math.hypot(p.x - pos.x, p.z - pos.z) < 0.3) return null;
     return out.set(p.x, pos.y, p.z);
   };
@@ -9166,6 +9204,7 @@ async function initCore(runtimeContext) {
     if (!pts || pts.length < 2) { _psPath = null; _psAutoWalking = false; return false; }
     if (teleport) _teleportPlayer(pts[0].x, pts[0].z, Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
     const path = createPolyline(pts);
+    path.cyclic = true; // (the loop ends where it starts — enemies' chaseVia wraps round it)
     _psPath = path;
     _psPathProgress = teleport ? 0 : path.project(playerModel.position.x, playerModel.position.z, 0, PS_ROUTE_WALK_IN_MAX);
     const last = pts[pts.length - 1];
