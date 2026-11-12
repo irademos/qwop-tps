@@ -19,6 +19,7 @@ export {
   saveClassicStats,
   loadEndlessStats,
   recordEndlessRun,
+  recordEndlessCleared,
   normalizeEndlessStats,
   normalizeStageStats,
   loadClassicStage,

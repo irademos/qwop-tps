@@ -71,6 +71,7 @@ import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk, makeTextSprite } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
+import { createCharacterChooser } from '../endless/characterChooser.js';
 import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
 import { createSeaStart } from '../town/seaStart.js';
@@ -113,6 +114,7 @@ import {
   saveTownSave,
   loadEndlessStats,
   recordEndlessRun,
+  recordEndlessCleared,
   normalizeEndlessStats,
   randomGuestName,
   buildGuestProfile
@@ -5601,7 +5603,8 @@ async function initCore(runtimeContext) {
   let _endless = null;
   let _endlessPanel = null;        // its start / results card
   let _endlessPanelAction = null;  // the card's main button (Start / Play Again)
-  let _endlessStats = null;        // { best, bestWave, runs } (the better of this device's / the profile's)
+  let _endlessStats = null;        // { best, bestWave, runs, cleared } (the better of this device's / the profile's)
+  let _endlessChooser = null;      // the character chooser on the card (src/endless/characterChooser.js)
   const _endlessPanelOpen = () => !!_endlessPanel && !_endlessPanel.classList.contains('hidden');
   let _psStageKills = 0;       // enemies killed this stage
   let _psStageTotal = 0;       // enemies in this stage
@@ -9260,6 +9263,26 @@ async function initCore(runtimeContext) {
     _psAutoWalking = true;
     return true;
   };
+  // Characters: the village boy from the start, the rest unlocked by clearing waves (the most
+  // waves cleared in one run — _endlessStats.cleared); all of them by wave 10. Endless keeps
+  // its own pick (`ps_endless_char_<key | guest>`), apart from Showdown's.
+  const ENDLESS_UNLOCKS = [
+    ['villageBoy', 0], ['villageGirl', 2], ['frog', 3], ['pumpkin', 4], ['antler', 5],
+    ['gemhorn', 6], ['tree', 7], ['wizard', 8], ['villager', 10],
+  ];
+  const _endlessUnlockWave = (key) => ENDLESS_UNLOCKS.find(([k]) => k === key)?.[1] ?? Infinity;
+  const _endlessUnlocked = (key, cleared = _endlessStats?.cleared || 0) => _endlessUnlockWave(key) <= cleared;
+  // (the characters a run clearing `cleared` waves unlocks, past `before`)
+  const _endlessNewUnlocks = (before, cleared) => ENDLESS_UNLOCKS.filter(([, w]) => w > before && w <= cleared).map(([k]) => k);
+  const _endlessCharLsKey = () => `ps_endless_char_${profileNameKey || 'guest'}`;
+  const _endlessLoadChar = () => {
+    let k = null;
+    try { k = localStorage.getItem(_endlessCharLsKey()); } catch (_) {}
+    return k && MATCH_CHARACTERS[k] && _endlessUnlocked(k) ? k : 'villageBoy';
+  };
+  const _endlessSaveChar = (k) => { try { localStorage.setItem(_endlessCharLsKey(), k); } catch (_) {} };
+  const _endlessCharLabel = (k) => MATCH_CHARACTERS[k]?.label ?? k;
+
   const _endlessLsKey = () => `ps_endless_${profileNameKey || 'guest'}`;
   const _endlessLoadLocal = () => {
     try { return normalizeEndlessStats(JSON.parse(localStorage.getItem(_endlessLsKey()) || 'null')); } catch (_) { return normalizeEndlessStats(null); }
@@ -9271,14 +9294,26 @@ async function initCore(runtimeContext) {
     best: Math.max(a?.best || 0, b?.best || 0),
     bestWave: Math.max(a?.bestWave || 0, b?.bestWave || 0),
     runs: Math.max(a?.runs || 0, b?.runs || 0),
+    cleared: Math.max(a?.cleared || 0, b?.cleared || 0),
   });
 
   // The start / results card: title, the run's kills (results), best, Start / Play Again + Lobby
   const _endlessShowPanel = ({ result = null } = {}) => {
     if (!_endlessPanel) {
       _endlessPanel = document.createElement('div');
-      _endlessPanel.className = 'endless-panel ui-panel hidden';
+      _endlessPanel.className = 'endless-panel hidden';
       _endlessPanel.innerHTML = `
+        <div class="endless-chooser">
+          <div class="endless-stage"></div>
+          <button type="button" class="endless-nav endless-prev" aria-label="Previous character">‹</button>
+          <button type="button" class="endless-nav endless-next" aria-label="Next character">›</button>
+          <div class="endless-char">
+            <div class="endless-char-name"></div>
+            <div class="endless-char-lock"></div>
+            <div class="endless-dots"></div>
+          </div>
+        </div>
+        <div class="endless-card ui-panel">
         <div class="endless-title"></div>
         <div class="endless-score"><span class="endless-kills"></span><span class="endless-kills-label">kills</span></div>
         <div class="endless-new">New best!</div>
@@ -9287,8 +9322,10 @@ async function initCore(runtimeContext) {
         <div class="endless-btns">
           <button type="button" class="ui-btn endless-go"></button>
           <button type="button" class="ui-btn-secondary endless-lobby">Lobby</button>
+        </div>
         </div>`;
       document.body.appendChild(_endlessPanel);
+      _endlessSetupChooser();
       _endlessPanel.querySelector('.endless-go').addEventListener('click', () => _endlessPanelAction?.());
       _endlessPanel.querySelector('.endless-lobby').addEventListener('click', () => {
         _resetForMenu();
@@ -9306,8 +9343,23 @@ async function initCore(runtimeContext) {
       : (s.best > 0 ? `Your best: ${s.best} kills (wave ${s.bestWave})` : 'No best yet');
     q('.endless-help').textContent = result ? '' : 'Waves keep coming, each one tougher. How many can you take down?';
     q('.endless-help').classList.toggle('hidden', !!result);
-    q('.endless-go').textContent = result ? 'Play Again' : 'Start';
+    _endlessGoLabel = result ? 'Play Again' : 'Start';
+    _endlessChooser.mount(q('.endless-stage'));
+    _endlessChooser.refresh();
+    _endlessChooser.select(_endlessLoadChar(), { instant: true });
+    _endlessRenderChar();
     _endlessPanelAction = () => {
+      if (_endlessUnlockOpen()) { _endlessDismissUnlock(); return; }
+      const pick = _endlessChooser.selected();
+      if (!_endlessUnlocked(pick)) {
+        const go = q('.endless-go');
+        go.classList.remove('endless-shake');
+        void go.offsetWidth;
+        go.classList.add('endless-shake');
+        return;
+      }
+      _endlessSaveChar(pick);
+      setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[pick]?.url ?? glbCharacterConfig.villageBoyUrl);
       _endlessHidePanel();
       _villageUnsheathe();
       _requireSwordCalibration(_endlessBegin);
@@ -9319,14 +9371,118 @@ async function initCore(runtimeContext) {
   const _endlessHidePanel = () => {
     _endlessPanel?.classList.add('hidden');
     document.body.classList.remove('endless-panel-open');
+    _endlessDismissUnlock({ all: true });
+  };
+
+  // The chooser: made with the card, the name / lock / dots under it follow the pick
+  let _endlessGoLabel = 'Start';
+  const _endlessSetupChooser = () => {
+    const roster = ENDLESS_UNLOCKS.map(([k]) => ({ key: k, label: _endlessCharLabel(k), url: MATCH_CHARACTERS[k].url }));
+    _endlessChooser = createCharacterChooser({ renderer, roster, isUnlocked: (k) => _endlessUnlocked(k) });
+    _endlessChooser.onChange(() => _endlessRenderChar());
+    const q = (sel) => _endlessPanel.querySelector(sel);
+    q('.endless-prev').addEventListener('click', () => _endlessChooser.next(-1));
+    q('.endless-next').addEventListener('click', () => _endlessChooser.next(1));
+    q('.endless-dots').innerHTML = roster.map(() => '<span class="endless-dot"></span>').join('');
+  };
+  const _endlessRenderChar = () => {
+    if (!_endlessPanel || !_endlessChooser) return;
+    const q = (sel) => _endlessPanel.querySelector(sel);
+    const k = _endlessChooser.selected();
+    const unlocked = _endlessUnlocked(k);
+    const i = ENDLESS_UNLOCKS.findIndex(([key]) => key === k);
+    q('.endless-char-name').textContent = unlocked ? _endlessCharLabel(k) : '???';
+    q('.endless-char-lock').textContent = unlocked ? '' : `🔒 Clear wave ${_endlessUnlockWave(k)} to unlock`;
+    q('.endless-char-lock').classList.toggle('hidden', unlocked);
+    q('.endless-prev').disabled = i <= 0;
+    q('.endless-next').disabled = i >= ENDLESS_UNLOCKS.length - 1;
+    _endlessPanel.querySelectorAll('.endless-dot').forEach((d, j) => {
+      d.classList.toggle('is-active', j === i);
+      d.classList.toggle('is-locked', !_endlessUnlocked(ENDLESS_UNLOCKS[j][0]));
+    });
+    const go = q('.endless-go');
+    go.textContent = unlocked ? _endlessGoLabel : '🔒 Locked';
+    go.classList.toggle('is-locked', !unlocked);
+  };
+
+  // A small note mid-run when a wave cleared unlocks someone (the big popup comes after the run)
+  const _endlessUnlockNote = (keys) => {
+    const note = document.createElement('div');
+    note.className = 'endless-unlock-note';
+    note.textContent = `🔓 ${keys.map(_endlessCharLabel).join(', ')} unlocked`;
+    document.body.appendChild(note);
+    setTimeout(() => note.classList.add('is-out'), 3200);
+    setTimeout(() => note.remove(), 3800);
+  };
+
+  // After the run: "New character!" — the character itself (the chooser drawn into the popup's
+  // stage), one at a time; Dismiss / Next, and the newest unlocked is the pick on the card
+  let _endlessUnlockEl = null;
+  let _endlessUnlockQueue = [];
+  const _endlessUnlockOpen = () => !!_endlessUnlockEl && !_endlessUnlockEl.classList.contains('hidden');
+  const _endlessShowUnlocks = (keys) => {
+    if (!keys?.length || !_endlessChooser) return;
+    _endlessUnlockQueue = [...keys];
+    if (!_endlessUnlockEl) {
+      _endlessUnlockEl = document.createElement('div');
+      _endlessUnlockEl.className = 'endless-unlock hidden';
+      _endlessUnlockEl.innerHTML = `
+        <div class="endless-unlock-stage"></div>
+        <div class="endless-unlock-card ui-panel">
+          <div class="endless-unlock-kicker">🔓 New character!</div>
+          <div class="endless-unlock-name"></div>
+          <div class="endless-unlock-sub"></div>
+          <button type="button" class="ui-btn endless-unlock-ok"></button>
+        </div>`;
+      document.body.appendChild(_endlessUnlockEl);
+      _endlessUnlockEl.querySelector('.endless-unlock-ok').addEventListener('click', () => _endlessDismissUnlock());
+      _endlessUnlockEl.addEventListener('click', (e) => { if (e.target === _endlessUnlockEl) _endlessDismissUnlock(); });
+    }
+    _endlessUnlockEl.classList.remove('hidden');
+    document.body.classList.add('endless-unlock-open');
+    _endlessShowNextUnlock();
+  };
+  const _endlessShowNextUnlock = () => {
+    const k = _endlessUnlockQueue[0];
+    const q = (sel) => _endlessUnlockEl.querySelector(sel);
+    q('.endless-unlock-name').textContent = _endlessCharLabel(k);
+    q('.endless-unlock-sub').textContent = `For clearing wave ${_endlessUnlockWave(k)}`;
+    q('.endless-unlock-ok').textContent = _endlessUnlockQueue.length > 1 ? 'Next' : 'Nice!';
+    _endlessChooser.mount(q('.endless-unlock-stage'));
+    _endlessChooser.select(k, { instant: true });
+    audioManager?.playSynth?.('comboReady', 0.7);
+  };
+  const _endlessDismissUnlock = ({ all = false } = {}) => {
+    if (!_endlessUnlockOpen()) return;
+    const last = _endlessUnlockQueue[_endlessUnlockQueue.length - 1];
+    _endlessUnlockQueue = all ? [] : _endlessUnlockQueue.slice(1);
+    if (_endlessUnlockQueue.length) { _endlessShowNextUnlock(); return; }
+    _endlessUnlockEl.classList.add('hidden');
+    document.body.classList.remove('endless-unlock-open');
+    if (!_endlessPanel || !_endlessChooser) return;
+    _endlessChooser.mount(_endlessPanel.querySelector('.endless-stage'));
+    if (last && _endlessUnlocked(last)) { _endlessSaveChar(last); _endlessChooser.select(last, { instant: true }); }
+    _endlessRenderChar();
+  };
+  // (each frame, after the world is drawn — the game loop)
+  const _endlessChooserFrame = (dt) => {
+    if (!_endlessChooser || !(_endlessPanelOpen() || _endlessUnlockOpen())) return;
+    _endlessChooser.update(dt);
+    _endlessChooser.render();
   };
   // (Enter / the phone's interact press the panel's main button)
   window.addEventListener('keydown', (e) => {
-    if (!_endlessPanelOpen() || (e.key !== 'Enter' && e.key !== ' ')) return;
-    if (document.body.classList.contains('settings-open')) return;
+    if (!_endlessPanelOpen() || document.body.classList.contains('settings-open')) return;
+    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !_endlessUnlockOpen()) {
+      e.preventDefault();
+      e.stopPropagation();
+      _endlessChooser?.next(e.key === 'ArrowLeft' ? -1 : 1);
+      return;
+    }
+    if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     _endlessPanelAction?.();
-  });
+  }, true);
 
   // The field cleared: enemies, bombs, spells, heart bubbles
   const _endlessClearField = () => {
@@ -9473,6 +9629,18 @@ async function initCore(runtimeContext) {
         heartBubbles.spawn(playerModel.position.clone().add(new THREE.Vector3(Math.cos(a) * 3.5, 0, Math.sin(a) * 3.5)));
       }
       _showWorldBanner(`WAVE ${e.wave} CLEARED`, `+${bonus} coins`, 2600);
+      // Past the best: characters unlocked (a note now, the popup after the run), saved at once
+      const before = _endlessStats?.cleared || 0;
+      if (e.wave > before) {
+        const fresh = _endlessNewUnlocks(before, e.wave);
+        _endlessStats = { ...(_endlessStats || normalizeEndlessStats(null)), cleared: e.wave };
+        _endlessSaveLocal(_endlessStats);
+        if (fresh.length) {
+          e.unlocked = [...(e.unlocked || []), ...fresh];
+          _endlessUnlockNote(fresh);
+          if (profileNameKey) void recordEndlessCleared(profileNameKey, e.wave);
+        }
+      }
     }
   };
 
@@ -9492,10 +9660,11 @@ async function initCore(runtimeContext) {
       best: Math.max(prev.best, kills),
       bestWave: Math.max(prev.bestWave, wave),
       runs: prev.runs + 1,
+      cleared: prev.cleared || 0,
     };
     _endlessSaveLocal(_endlessStats);
-    if (profileNameKey) void recordEndlessRun(profileNameKey, { kills, wave });
-    e.result = { kills, wave, newBest };
+    if (profileNameKey) void recordEndlessRun(profileNameKey, { kills, wave, cleared: _endlessStats.cleared });
+    e.result = { kills, wave, newBest, unlocked: e.unlocked || [] };
   };
   // After the carry: the field cleared, back at the arena, the results card
   const _endlessAfterDeath = () => {
@@ -9504,6 +9673,7 @@ async function initCore(runtimeContext) {
     _psUpdateKillHud(false);
     _endlessToArena();
     _endlessShowPanel({ result });
+    _endlessShowUnlocks(result?.unlocked);
   };
   // Back to where the next run starts: a random point along the routes (the arena with none)
   const _endlessToArena = () => {
@@ -9531,7 +9701,7 @@ async function initCore(runtimeContext) {
     _psStageTotal = 0;
     _psStageActive = true;
     _psWinShown = false;
-    Object.assign(_endless, { wave: 0, def: _endlessWave(1), diff: 1, toSpawn: 0, phase: 'break', breakUntil: performance.now() + 1500, result: null });
+    Object.assign(_endless, { wave: 0, def: _endlessWave(1), diff: 1, toSpawn: 0, phase: 'break', breakUntil: performance.now() + 1500, result: null, unlocked: [] });
     _psUpdateKillHud(true);
     _psSongPool = [];
     _psStopSong();
@@ -9544,7 +9714,8 @@ async function initCore(runtimeContext) {
     document.body.classList.add('endless-mode');
     _endlessSetAside();
     _endlessFreshLoadout();
-    setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected]?.url ?? glbCharacterConfig.villageBoyUrl);
+    _endlessStats = _endlessMergeStats(_endlessStats, _endlessLoadLocal());
+    setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_endlessLoadChar()]?.url ?? glbCharacterConfig.villageBoyUrl);
     _endlessToArena();
     [...ENDLESS_CHAMPION_CHARACTERS].forEach((k) => preloadCharacterModel(MATCH_CHARACTERS[k].url));
     _endlessStats = _endlessMergeStats(_endlessStats, _endlessLoadLocal());
@@ -9555,7 +9726,7 @@ async function initCore(runtimeContext) {
         if (!cloud) return;
         _endlessStats = _endlessMergeStats(_endlessStats, cloud);
         _endlessSaveLocal(_endlessStats);
-        if (_endless?.phase === 'idle' && _endlessPanelOpen()) _endlessShowPanel();
+        if (_endless?.phase === 'idle' && _endlessPanelOpen() && !_endlessUnlockOpen()) _endlessShowPanel();
       });
     }
   };
@@ -9571,6 +9742,8 @@ async function initCore(runtimeContext) {
         else _castEnemySpell(e, { origin: origin.setY(e.group.position.y + 0.55), forward: dir, line: new THREE.Vector3(1, 0, 0) });
       } }),
     startWave: (w) => { if (_endless && _endless.phase !== 'idle') _endlessStartWave(w); },
+    // (the after-run popup, e.g. endless.showUnlocks(['pumpkin', 'frog']))
+    showUnlocks: (keys) => _endlessShowUnlocks(keys),
   };
   // Leaving (the lobby, another mode)
   const _endlessStop = () => {
@@ -12651,6 +12824,7 @@ async function initCore(runtimeContext) {
     hitFeel.applyShake(camera, frameDelta);
     renderer.render(scene, camera);
     hitFeel.restoreShake(camera);
+    _endlessChooserFrame(frameDelta);
     const frameTotalMs = performance.now() - frameStartMs;
     if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
       frameOverrunStreak += 1;
