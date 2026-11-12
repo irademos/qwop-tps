@@ -2237,13 +2237,12 @@ async function initCore(runtimeContext) {
   const _CACHE_SNAP = 0.5;
   const _glbNormal = new THREE.Vector3();
   const _NO_LAYERS = [];
-  const _glbLayers = (x, z) => {
-    const sx = Math.round(x / _CACHE_SNAP) * _CACHE_SNAP;
-    const sz = Math.round(z / _CACHE_SNAP) * _CACHE_SNAP;
-    const key = `${sx}_${sz}`;
+  // Every surface at one grid point (i, k) — cached
+  const _glbCellLayers = (i, k) => {
+    const key = `${i}_${k}`;
     let ys = _glbHeightCache.get(key);
     if (ys) return ys;
-    _glbRaycaster.ray.origin.set(sx, 500, sz);
+    _glbRaycaster.ray.origin.set(i * _CACHE_SNAP, 500, k * _CACHE_SNAP);
     ys = _NO_LAYERS;
     for (const hit of _glbRaycaster.intersectObjects(_groundMeshes, false)) {
       // (a double-sided ceiling's underside isn't ground; the top surface always counts)
@@ -2258,6 +2257,50 @@ async function initCore(runtimeContext) {
     }
     _glbHeightCache.set(key, ys);
     return ys;
+  };
+  // The surfaces at x, z: the nearest grid point's, each blended bilinearly with the same
+  // surface at the 4 grid points round x, z — so walking up a slope rises smoothly instead of
+  // in 0.5 m stair-steps. Where a corner has nothing within _GLB_BLEND_MAX_STEP of it (a wall,
+  // a ledge, a bridge's edge) that surface keeps the nearest point's height (edges stay sharp).
+  // The result is reused between calls.
+  const _GLB_BLEND_MAX_STEP = 0.6;
+  const _glbBlendOut = [];
+  const _glbCorners = [null, null, null, null];
+  const _closestLayer = (ys, h) => {
+    let best = NaN;
+    let bestD = Infinity;
+    for (const y of ys) {
+      const d = Math.abs(y - h);
+      if (d < bestD) { bestD = d; best = y; }
+    }
+    return bestD <= _GLB_BLEND_MAX_STEP ? best : NaN;
+  };
+  const _glbLayers = (x, z) => {
+    const gx = x / _CACHE_SNAP;
+    const gz = z / _CACHE_SNAP;
+    const i0 = Math.floor(gx);
+    const k0 = Math.floor(gz);
+    const fx = gx - i0;
+    const fz = gz - k0;
+    const base = _glbCellLayers(Math.round(gx), Math.round(gz));
+    if (!base.length || !Number.isFinite(fx) || !Number.isFinite(fz)) return base;
+    _glbCorners[0] = _glbCellLayers(i0, k0);
+    _glbCorners[1] = _glbCellLayers(i0 + 1, k0);
+    _glbCorners[2] = _glbCellLayers(i0, k0 + 1);
+    _glbCorners[3] = _glbCellLayers(i0 + 1, k0 + 1);
+    _glbBlendOut.length = 0;
+    for (const h of base) {
+      const a = _closestLayer(_glbCorners[0], h);
+      const b = _closestLayer(_glbCorners[1], h);
+      const c = _closestLayer(_glbCorners[2], h);
+      const d = _closestLayer(_glbCorners[3], h);
+      if (Number.isNaN(a) || Number.isNaN(b) || Number.isNaN(c) || Number.isNaN(d)) {
+        _glbBlendOut.push(h);
+      } else {
+        _glbBlendOut.push((a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz);
+      }
+    }
+    return _glbBlendOut;
   };
   const _glbResolveHeight = (x, z) => _glbLayers(x, z)[0];
   registerTerrainHeightResolver(_glbResolveHeight, { layers: _glbLayers });

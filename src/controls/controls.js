@@ -42,6 +42,10 @@ const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const LEDGE_FALL_MIN_DROP = 0.6;
 // Moved further than this (m) since the last frame → a teleport, snap to the ground
 const LEDGE_FALL_MAX_STEP = 1.5;
+// Ground height changes smaller than this are eased in at GROUND_EASE_RATE (1/s) instead of
+// snapped to (no jolt stepping up a curb / a bumpy hill); bigger ones (teleports) snap
+const GROUND_EASE_MAX_STEP = 0.6;
+const GROUND_EASE_RATE = 18;
 // Walking under things: a surface higher than the feet can step (CLIMB_CONFIG.minRise) is
 // overhead — a bridge deck, a roof overhang — not a wall, where there's ground under it, the
 // body fits (WALK_UNDER_CLEARANCE m between the two) and nothing stands in the way at
@@ -1552,6 +1556,15 @@ export class PlayerControls {
           : Infinity;
         if (drop > LEDGE_FALL_MIN_DROP && moved < LEDGE_FALL_MAX_STEP && typeof this.onLedgeFall === 'function') {
           this.onLedgeFall();
+        } else if (
+          Number.isFinite(this.playerY) && !Number.isFinite(this.groundOverrideY) &&
+          moved < LEDGE_FALL_MAX_STEP && Math.abs(groundY - this.playerY) < GROUND_EASE_MAX_STEP
+        ) {
+          // A small step up / down (a curb, a rock, a bumpy slope): eased instead of a jolt —
+          // quick enough that the feet are never far off the ground
+          const k = 1 - Math.exp(-GROUND_EASE_RATE * Math.min(deltaSeconds, 0.1));
+          this.playerY += (groundY - this.playerY) * k;
+          if (Math.abs(groundY - this.playerY) < 0.002) this.playerY = groundY;
         } else {
           this.playerY = groundY;
         }
