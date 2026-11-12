@@ -203,6 +203,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │   ├── glb_map/map.glb         # Classic's world
 │   ├── mappacks/island_town.mappack # The world for Showdown / tutorial / Multiplayer (map editor export, zip)
 │   ├── mappacks/tree_island.mappack # Tree Island — out on the island town's sea (MAPS `islands`), paddled to in Town's canoe
+│   ├── mappacks/CREDITS.md     # Credits for the assets inside the mappacks (the low poly trees / Tree Island's big rock — also in credits.json)
 │   ├── basis/                  # basis_transcoder.js / .wasm (KTX2 textures in mappacks; copied from three/examples/jsm/libs/basis)
 │   ├── models/glb_characters/pumpkin.glb         # Pumpkin (Multiplayer roster; Showdown unlock)
 │   ├── models/glb_characters/antler_guy.glb      # Antler guy (Multiplayer roster; Showdown unlock)
