@@ -25,6 +25,7 @@ import { createMatchMode, MATCH_CHARACTERS, ARENA_LOCATION } from '../multiplaye
 import { PlayerControls } from '../controls/controls.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
+import { installUiSounds, playUiSound } from '../audio/uiSounds.js';
 import { spawnProjectile, updateProjectiles, loadSpecialWeapons, arrowShotOptions, ARROW_SPEED_MAX, ARROW_GRAVITY_SCALE, BOT_ARROW_SPEED } from '../features/combatFeature.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -408,9 +409,12 @@ function createArcadeOverlay(startOverlay) {
   const loginWaiter = createWaiter();
   const signupWaiter = createWaiter();
 
+  // login problems the player has to fix get the error sound
+  const ERROR_MESSAGE = /incorrect|must be|failed|do not match|canceled|^enter (your|and)|^switch user to/i;
   const setMessage = text => {
     if (!message) return;
     message.textContent = text || '';
+    if (text && ERROR_MESSAGE.test(text)) playUiSound('error');
   };
 
   const setMode = nextMode => {
@@ -778,6 +782,7 @@ async function initCore(runtimeContext) {
   });
   runtimeContext.systems.audioManager = audioManager;
   window.audioManager = audioManager;
+  installUiSounds(audioManager); // menu / lobby button sounds
   // Sword Showdown always uses the same ambient loop, at half the SFX volume.
   const playShowdownBackgroundLoop = () => {
     audioManager.playBGS(SWORD_SHOWDOWN_BGS, { volumeScale: SWORD_SHOWDOWN_BGS_VOLUME_SCALE });
