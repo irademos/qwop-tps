@@ -780,6 +780,8 @@ export const normalizeEndlessStats = (raw) => ({
   best: Math.max(0, Math.floor(Number(raw?.best) || 0)),
   bestWave: Math.max(0, Math.floor(Number(raw?.bestWave) || 0)),
   runs: Math.max(0, Math.floor(Number(raw?.runs) || 0)),
+  // the most waves cleared in one run (Endless character unlocks — older saves: bestWave - 1)
+  cleared: Math.max(0, Math.floor(Number(raw?.cleared) || 0), Math.floor(Number(raw?.bestWave) || 0) - 1),
 });
 
 export async function loadEndlessStats(nameKey) {
@@ -793,7 +795,7 @@ export async function loadEndlessStats(nameKey) {
   }
 }
 
-export async function recordEndlessRun(nameKey, { kills, wave }) {
+export async function recordEndlessRun(nameKey, { kills, wave, cleared = 0 }) {
   if (!nameKey) return;
   try {
     await runTransaction(ref(db, `profiles/${nameKey}/endlessStats`), (cur) => {
@@ -802,9 +804,23 @@ export async function recordEndlessRun(nameKey, { kills, wave }) {
         best: Math.max(s.best, Math.floor(kills) || 0),
         bestWave: Math.max(s.bestWave, Math.floor(wave) || 0),
         runs: s.runs + 1,
+        cleared: Math.max(s.cleared, Math.floor(cleared) || 0),
       };
     });
   } catch (err) {
     console.warn('Failed to save Endless run:', err);
+  }
+}
+
+// A wave cleared mid-run past the best (an Endless character unlocked): saved straight away
+export async function recordEndlessCleared(nameKey, cleared) {
+  if (!nameKey) return;
+  try {
+    await runTransaction(ref(db, `profiles/${nameKey}/endlessStats`), (cur) => {
+      const s = normalizeEndlessStats(cur);
+      return { ...s, cleared: Math.max(s.cleared, Math.floor(cleared) || 0) };
+    });
+  } catch (err) {
+    console.warn('Failed to save Endless progress:', err);
   }
 }
