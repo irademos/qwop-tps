@@ -9105,7 +9105,7 @@ async function initCore(runtimeContext) {
   // every ENDLESS_CHAMPION_EVERY waves the last enemy is a champion (big, red,
   // health bar across the top, more gear each time — stageBossGear). Between waves: heart bubbles
   // and a few coins. Every run starts with 0 coins, the sword and a shield that never breaks
-  // (_endlessFreshLoadout — the sword, the bow (no arrows) and a shield; the real coins / gear / bombs / bubbles / mana are set aside meanwhile —
+  // (_endlessFreshLoadout — the sword, the bow (no arrows), a shield and the magic wand (full mana); the real coins / gear / bombs / bubbles / mana are set aside meanwhile —
   // _saveAside, so saves keep the real ones); auto-buy still spends what the run earns. The
   // player auto-walks all the Showdown stage routes one after another (_endlessLoop), and after
   // the last one starts over on the first.
@@ -9158,8 +9158,8 @@ async function initCore(runtimeContext) {
     ENDLESS_ITEM_IDS.forEach((id) => { aside.inventory[id] = inventoryState[id] ?? null; });
     _saveAside = aside;
   };
-  // A run's start: level 1 with the base hearts, 0 coins, the sword and a shield (it never
-  // breaks — damageEquippedShield)
+  // A run's start: level 1 with the base hearts, 0 coins, the sword, the bow, the wand (full
+  // mana) and a shield (it never breaks — damageEquippedShield)
   const _endlessFreshLoadout = () => {
     if (!_saveAside) return;
     _putWeaponsAway();
@@ -9172,6 +9172,8 @@ async function initCore(runtimeContext) {
     }));
     // The bow from the start, with no arrows (auto-buy gets them once the run has the coins)
     inventoryState.pistol = ensureCatalogEntry('pistol', { count: 1, [PISTOL_AMMO_KEY]: 0 });
+    // The magic wand from the start too, with a full mana pool (auto-buy refills it with potions)
+    inventoryState[MAGIC_WAND_ITEM_ID] = ensureCatalogEntry(MAGIC_WAND_ITEM_ID, { count: 1 });
     statsState.coins = 0;
     xpAnimationQueue.length = 0;
     statsState.xp = 0;
@@ -9184,7 +9186,7 @@ async function initCore(runtimeContext) {
     updateHealthUI();
     statsState.bombs = 0;
     statsState.bubbles = 0;
-    statsState.mana = 0;
+    statsState.mana = MAX_MANA;
     hideShieldHealthHUD();
     equipInventoryItem(FOAM_SWORD_ITEM_ID);
     updatePlayerInfoUI();

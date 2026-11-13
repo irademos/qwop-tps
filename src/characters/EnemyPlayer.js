@@ -854,6 +854,7 @@ export class EnemyPlayer {
 
     // ── AI state ───────────────────────────────────────────────────────────
     const scriptMode = this.script?.mode;
+    this._guardOnly = attacksPaused && !scriptMode;
     if (scriptMode === 'passive') {
       this._aiState = 'hold';
     } else if (scriptMode === 'block' || scriptMode === 'windup') {
@@ -861,7 +862,9 @@ export class EnemyPlayer {
       // stance from any distance)
       this._aiState = distToTarget < ATTACK_RANGE || this.stationary ? 'attack' : 'chase';
     } else if (attacksPaused && distToTarget < ATTACK_RANGE) {
-      this._aiState = 'hold';
+      // Attacks held (an incoming bomb / blast / arrow, another's ranged turn…): no swings,
+      // but it stands its ground in a block stance (guardOnly — _updateHandPositions)
+      this._aiState = 'attack';
     } else if (!allowAttack && distToTarget < BACKOFF_DIST) {
       this._aiState = 'backoff';
     } else if (distToTarget < ATTACK_RANGE && allowAttack) {
@@ -992,9 +995,10 @@ export class EnemyPlayer {
    * block and idle (default 0.35 → 40% block, 25% idle, 35% swing).
    */
   _decideNextPhase() {
-    const r = Math.random();
     const swing = Math.min(0.9, Math.max(0, this.swingChance));
     const blockCut = (1 - swing) * (40 / 65);
+    // Attacks held → a block (idle while staggered), never a swing
+    const r = !this._guardOnly ? Math.random() : this.isStaggered() ? blockCut : 0;
     if (r < blockCut && !this.isStaggered()) {
       this._attackPhase    = 'block';
       this._attackPhaseDur = 1.5 + Math.random() * 2.5;
@@ -1056,6 +1060,15 @@ export class EnemyPlayer {
     if (this._aiState === 'attack') {
       this._attackPhaseT += dt;
       this._applyScript();
+      // Attacks held: drop any swing / idle and hold a block (idle while staggered)
+      if (this._guardOnly && !this.ranged) {
+        const ph = this._attackPhase;
+        if (this.isStaggered()) {
+          if (ph !== 'idle') { this._attackPhase = 'idle'; this._attackPhaseDur = 0.5; this._attackPhaseT = 0; this._blockSeed = Math.random() * 100; }
+        } else if (ph !== 'block') {
+          this._attackPhase = 'decide';
+        }
+      }
 
       // ── Phase transitions ────────────────────────────────────────────────
       if (this._attackPhase === 'decide' || this._attackPhaseT >= this._attackPhaseDur) {
