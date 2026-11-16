@@ -234,7 +234,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │
 └── scripts/
     ├── generate-asset-report.mjs  # Reports dist/ file sizes with gzip/brotli
-    └── optimize-mappack.mjs    # Shrinks a .mappack's GLBs (WebP textures ≤ 512 px, meshopt geometry; no simplification) — `npm run optimize:mappack -- public/mappacks/<pack>.mappack` after every editor export; a folder of .glb / .gltf (an asset kit's glTF folder) → optimized self-contained .glbs: `npm run optimize:models -- <folder> -o <out>`
+    └── optimize-mappack.mjs    # Shrinks a .mappack's GLBs (WebP textures ≤ 512 px, meshopt geometry; no simplification) — `npm run optimize:mappack -- public/mappacks/<pack>.mappack` after every editor export
 ```
 
 ---

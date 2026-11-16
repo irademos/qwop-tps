@@ -8,8 +8,7 @@
     "preview": "vite preview",
     "build:report": "vite build && node scripts/generate-asset-report.mjs",
     "report:assets": "node scripts/generate-asset-report.mjs",
-    "optimize:mappack": "node scripts/optimize-mappack.mjs",
-    "optimize:models": "node scripts/optimize-mappack.mjs"
+    "optimize:mappack": "node scripts/optimize-mappack.mjs"
   },
   "repository": {
     "type": "git",
