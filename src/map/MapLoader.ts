@@ -48,6 +48,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import JSZip from 'jszip'
 
 // ── Exported constants ─────────────────────────────────────────────────────
@@ -1325,7 +1326,8 @@ async function buildGrassGroup(
 // ── MapLoader class ────────────────────────────────────────────────────────
 
 export class MapLoader {
-  private gltfLoader = new GLTFLoader()
+  // meshopt: models packed by scripts/optimize-mappack.mjs (EXT_meshopt_compression)
+  private gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
 
   /**
    * Load a .mappack (zip) and return a populated THREE.Group.

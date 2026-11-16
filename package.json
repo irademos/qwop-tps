@@ -7,7 +7,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "build:report": "vite build && node scripts/generate-asset-report.mjs",
-    "report:assets": "node scripts/generate-asset-report.mjs"
+    "report:assets": "node scripts/generate-asset-report.mjs",
+    "optimize:mappack": "node scripts/optimize-mappack.mjs"
   },
   "repository": {
     "type": "git",
@@ -22,6 +23,11 @@
   "homepage": "https://github.com/irademos/multiplayer_game#readme",
   "description": "",
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "meshoptimizer": "^1.3.0",
+    "sharp": "^0.35.5",
     "vite": "^6.3.4"
   },
   "dependencies": {
