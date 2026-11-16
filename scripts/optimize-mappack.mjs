@@ -11,7 +11,9 @@
 // Usage:
 //   node scripts/optimize-mappack.mjs public/mappacks/island_town.mappack            # in place
 //   node scripts/optimize-mappack.mjs in.mappack -o out.mappack --texture-size 1024
-//   node scripts/optimize-mappack.mjs some/folder/of/glbs -o optimized/              # loose GLBs
+//   node scripts/optimize-mappack.mjs some/folder -o optimized/                       # loose models
+// A folder: every .glb, and every .gltf (with its .bin / textures beside it or in sub-folders,
+// e.g. an asset kit's glTF folder), is written to the output folder as one self-contained .glb.
 // Run it on a pack every time it is exported from the editor. Optimizing an already optimized
 // pack is harmless (it is skipped per model when it wouldn't get smaller).
 
@@ -83,15 +85,28 @@ const stat = fs.statSync(input);
 if (stat.isDirectory()) {
   const dest = out || input;
   fs.mkdirSync(dest, { recursive: true });
-  let before = 0, after = 0;
-  for (const f of fs.readdirSync(input).filter((f) => f.toLowerCase().endsWith('.glb'))) {
-    const bytes = fs.readFileSync(path.join(input, f));
-    const r = await optimizeEntry(f, bytes);
-    fs.writeFileSync(path.join(dest, f), r.bytes);
-    before += bytes.length; after += r.bytes.length;
-    console.log(`  ${f}: ${r.note}`);
+  let before = 0, after = 0, n = 0;
+  for (const f of fs.readdirSync(input).filter((f) => /\.(glb|gltf)$/i.test(f)).sort()) {
+    const src = path.join(input, f);
+    const name = f.replace(/\.gltf$/i, '.glb');
+    let bytes;
+    if (/\.gltf$/i.test(f)) {
+      // pack the .gltf + its .bin + textures into one GLB first (its size before = all of them)
+      const doc = await io.read(src);
+      bytes = Buffer.from(await io.writeBinary(doc));
+      const own = [src, ...doc.getRoot().listBuffers().map((b) => b.getURI()), ...doc.getRoot().listTextures().map((t) => t.getURI())]
+        .filter(Boolean).map((u) => (u === src ? u : path.join(input, decodeURIComponent(u))));
+      before += own.reduce((sum, u) => sum + (fs.existsSync(u) ? fs.statSync(u).size : 0), 0);
+    } else {
+      bytes = fs.readFileSync(src);
+      before += bytes.length;
+    }
+    const r = await optimizeEntry(name, bytes);
+    fs.writeFileSync(path.join(dest, name), r.bytes);
+    after += r.bytes.length; n++;
+    console.log(`  ${name}: ${r.note}`);
   }
-  console.log(`GLBs: ${kb(before)} → ${kb(after)}`);
+  console.log(`${n} models: ${kb(before)} → ${kb(after)} (${dest})`);
 } else {
   const srcBuf = fs.readFileSync(input);
   const zip = await JSZip.loadAsync(srcBuf);
