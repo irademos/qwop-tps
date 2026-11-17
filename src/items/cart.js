@@ -22,7 +22,7 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // rising steeper than MAX_UP_SLOPE, a step up of more than MAX_STEP_UP (walls, houses, steps),
 // water deeper than MAX_WADE, a tree trunk. Down it goes any way: a drop steeper than it can follow
 // (FALL_STEP) and it's off the edge, falling with gravity (FALL_GRAVITY) until it lands. Dust
-// cartoon dust puffs pop up behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
+// soft dust puffs rise behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
 // Holding something the gyro works (ctx.isHolding): the phone's busy with it, so the cart stops
 // and the rider turns in the bed to face the camera's way (the cart stays put); put away, the
 // phone's pose then is the new rest (ctx.onHoldEnd) — as on the broom.
@@ -67,16 +67,17 @@ const FALL_TIP_RATE = 2.5;                   // 1/s — falling, the pitch / rol
 const HARD_LANDING = 4;                      // m/s down landing: a thud
 // Dust behind the back wheels
 const DUST_MAX = 64;                         // puffs alive at once
-const DUST_PER_M = 2.6;                    // puffs a metre rolled (both wheels)
-const DUST_MIN_SPEED = 0.4;                  // m/s — slower than this, none
-const DUST_LIFE = [0.55, 0.85];              // s
-const DUST_SIZE = [0.35, 0.7];              // m across at full size
-const DUST_POP = 0.22;                       // share of its life popping in (overshooting)
-const DUST_SHRINK = 0.4;                     // … and shrinking away at the end
-const DUST_RISE = 0.45;                      // m/s up
-const DUST_LIGHT = '#f4e6c8';                // its colours: lit,
-const DUST_SHADE = '#d6bf94';                // shaded underside,
-const DUST_OUTLINE = '#6e5638';              // outline
+const DUST_PER_M = 2.6;                      // puffs a metre rolled (both wheels)
+const DUST_MIN_SPEED = 0.5;                  // m/s — slower than this, none
+const DUST_LIFE = [0.7, 1.1];                // s
+const DUST_SIZE = [0.35, 0.6];               // m across, grown
+const DUST_POP = 0.3;                        // share of its life swelling up
+const DUST_FADE = 0.6;                       // … and fading out at the end
+const DUST_OPACITY = 0.75;
+const DUST_BLUR_PX = 4;                      // soft edges (of 128 px)
+const DUST_RISE = 0.35;                      // m/s up
+const DUST_LIGHT = '#e9dcc0';                // its colours: lit,
+const DUST_SHADE = '#cdb894';                // a little darker underneath
 const MAX_WADE = 0.3;                        // m of water it rolls through
 const TRUNK_PROBE_R = 0.12;                  // m: a corner this near a trunk is against it
 const TILT_DEAD = 0.1;                       // sin of the tilt — under this, no lean
@@ -147,8 +148,8 @@ export function createCartModel() {
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
-// Cartoon puffs (shared by every cart's dust): a little cloud of overlapping circles in a flat
-// cream, darker underneath, a highlight on top and a dark outline — a few shapes for variety
+// Dust puffs (shared by every cart's dust): a little cloud of overlapping circles, soft-edged,
+// a touch darker underneath — a few shapes for variety
 const DUST_VARIANTS = 3;
 let dustTextures = null;
 const getDustTextures = () => {
@@ -171,36 +172,40 @@ const getDustTextures = () => {
       g.beginPath();
       for (const [x, y, r] of blobs) { g.moveTo(x + r + grow, y); g.arc(x, y, r + grow, 0, Math.PI * 2); }
     };
-    g.fillStyle = DUST_OUTLINE;
-    shape(4);
+    // (soft edges: the whole cloud drawn blurred)
+    g.filter = `blur(${DUST_BLUR_PX}px)`;
+    g.fillStyle = '#fff';
+    shape(-2);
     g.fill();
+    g.filter = 'none';
     g.save();
-    shape(0);
-    g.clip();
+    g.globalCompositeOperation = 'source-atop';
     // (shaded all over, then the lit circles shifted up over it — a dark rim stays underneath)
     g.fillStyle = DUST_SHADE;
     g.fillRect(0, 0, S, S);
     g.fillStyle = DUST_LIGHT;
     g.beginPath();
-    for (const [x, y, r] of blobs) { g.moveTo(x - 3 + r * 0.92, y - 7); g.arc(x - 3, y - 7, r * 0.92, 0, Math.PI * 2); }
-    g.fill();
-    // (highlight: a small spot up on the middle one)
-    g.fillStyle = 'rgba(255,255,255,0.9)';
-    g.beginPath();
-    g.ellipse(52, 54, 9, 6, -0.5, 0, Math.PI * 2);
+    for (const [x, y, r] of blobs) { g.moveTo(x + r * 0.9, y - 6); g.arc(x, y - 6, r * 0.9, 0, Math.PI * 2); }
+    g.filter = `blur(${DUST_BLUR_PX * 1.5}px)`;
     g.fill();
     g.restore();
+    // (and faded toward its edge — soft even where the canvas can't blur, e.g. older Safari)
+    const fade = g.createRadialGradient(64, 66, 28, 64, 66, 62);
+    fade.addColorStop(0, 'rgba(0,0,0,1)');
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalCompositeOperation = 'destination-in';
+    g.fillStyle = fade;
+    g.fillRect(0, 0, S, S);
+    g.globalCompositeOperation = 'source-over';
     const t = new THREE.CanvasTexture(c);
     t.colorSpace = THREE.SRGBColorSpace;
     dustTextures.push(t);
   }
   return dustTextures;
 };
-// Pop in past its size and settle (an overshoot), then shrink away
-const easeOutBack = (x) => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2;
-const puffScale = (u) => (u < DUST_POP ? easeOutBack(u / DUST_POP)
-  : u < 1 - DUST_SHRINK ? 1 + 0.12 * ((u - DUST_POP) / (1 - DUST_POP - DUST_SHRINK))
-    : 1.12 * (1 - ((u - 1 + DUST_SHRINK) / DUST_SHRINK) ** 2));
+// Swells quickly, keeps spreading a little; fades in fast and out slowly
+const puffScale = (u) => 0.45 + 0.55 * (1 - (1 - Math.min(1, u / DUST_POP)) ** 2) + 0.25 * u;
+const puffOpacity = (u) => DUST_OPACITY * Math.min(1, u / 0.12) * (u < 1 - DUST_FADE ? 1 : (1 - u) / DUST_FADE);
 
 /** Dust puffs: { emit(x, y, z, vx, vz), update(dt), clear() } — sprites in `parent`. */
 function createCartDust(parent) {
@@ -208,8 +213,7 @@ function createCartDust(parent) {
   let next = 0;
   const textures = getDustTextures();
   for (let i = 0; i < DUST_MAX; i++) {
-    // (crisp edges, drawn solid — alphaTest, no blending to sort)
-    const mat = new THREE.SpriteMaterial({ map: textures[i % textures.length], alphaTest: 0.5, transparent: false });
+    const mat = new THREE.SpriteMaterial({ map: textures[i % textures.length], transparent: true, depthWrite: false, opacity: 0 });
     const sp = new THREE.Sprite(mat);
     sp.visible = false;
     sp.renderOrder = 2;
@@ -246,6 +250,7 @@ function createCartDust(parent) {
         p.sp.position.z += p.vz * dt;
         const k = Math.max(0.001, p.size * puffScale(u));
         p.sp.scale.set(k, k, 1);
+        p.sp.material.opacity = puffOpacity(u);
       }
     },
     clear() { for (const p of pool) p.sp.visible = false; },
