@@ -418,7 +418,8 @@ export class GLBCharacter {
   // Measures the ground speed from the world position (last frame's matrix) and flips
   // walk <-> run around runSpeed
   _updateSpeed(dt) {
-    if (!(dt > 0)) return;
+    // (`noRun`: always the walk — the giant, whose clips play slowed down)
+    if (!(dt > 0) || this.noRun) return;
     const e = this.scene.matrixWorld.elements;
     const x = e[12];
     const z = e[14];

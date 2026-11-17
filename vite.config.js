@@ -23,6 +23,7 @@ const versionFile = () => ({
 const OFFLINE_SKIP = [
   /^glb_map\//,
   /^mappacks\/tree_island/,
+  /^models\/glb_characters\/giant\.glb$/, // (Tree Island's giant — the island isn't offline either)
   /^assets\/audio\/Songs\//,
   /^service-worker\.js$/,
   /\.map$/,

@@ -160,6 +160,11 @@ export class PlayerControls {
     // Riding Town's broom (with holdStill): { y, yaw } — the game moves playerX / playerZ, and
     // the player's height and the body's facing are these (the camera's yaw stays this.yaw)
     this.ride = null;
+    // Climbing something that moves (the giant on Tree Island — src/characters/giant.js): a hook
+    // (ctrl, movement, dt) → null (not climbing) or { x, y, z, yaw, moving } — where the player
+    // is on it this frame; it owns the movement then (no walking, ground snap or wall climbing)
+    this.surfaceClimb = null;
+    this._surface = null;
     // () => bool: whether a quick swipe on this screen rolls (false: it stays a camera drag —
     // this device is the gyro sword, so swipes are sword moves; the QR phone page still rolls)
     this.swipeRollAllowed = () => true;
@@ -1277,7 +1282,7 @@ export class PlayerControls {
   }
 
   get isClimbing() {
-    return !!this._climb;
+    return !!this._climb || !!this._surface;
   }
 
   /**
@@ -1287,7 +1292,7 @@ export class PlayerControls {
    * the clip. Returns false when it can't roll now.
    */
   startRoll(dx, dy) {
-    if (this._roll || this._climb || this.holdStill || window.phoneSwordAirborne) return false;
+    if (this._roll || this._climb || this._surface || this.holdStill || window.phoneSwordAirborne) return false;
     const len = Math.hypot(dx, dy);
     if (!(len > 1e-6)) return false;
     const forward = new THREE.Vector3();
@@ -1541,7 +1546,17 @@ export class PlayerControls {
         }
       }
 
-      const climbHandled = !roll && this._updateClimb(climbInput, deltaSeconds, autoLen > 1e-6);
+      // (on the giant: its hook places the player — src/characters/giant.js)
+      const surf = !roll && !this.holdStill && typeof this.surfaceClimb === 'function'
+        ? this.surfaceClimb(this, climbInput, deltaSeconds) : null;
+      this._surface = surf;
+      if (surf) {
+        this._climb = null;
+        this.playerX = surf.x;
+        this.playerY = surf.y;
+        this.playerZ = surf.z;
+      }
+      const climbHandled = !!surf || (!roll && this._updateClimb(climbInput, deltaSeconds, autoLen > 1e-6));
       if (!climbHandled) {
         this._walkStep(
           movement.x * speed * deltaSeconds + (autoLen > 1e-6 ? autoMove.x : 0),
@@ -1550,15 +1565,15 @@ export class PlayerControls {
         if (stepMove && !roll && !this._climb) this._walkStep(stepMove.x, stepMove.z);
       }
       // (never inside a tree trunk — a roll, a climb's drift or a knock that ended up there)
-      const outOfTrunk = pushOutOfObstacles(this.playerX, this.playerZ, this.playerY, TRUNK_PLAYER_RADIUS);
+      const outOfTrunk = !surf && pushOutOfObstacles(this.playerX, this.playerZ, this.playerY, TRUNK_PLAYER_RADIUS);
       if (outOfTrunk) {
         this.playerX = outOfTrunk.x;
         this.playerZ = outOfTrunk.z;
       }
       // (a hook that keeps the player inside an area — the pirate ship's deck on a voyage)
-      if (typeof this.positionConstraint === 'function') this.positionConstraint(this);
+      if (!surf && typeof this.positionConstraint === 'function') this.positionConstraint(this);
 
-      if (this.ride) {
+      if (this.ride && !surf) {
         // (riding Town's broom: it sets the height — no ground snap, no ledge falls)
         if (Number.isFinite(this.ride.y)) this.playerY = this.ride.y;
       } else if (!climbHandled && !window.phoneSwordAirborne) {
@@ -1603,11 +1618,11 @@ export class PlayerControls {
       const newY = this.playerY;
       const newZ = this.playerZ;
       const isMovingNow = climbInput.length() > 0;
-      this.isMoving = isMovingNow && !this._climb && !roll;
+      this.isMoving = isMovingNow && !this._climb && !surf && !roll;
 
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
-        this.playerModel.rotation.set(0, roll ? roll.yaw : this.ride ? this.ride.yaw : this.yaw, 0);
+        this.playerModel.rotation.set(0, surf ? surf.yaw : roll ? roll.yaw : this.ride ? this.ride.yaw : this.yaw, 0);
         this.playerModel.up.set(0, 1, 0);
         this.camera.up.set(0, 1, 0);
 
@@ -1646,9 +1661,9 @@ export class PlayerControls {
     this.deltaSeconds = delta;
 
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, {
-      isMoving: !!this.isMoving && !this._climb,
-      climbing: !!this._climb,
-      climbMoving: !!this._climb && !!this._climbMoving
+      isMoving: !!this.isMoving && !this._climb && !this._surface,
+      climbing: !!this._climb || !!this._surface,
+      climbMoving: (!!this._climb && !!this._climbMoving) || !!this._surface?.moving
     });
 
     // Arrow keys turn the camera (or shift the gyro reference while the camera gyro is active)
