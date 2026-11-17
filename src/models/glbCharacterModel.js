@@ -2,7 +2,7 @@
  * GLB character used by the local player, remote players and EnemyPlayers.
  *
  * The character (pumpkin.glb for players; pumpkin.glb, antler_guy.glb, frog_man.glb or
- * gemhorn_rigged.glb for enemies — all share the Mixamo skeleton; pick one with the `url` option) is animated with Mixamo FBX
+ * gemhorn_rigged.glb for enemies — all share the Mixamo skeleton; pick one with the `url` option) is animated with Mixamo
  * clips through fluffyCharacter.ts, which retargets by world-space rotation deltas
  * and adds fluffy secondary motion + shell fur. The clip drives the whole body
  * EXCEPT the arm chains (Shoulder → Arm → ForeArm → Hand): those are posed every
@@ -60,6 +60,9 @@ import { FluffyCharacter, preloadAnimation } from './fluffyCharacter.ts';
 import { stylizeObject, whenStyleReferenceReady } from '../environment/artStyle.js';
 import { addBlobShadow } from '../environment/blobShadows.js';
 
+// Every clip is an action in one GLB, named after the Mixamo FBX it came from
+const ANIM = '/models/animations/animations.glb#';
+
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
   villageBoyUrl: '/models/glb_characters/village_boy.glb', // default player character (unlocked from the start)
@@ -74,19 +77,19 @@ export const glbCharacterConfig = {
   oldGuyUrl: '/models/glb_characters/old_guy.glb',         // Old guy: roster / Showdown + Endless unlock; wand caster like the wizard; Town townsfolk
   giantUrl: '/models/glb_characters/giant.glb?v=1',       // Tree Island's giant (src/characters/giant.js); bump ?v= here and in keepTextureUrls
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
-  walkClip: '/models/animations/Old Man Walk.fbx',
-  idleClip: '/models/animations/Breathing Idle.fbx',
-  deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
-  throwClip: '/models/animations/Throw.fbx', // bomb thrower's throw (playAction); right-handed
-  runClip: '/models/animations/Slow Run.fbx',  // replaces the walk above runSpeed
-  rollClip: '/models/animations/Roll.fbx',     // player's dodge roll (playAction)
-  sitClip: '/models/animations/Sitting.fbx',   // riding Town's broom (playPose)
-  crouchClip: '/models/animations/Crouch.fbx', // riding Town's cart (playPose)
-  climbClip: '/models/animations/Climb.fbx',   // wall climbing (playPose — PlayerControls._updateClimb)
-  swimClip: '/models/animations/Swimming.fbx',        // swimming in deep water (playPose — SWIM_CONFIG in controls.js)
-  treadClip: '/models/animations/Treading Water.fbx', // still in deep water (playPose)
-  smallHitClip: '/models/animations/Small Hit Reaction.fbx', // a hit that doesn't knock them down (playReaction)
-  blockedClip: '/models/animations/Blocked Reaction.fbx',    // own swing blocked — the stagger (playReaction)
+  walkClip: ANIM + 'Old Man Walk',
+  idleClip: ANIM + 'Breathing Idle',
+  deathClip: ANIM + 'Flying Back Death', // played once (whole body, arms included) by playDeath()
+  throwClip: ANIM + 'Throw', // bomb thrower's throw (playAction); right-handed
+  runClip: ANIM + 'Slow Run',  // replaces the walk above runSpeed
+  rollClip: ANIM + 'Roll',     // player's dodge roll (playAction)
+  sitClip: ANIM + 'Sitting',   // riding Town's broom (playPose)
+  crouchClip: ANIM + 'Crouch', // riding Town's cart (playPose)
+  climbClip: ANIM + 'Climb',   // wall climbing (playPose — PlayerControls._updateClimb)
+  swimClip: ANIM + 'Swimming',        // swimming in deep water (playPose — SWIM_CONFIG in controls.js)
+  treadClip: ANIM + 'Treading Water', // still in deep water (playPose)
+  smallHitClip: ANIM + 'Small Hit Reaction', // a hit that doesn't knock them down (playReaction)
+  blockedClip: ANIM + 'Blocked Reaction',    // own swing blocked — the stagger (playReaction)
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
   // Moving characters run once their measured ground speed (m/s, world space — every
   // player, remote player and enemy alike) goes above runSpeed, and walk again below

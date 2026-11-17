@@ -5,7 +5,7 @@
  * the foam sword, sending it back toward the thrower (it homes in and always kills them).
  *
  * Body: the shared GLB character (gemhorn_rigged.glb, like a third of the
- * EnemyPlayers) with walk/idle clips, Throw.fbx for each throw and the flying-back
+ * EnemyPlayers) with walk/idle clips, the Throw clip for each throw and the flying-back
  * death clip. Its arms follow the clips (no IK); a bomb is held in the right palm.
  *
  * Physics: dynamic Rapier capsule (same as EnemyPlayer).
@@ -47,7 +47,7 @@ const THROW_RANGE_MIN  = 5;    // min distance to throw (don't throw point-blank
 const THROW_RANGE_MAX  = 18;   // max distance to throw
 const THROW_COOLDOWN_MS = 6000; // ms between throws
 const THROW_WINDUP_MS   = 700;  // fallback windup when the throw clip isn't playing (character still loading)
-const THROW_RELEASE_AT  = 0.3;  // fraction of Throw.fbx where the bomb leaves the hand (fastest, forward swing)
+const THROW_RELEASE_AT  = 0.3;  // fraction of the Throw clip where the bomb leaves the hand (fastest, forward swing)
 const THROW_CLIP_TIMEOUT_MS = 2500; // throw anyway if the clip hasn't reached the release point by then
 // The GLB's floating-hand labels are mirrored: 'left' is the anatomical right arm (see glbCharacterModel.js)
 const BOMB_HAND         = 'left';
@@ -485,7 +485,7 @@ export class BombThrowerEnemy {
     const inRange = dist >= THROW_RANGE_MIN && dist <= THROW_RANGE_MAX;
 
     if (!this._inWindup && cooldownReady && inRange && !this.throwsHeld && !this.throwsPaused) {
-      // Start the throw: Throw.fbx when the character is loaded, else a timed windup
+      // Start the throw: the Throw clip when the character is loaded, else a timed windup
       this._inWindup  = true;
       this._windupEnd = now + THROW_WINDUP_MS;
       this._throwUsesClip = !!this._glbCharacter;

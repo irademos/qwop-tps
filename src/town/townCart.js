@@ -1,7 +1,7 @@
 // Town: the cart (src/items/cart.js — the model and how it rolls). It's parked near where the
 // player arrives (between the shop and the campfire — `places.spawn`), on the first spot round
 // it where the whole cart fits (`findParking`). Walk up to it → Get in the cart (like the
-// canoe): the player crouches in its bed (Crouch.fbx) and steers it by tilting the phone, like
+// canoe): the player crouches in its bed (the Crouch clip) and steers it by tilting the phone, like
 // the broom but on the ground — tipped forward it rolls on, back it backs up, leaned left /
 // right it turns (the joystick / WASD the same, the only way without a gyro). Whatever's in hand
 // stays there and can be used (a gyro item stops the cart while it's out — as on the broom).
