@@ -23,6 +23,15 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // water deeper than MAX_WADE, a tree trunk. Down it goes any way: a drop steeper than it can follow
 // (FALL_STEP) and it's off the edge, falling with gravity (FALL_GRAVITY) until it lands. Dust
 // soft dust puffs rise behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
+// Tipping up: pushing into something it can't pass (not water) lifts one side — it rolls up onto
+// the other side's wheels (the side that hit lifts; both blocked, an alley: the side it's
+// steered toward, else either), pivoting on the low side's edge, so its footprint narrows
+// (CART_HALF_WIDTH × cos of the tip, from the low edge in) — a tight gap may let it through.
+// The tip: pushed up while it's blocked (TIP_PUSH), pulled back down below TIP_BALANCE and on
+// over above it (TIP_GRAVITY), held up by whatever won't let it come down (it only drops as far
+// as it still fits), wobbling as it rolls tipped (TIP_WOBBLE). Past TIP_FLIP it flips over: the
+// rider is thrown out (update() → 'flip'), it falls onto its side, lies there FLIP_LIE_S and
+// rights itself (FLIP_RIGHT_S) — nobody gets in meanwhile (isFlipped).
 // Holding something the gyro works (ctx.isHolding): the phone's busy with it, so the cart stops
 // and the rider turns in the bed to face the camera's way (the cart stays put); put away, the
 // phone's pose then is the new rest (ctx.onHoldEnd) — as on the broom.
@@ -87,7 +96,19 @@ const CAM_FOLLOW = 2;                        // 1/s — the camera swinging roun
 const CAM_MANUAL_S = 1.5;                    // s after the player turns the camera by hand
 const CAM_BACK = 1.6;                        // m further back in the cart (it fills the view otherwise)
 const RIDER_TURN_RATE = 8;                   // 1/s — holding something: the rider turning to the camera's way
-const TELEPORT_DIST = 1.5;                   // m moved by someone else in a frame: get out
+const TELEPORT_DIST = 1.5;
+// Tipping up against what it can't pass / flipping over
+const TIP_PUSH = 5;                          // rad/s² lifting at full push into something
+const TIP_GRAVITY = 6;                       // rad/s² × sin(tip − TIP_BALANCE): down below it, over above it
+const TIP_BALANCE = 0.75;                    // rad (~43°) — the balance point
+const TIP_FLIP = 1.1;                        // rad (~63°) — past this it goes over
+const TIP_DAMP = 3;                          // 1/s
+const TIP_WOBBLE = 4;                        // rad/s² of random wobble rolling tipped at full speed
+const TIP_PROBE = 0.6;                       // rad — tried each way to pick the side to lift
+const TIP_CLUNK_SPEED = 0.8;                 // rad/s coming back down onto its wheels: a thud
+const FLIP_LIE = Math.PI / 2;                // rad — on its side
+const FLIP_LIE_S = 1.6;                      // s lying there
+const FLIP_RIGHT_S = 1.1;                    // s righting itself                   // m moved by someone else in a frame: get out
 
 let templatePromise = null;
 let floorY = MODEL_FLOOR_FALLBACK_Y;         // the bed's floor, model units
@@ -282,7 +303,7 @@ export function createCartRide(ctx) {
   ctx.parent.add(model.group);
   const dust = createCartDust(ctx.parent);
   let dustDue = 0;
-  const st = { vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
+  const st = { tip: 0, tipV: 0, tipSide: 1, flip: null, vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
   const ride = { y: 0, yaw: 0, camDist: 0 }; // (controls.ride)
   let riding = false;
   let holding = false;
@@ -303,16 +324,29 @@ export function createCartRide(ctx) {
     x: x + Math.cos(yaw) * lx + Math.sin(yaw) * lz,
     z: z - Math.sin(yaw) * lx + Math.cos(yaw) * lz,
   });
-  const CORNERS = [[CART_HALF_WIDTH, CART_FRONT], [-CART_HALF_WIDTH, CART_FRONT], [CART_HALF_WIDTH, -CART_BACK], [-CART_HALF_WIDTH, -CART_BACK], [0, CART_FRONT], [0, -CART_BACK]];
+  // Its footprint's corners (cart-local), tipped up `tip` rad with side `side` (+1 left, −1
+  // right) lifted: narrower, from the low side's edge in
+  const cornersFor = (tip = 0, side = 1) => {
+    const c = Math.cos(tip);
+    const hw = CART_HALF_WIDTH * c;
+    const mx = -side * CART_HALF_WIDTH * (1 - c);
+    return [[mx + hw, CART_FRONT], [mx - hw, CART_FRONT], [mx + hw, -CART_BACK], [mx - hw, -CART_BACK], [mx, CART_FRONT], [mx, -CART_BACK]];
+  };
+  let blockedBy = null;                       // why fits() last said no ('water' / null)
   // Whether the cart fits at a pose. `roll` (rolling there): { dir — +1 forward / −1 back / 0
   // turning on the spot, y — its height now, air — in the air }; without it (parking) every
   // corner's slope counts. Rolling, only the ground ahead the way it goes counts: up it's
   // limited (MAX_UP_SLOPE, MAX_STEP_UP), down never — off an edge it falls.
-  const fits = (x, z, yaw, roll = null) => {
-    const mid = groundAt(x, z);
-    if (!Number.isFinite(mid) || ctx.waterDepth(x, z) > MAX_WADE) return false;
+  // `tilt` { tip, side }: tipped up (its narrower footprint)
+  const fits = (x, z, yaw, roll = null, tilt = null) => {
+    blockedBy = null;
+    const corners = cornersFor(tilt?.tip ?? 0, tilt?.side ?? 1);
+    const m = worldXZ(x, z, yaw, corners[4][0], 0);
+    const mid = groundAt(m.x, m.z);
+    if (!Number.isFinite(mid)) return false;
+    if (ctx.waterDepth(m.x, m.z) > MAX_WADE) { blockedBy = 'water'; return false; }
     if (roll && !roll.air && mid - roll.y > MAX_STEP_UP) return false;
-    for (const [lx, lz] of CORNERS) {
+    for (const [lx, lz] of corners) {
       const p = worldXZ(x, z, yaw, lx, lz);
       const g = groundAt(p.x, p.z);
       if (!Number.isFinite(g)) return false;
@@ -324,7 +358,7 @@ export function createCartRide(ctx) {
         const limit = roll?.dir === 0 ? MAX_UP_SLOPE + TURN_SLOPE_SLACK : MAX_UP_SLOPE;
         if (ahead && (g - mid) / Math.abs(lz) > limit) return false;
       }
-      if (ctx.waterDepth(p.x, p.z) > MAX_WADE) return false;
+      if (ctx.waterDepth(p.x, p.z) > MAX_WADE) { blockedBy = 'water'; return false; }
       if (pushOutOfObstacles(p.x, p.z, g + 0.4, TRUNK_PROBE_R)) return false;
     }
     return true;
@@ -343,11 +377,14 @@ export function createCartRide(ctx) {
     const fr = h(-hw, hb);
     const bl = h(hw, -hb);
     const br = h(-hw, -hb);
-    const front = (fl + fr) / 2;
-    const back = (bl + br) / 2;
+    // (tipped up: on the low side's wheels alone — the raised side's may be over a wall)
+    const tipped = st.tip > 0.02;
+    const lowLeft = st.tipSide < 0;
+    const front = tipped ? (lowLeft ? fl : fr) : (fl + fr) / 2;
+    const back = tipped ? (lowLeft ? bl : br) : (bl + br) / 2;
     const y = (front + back) / 2;
     const pitch = Math.atan2(back - front, CART_WHEELBASE); // (+: nose down)
-    const roll = Math.atan2((fl + bl) / 2 - (fr + br) / 2, CART_TRACK); // (+: the left side up)
+    const roll = tipped ? 0 : Math.atan2((fl + bl) / 2 - (fr + br) / 2, CART_TRACK); // (+: the left side up)
     if (!st.settled || !(dt > 0)) {
       Object.assign(st, { y, pitch, roll, vy: 0, air: false, settled: true });
       return null;
@@ -392,9 +429,64 @@ export function createCartRide(ctx) {
       dust.emit(p.x, Number.isFinite(g) ? g : st.y, p.z, vx, vz);
     }
   };
+  // (tipped: turned about the low side's bottom edge — raised, and shifted toward that side)
   const placeModel = () => {
-    model.group.position.set(st.x, st.y, st.z);
-    model.group.rotation.set(st.pitch, st.yaw, st.roll);
+    const tip = st.tip;
+    const off = tip > 1e-4 ? worldXZ(0, 0, st.yaw, -st.tipSide * CART_HALF_WIDTH * (1 - Math.cos(tip)), 0) : { x: 0, z: 0 };
+    model.group.position.set(st.x + off.x, st.y + CART_HALF_WIDTH * Math.sin(tip), st.z + off.z);
+    model.group.rotation.set(st.pitch, st.yaw, st.roll + st.tipSide * tip);
+  };
+  const tilt = (tip = st.tip) => (tip > 1e-3 ? { tip, side: st.tipSide } : null);
+  // The tip each frame riding (on the ground): `lift` — pushing into something it can't pass
+  // (0 … 1). → 'flip' when it goes over.
+  const updateTip = (dt, lift) => {
+    if (st.tip < 1e-3 && lift <= 0) { st.tip = 0; st.tipV = 0; return null; }
+    let acc = TIP_GRAVITY * Math.sin(st.tip - TIP_BALANCE) + TIP_PUSH * lift;
+    if (st.tip > 0.02) acc += (Math.random() - 0.5) * 2 * TIP_WOBBLE * Math.min(1, Math.abs(st.v) / MAX_SPEED);
+    st.tipV = (st.tipV + acc * dt) * Math.exp(-TIP_DAMP * dt);
+    let next = st.tip + st.tipV * dt;
+    if (next < st.tip) {
+      // (coming down only as far as it still fits — walls either side hold it up)
+      const y = groundAt(st.x, st.z);
+      if (!fits(st.x, st.z, st.yaw, { dir: 0, y: Number.isFinite(y) ? y : st.y, air: false }, tilt(Math.max(0, next)))) {
+        next = st.tip;
+        st.tipV = Math.max(0, st.tipV);
+      }
+    }
+    if (next <= 0) {
+      if (st.tipV < -TIP_CLUNK_SPEED && st.t - st.bumpAt > 0.3) { st.bumpAt = st.t; ctx.onBump?.(); }
+      next = 0;
+      st.tipV = 0;
+    }
+    st.tip = next;
+    if (st.tip < TIP_FLIP) return null;
+    st.flip = { phase: 'fall', t: 0 };
+    return 'flip';
+  };
+  // Flipped over (nobody in it): falling onto its side, lying there, righting itself
+  const updateFlip = (dt) => {
+    const f = st.flip;
+    f.t += dt;
+    if (f.phase === 'fall') {
+      st.tipV += TIP_GRAVITY * 1.5 * dt;
+      st.tip += st.tipV * dt;
+      if (st.tip >= FLIP_LIE) {
+        st.tip = FLIP_LIE;
+        if (st.tipV > 1.5) st.tipV *= -0.25; // (a little bounce)
+        else { st.tipV = 0; f.phase = 'lie'; f.t = 0; }
+        ctx.onBump?.();
+      }
+    } else if (f.phase === 'lie') {
+      if (f.t >= FLIP_LIE_S) { f.phase = 'right'; f.t = 0; }
+    } else {
+      const u = Math.min(1, f.t / FLIP_RIGHT_S);
+      st.tip = FLIP_LIE * (1 - u * u * (3 - 2 * u));
+      if (u >= 1) {
+        Object.assign(st, { tip: 0, tipV: 0, flip: null });
+        ctx.onBump?.();
+      }
+    }
+    placeModel();
   };
   // The bed's floor where the rider crouches, in the world
   const standPoint = (out = _v) => {
@@ -405,7 +497,7 @@ export function createCartRide(ctx) {
 
   /** Parks it at a pose (on the ground there). */
   const place = (x, z, yaw) => {
-    Object.assign(st, { x, z, yaw, v: 0, settled: false });
+    Object.assign(st, { x, z, yaw, v: 0, settled: false, tip: 0, tipV: 0, flip: null });
     dust.clear();
     settle(0);
     placeModel();
@@ -413,10 +505,10 @@ export function createCartRide(ctx) {
 
   const mount = () => {
     const c = ctx.getControls();
-    if (riding || !c) return false;
+    if (riding || !c || st.flip) return false;
     riding = true;
     holding = false;
-    Object.assign(st, { v: 0, riderYaw: st.yaw, camYaw: null, manualAt: -Infinity });
+    Object.assign(st, { v: 0, riderYaw: st.yaw, camYaw: null, manualAt: -Infinity, tip: 0, tipV: 0 });
     const s = standPoint();
     c.playerX = s.x;
     c.playerZ = s.z;
@@ -468,7 +560,7 @@ export function createCartRide(ctx) {
   const update = (dt) => {
     dt = Math.min(0.1, Math.max(0, dt));
     dust.update(dt);
-    if (!riding) return;
+    if (!riding) { if (st.flip) updateFlip(dt); return null; }
     const c = ctx.getControls();
     if (!c) return;
     st.t += dt;
@@ -501,18 +593,32 @@ export function createCartRide(ctx) {
     // (on the ground: steps up measured from the ground under its middle — not its wheels'
     // average, which sits under a crest; in the air: from its bottom)
     const fromY = st.air ? st.y : groundAt(st.x, st.z);
-    if (fits(nx, nz, yaw, { dir, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air })) {
+    const rollAt = { dir, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air };
+    let lift = 0;
+    if (fits(nx, nz, yaw, rollAt, tilt())) {
       Object.assign(st, { x: nx, z: nz, yaw });
       moved = step;
       if (!st.air) model.spin(step);
-    } else if (fits(st.x, st.z, yaw, { dir: 0, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air })) {
-      // (up against something: turning still works)
-      st.yaw = yaw;
-      if (Math.abs(st.v) > 1 && st.t - st.bumpAt > 0.6) { st.bumpAt = st.t; ctx.onBump?.(); }
-      st.v = 0;
     } else {
+      // Up against something: pushing on into it (not water) tips it up — first, which side lifts
+      const intoWater = blockedBy === 'water';
+      if (!st.air && !holding && !intoWater && Math.abs(iz) > 0.15 && dir !== 0) {
+        if (st.tip < 0.02) {
+          const ok = [1, -1].filter((sd) => fits(nx, nz, yaw, rollAt, { tip: TIP_PROBE, side: sd }));
+          st.tipSide = ok.length === 1 ? ok[0]
+            : Math.abs(ix) > 0.2 ? Math.sign(ix) // (steered that way: that side up)
+              : (Math.random() < 0.5 ? 1 : -1);
+        }
+        lift = Math.abs(iz);
+      }
+      // (turning still works)
+      if (fits(st.x, st.z, yaw, { ...rollAt, dir: 0 }, tilt())) st.yaw = yaw;
       if (Math.abs(st.v) > 1 && st.t - st.bumpAt > 0.6) { st.bumpAt = st.t; ctx.onBump?.(); }
       st.v = 0;
+    }
+    if (!st.air && updateTip(dt, holding ? 0 : lift) === 'flip') {
+      placeModel();
+      return 'flip';
     }
     if (settle(dt, moved) === 'thud' && st.t - st.bumpAt > 0.3) { st.bumpAt = st.t; ctx.onBump?.(); }
     kickDust(moved, dt);
@@ -544,7 +650,8 @@ export function createCartRide(ctx) {
     pm.rotation.order = 'YXZ';
     // (the cart's tip, turned into the rider's frame when they face another way)
     const d = st.riderYaw - st.yaw;
-    pm.rotation.set(st.pitch * Math.cos(d) - st.roll * Math.sin(d), st.riderYaw, st.roll * Math.cos(d) + st.pitch * Math.sin(d));
+    const roll = st.roll + st.tipSide * st.tip;
+    pm.rotation.set(st.pitch * Math.cos(d) - roll * Math.sin(d), st.riderYaw, roll * Math.cos(d) + st.pitch * Math.sin(d));
     pm.updateMatrixWorld(true);
   };
 
@@ -566,6 +673,9 @@ export function createCartRide(ctx) {
     pose: () => ({ x: st.x, z: st.z, yaw: st.yaw }),
     group: model.group,
     isRiding: () => riding,
+    isFlipped: () => !!st.flip,
+    // The way the rider is thrown going over: toward the low side (world { x, z }, unit)
+    throwDir: () => worldXZ(0, 0, st.yaw, -st.tipSide, 0),
     isHolding: () => riding && holding,
   };
 }

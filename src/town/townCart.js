@@ -7,7 +7,9 @@
 // stays there and can be used (a gyro item stops the cart while it's out — as on the broom).
 // Get out → the player steps down beside it, the cart stays there (back at its parking spot the
 // next time Town opens). Dying / an arrest / a room / the canoe / leaving Town get them out too.
-// No going into houses in it (townTrade.js — `ctx.isInCart`). Only the player's own: in a shared
+// Pushed into something it can't pass, it tips up onto two wheels (narrower — a tight alley may
+// let it through); too far and it flips over, throwing the player out (ctx.throwPlayer), then
+// rights itself (src/items/cart.js). No going into houses in it (townTrade.js — `ctx.isInCart`). Only the player's own: in a shared
 // town the others don't see it (they'd see the player crouching as they go).
 
 import { createCartRide } from '../items/cart.js';
@@ -67,7 +69,7 @@ export function installTownCart(T, ctx) {
     ride.place(home.x, home.z, home.yaw);
   };
 
-  const canBoard = () => !!ride && !ride.isRiding() && !ctx.isPlayerDead() && !T.sequence && !T.jail && !T.inRoom
+  const canBoard = () => !!ride && !ride.isRiding() && !ride.isFlipped() && !ctx.isPlayerDead() && !T.sequence && !T.jail && !T.inRoom
     && !T.inCanoe() && !T.held && !T.fishing;
   const board = () => {
     if (!canBoard()) return;
@@ -108,7 +110,15 @@ export function installTownCart(T, ctx) {
     }
     if (!ride.isRiding()) { ride.update(dt); return; } // (its dust settling)
     if (!T.active || ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom || T.inCanoe()) { leave({ step: false }); return; }
-    if (ride.update(dt) === 'left') leave({ step: false });
+    const r = ride.update(dt);
+    if (r === 'left') leave({ step: false });
+    else if (r === 'flip') {
+      // Over it goes: the player thrown out toward the side it falls
+      const dir = ride.throwDir();
+      leave({ step: false });
+      ctx.throwPlayer?.(dir);
+      T.feedLine('The cart tipped over!');
+    }
   };
   const cartAfterControls = () => ride?.afterControls();
 
