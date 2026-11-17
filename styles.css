@@ -604,6 +604,47 @@ textarea {
 }
 body.has-mana:not(.multiplayer-mode):not(.classic-mode) #shield-health-display,
 body.has-mana.match-loadout #shield-health-display { top: 106px; }
+/* Swimming energy (deep water — _updateSwim in bootstrapGameApp.js): full on starting to swim,
+   out of breath → washed ashore, one health less; under the mana pill, the shield pill moves down */
+#swim-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 3px 9px 3px 6px;
+  background: var(--surface-hud);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-sm);
+}
+#swim-bar.hidden { display: none; }
+.swim-icon { font-size: 11px; line-height: 1; }
+.swim-track {
+  width: 72px;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+#swim-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #7dd3fc, #0284c7);
+  border-radius: inherit;
+  transition: width 0.2s linear;
+}
+#swim-bar.swim-low { animation: swim-low 0.8s ease-in-out infinite; }
+#swim-bar.swim-low #swim-bar-fill { background: linear-gradient(90deg, #fca5a5, #dc2626); }
+@keyframes swim-low {
+  0%, 100% { border-color: rgba(248, 113, 113, 0.4); }
+  50% { border-color: rgba(248, 113, 113, 0.95); box-shadow: 0 0 10px rgba(220, 38, 38, 0.5); }
+}
+@media (prefers-reduced-motion: reduce) { #swim-bar.swim-low { animation: none; } }
+body.player-swimming #shield-health-display { margin-top: 24px; }
+/* Story hides the health display (no health there): while swimming it shows the swim bar alone */
+body.story-mode.player-swimming #health-display { display: flex !important; }
+body.story-mode.player-swimming #health-display > :not(#swim-bar) { display: none !important; }
+
 /* Multiplayer: no mana outside battles (a picked-up wand brings it — body.match-loadout) */
 body.multiplayer-mode:not(.match-loadout) #mana-bar { display: none; }
 

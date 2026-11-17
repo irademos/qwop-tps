@@ -82,6 +82,8 @@ export const glbCharacterConfig = {
   sitClip: '/models/animations/Sitting.fbx',   // riding Town's broom (playPose)
   crouchClip: '/models/animations/Crouch.fbx', // riding Town's cart (playPose)
   climbClip: '/models/animations/Climb.fbx',   // wall climbing (playPose — PlayerControls._updateClimb)
+  swimClip: '/models/animations/Swimming.fbx',        // swimming in deep water (playPose — SWIM_CONFIG in controls.js)
+  treadClip: '/models/animations/Treading Water.fbx', // still in deep water (playPose)
   smallHitClip: '/models/animations/Small Hit Reaction.fbx', // a hit that doesn't knock them down (playReaction)
   blockedClip: '/models/animations/Blocked Reaction.fbx',    // own swing blocked — the stagger (playReaction)
   clipFade: 0.2,           // seconds to crossfade walk <-> idle

@@ -10,7 +10,7 @@ import { getSpawnPosition } from '../map/spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../combat/knockback.js";
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
-import { characterCameraHeight } from '../models/glbCharacterModel.js';
+import { characterCameraHeight, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { loadNippleJs } from '../core/externalDeps.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { arrowShotOptions, ARROW_SPEED_MIN, ARROW_SPEED_MAX } from '../items/projectiles.js';
@@ -63,6 +63,21 @@ const CAMERA_UNDER_MIN_HEIGHT = 0.8;
 // While climbing every stick direction does something: forward or sideways (within
 // upMaxAngleDeg of the wall) climbs at speed m/s until level with the top (then they step onto
 // it), pulling back jumps off (onClimbJumpOff hook, bootstrapGameApp.js).
+// Swimming: water deeper than enterDepth over the ground under the feet (the `swimLevel` hook
+// gives the surface — bootstrapGameApp.js) floats the player at the surface instead of wading
+// on the bottom: the swim clip moving, treading water still (updateProceduralPlayerRig), slower,
+// the body turned toward where they swim. No jumping / rolling meanwhile; walking into a shore
+// wall still climbs out. Heights scale with the character's (heightScaleByUrl).
+export const SWIM_CONFIG = {
+  enterDepth: 0.5,   // m of water over the ground to start swimming
+  exitDepth: 0.4,    // m: back to wading below this (hysteresis)
+  swimSink: 0.3,     // m the feet's y sits under the surface swimming (the clip lies flat)
+  treadSink: 0.5,    // m treading water (upright, head out)
+  easeRate: 5,       // 1/s the height eases to the swim height
+  speedScale: 0.6,   // × walking speed
+  turnRate: 7,       // 1/s the body turns toward the swim direction
+};
+
 export const CLIMB_CONFIG = {
   probeDist: 0.4,       // m ahead of the player where the wall height is sampled
   minRise: 0.9,         // m higher than the feet at probeDist → a wall to climb
@@ -160,6 +175,11 @@ export class PlayerControls {
     // Riding Town's broom (with holdStill): { y, yaw } — the game moves playerX / playerZ, and
     // the player's height and the body's facing are these (the camera's yaw stays this.yaw)
     this.ride = null;
+    // (x, z) → the water's surface Y there, or null (no water) — swimming (SWIM_CONFIG)
+    this.swimLevel = null;
+    this.isSwimming = false;
+    this.swimMoving = false;
+    this._swimYaw = null;
     // Climbing something that moves (the giant on Tree Island — src/characters/giant.js): a hook
     // (ctrl, movement, dt) → null (not climbing) or { x, y, z, yaw, moving } — where the player
     // is on it this frame; it owns the movement then (no walking, ground snap or wall climbing)
@@ -1281,6 +1301,20 @@ export class PlayerControls {
     if (cam.y > maxY) cam.y = maxY;
   }
 
+  /**
+   * Where the player floats swimming at x, z over ground `groundY` (null: not deep enough —
+   * wading / dry, or riding / held still). SWIM_CONFIG.
+   */
+  swimSurfaceY(x, z, groundY) {
+    if (typeof this.swimLevel !== 'function' || this.holdStill || this.ride || !Number.isFinite(groundY)) return null;
+    const level = this.swimLevel(x, z);
+    if (!Number.isFinite(level)) return null;
+    const cfg = SWIM_CONFIG;
+    const h = glbCharacterConfig.heightScaleByUrl[this.playerModel?.userData?.qwopRig?.characterUrl] ?? 1;
+    if (level - groundY <= (this.isSwimming ? cfg.exitDepth : cfg.enterDepth) * h) return null;
+    return Math.max(groundY, level - (this.swimMoving ? cfg.swimSink : cfg.treadSink) * h);
+  }
+
   get isClimbing() {
     return !!this._climb || (!!this._surface && !this._surface.standing);
   }
@@ -1292,7 +1326,7 @@ export class PlayerControls {
    * the clip. Returns false when it can't roll now.
    */
   startRoll(dx, dy) {
-    if (this._roll || this._climb || this._surface || this.holdStill || window.phoneSwordAirborne) return false;
+    if (this._roll || this._climb || this._surface || this.holdStill || this.isSwimming || window.phoneSwordAirborne) return false;
     const len = Math.hypot(dx, dy);
     if (!(len > 1e-6)) return false;
     const forward = new THREE.Vector3();
@@ -1510,7 +1544,8 @@ export class PlayerControls {
       const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
         ? this.deltaSeconds
         : 0.016;
-      const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05 * (this.moveSpeedScale ?? 1);
+      const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05 * (this.moveSpeedScale ?? 1)
+        * (this.isSwimming ? SWIM_CONFIG.speedScale : 1);
 
       // Auto-walk counts as full forward input along its direction for wall climbing
       const autoMove = this.holdStill ? null : this._autoMove;
@@ -1573,33 +1608,62 @@ export class PlayerControls {
       // (a hook that keeps the player inside an area — the pirate ship's deck on a voyage)
       if (!surf && typeof this.positionConstraint === 'function') this.positionConstraint(this);
 
+      let swimming = false;
       if (this.ride && !surf) {
         // (riding Town's broom: it sets the height — no ground snap, no ledge falls)
         if (Number.isFinite(this.ride.y)) this.playerY = this.ride.y;
       } else if (!climbHandled && !window.phoneSwordAirborne) {
         // (under a bridge / an overhang: the ground under it, not the deck — _groundHeightAt)
         const groundY = this._groundHeightAt(this.playerX, this.playerZ);
-        // Walked off a ledge: fall with the jump gravity (onLedgeFall hook) instead of
-        // snapping down. A big jump in position this frame is a teleport (respawn, stage
-        // start…) and still snaps.
-        const drop = this.playerY - groundY;
-        const moved = Number.isFinite(this._lastStepX)
-          ? Math.hypot(this.playerX - this._lastStepX, this.playerZ - this._lastStepZ)
-          : Infinity;
-        if (drop > LEDGE_FALL_MIN_DROP && moved < LEDGE_FALL_MAX_STEP && typeof this.onLedgeFall === 'function') {
+        const swimY = this.swimSurfaceY(this.playerX, this.playerZ, groundY);
+        const swimMoved = Number.isFinite(this._lastStepX)
+          ? Math.hypot(this.playerX - this._lastStepX, this.playerZ - this._lastStepZ) : Infinity;
+        if (swimY != null && this.playerY - swimY > LEDGE_FALL_MIN_DROP && swimMoved < LEDGE_FALL_MAX_STEP
+          && typeof this.onLedgeFall === 'function') {
+          // (off a dock / the shore's edge: fall in — the jump code lands at the swim height)
           this.onLedgeFall();
-        } else if (
-          Number.isFinite(this.playerY) && !Number.isFinite(this.groundOverrideY) &&
-          moved < LEDGE_FALL_MAX_STEP && Math.abs(groundY - this.playerY) < GROUND_EASE_MAX_STEP
-        ) {
-          // A small step up / down (a curb, a rock, a bumpy slope): eased instead of a jolt —
-          // quick enough that the feet are never far off the ground
-          const k = 1 - Math.exp(-GROUND_EASE_RATE * Math.min(deltaSeconds, 0.1));
-          this.playerY += (groundY - this.playerY) * k;
-          if (Math.abs(groundY - this.playerY) < 0.002) this.playerY = groundY;
+        } else if (swimY != null) {
+          // Swimming: float at the surface (eased — coming in from wading / a fall)
+          swimming = true;
+          const k = 1 - Math.exp(-SWIM_CONFIG.easeRate * Math.min(deltaSeconds, 0.1));
+          this.playerY = Number.isFinite(this.playerY) && Math.abs(swimY - this.playerY) < 3
+            ? this.playerY + (swimY - this.playerY) * k : swimY;
         } else {
-          this.playerY = groundY;
+          // Walked off a ledge: fall with the jump gravity (onLedgeFall hook) instead of
+          // snapping down. A big jump in position this frame is a teleport (respawn, stage
+          // start…) and still snaps.
+          const drop = this.playerY - groundY;
+          const moved = Number.isFinite(this._lastStepX)
+            ? Math.hypot(this.playerX - this._lastStepX, this.playerZ - this._lastStepZ)
+            : Infinity;
+          if (drop > LEDGE_FALL_MIN_DROP && moved < LEDGE_FALL_MAX_STEP && typeof this.onLedgeFall === 'function') {
+            this.onLedgeFall();
+          } else if (
+            Number.isFinite(this.playerY) && !Number.isFinite(this.groundOverrideY) &&
+            moved < LEDGE_FALL_MAX_STEP && Math.abs(groundY - this.playerY) < GROUND_EASE_MAX_STEP
+          ) {
+            // A small step up / down (a curb, a rock, a bumpy slope): eased instead of a jolt —
+            // quick enough that the feet are never far off the ground
+            const k = 1 - Math.exp(-GROUND_EASE_RATE * Math.min(deltaSeconds, 0.1));
+            this.playerY += (groundY - this.playerY) * k;
+            if (Math.abs(groundY - this.playerY) < 0.002) this.playerY = groundY;
+          } else {
+            this.playerY = groundY;
+          }
         }
+      }
+      this.isSwimming = swimming;
+      this.swimMoving = swimming && climbInput.length() > 0;
+      if (swimming) {
+        // (the body turns toward where they swim; treading water it stays as it was)
+        if (this._swimYaw == null) this._swimYaw = this.yaw;
+        if (this.swimMoving) {
+          let d = Math.atan2(climbInput.x, climbInput.z) - this._swimYaw;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          this._swimYaw += d * (1 - Math.exp(-SWIM_CONFIG.turnRate * Math.min(deltaSeconds, 0.1)));
+        }
+      } else {
+        this._swimYaw = null;
       }
       this._lastStepX = this.playerX;
       this._lastStepZ = this.playerZ;
@@ -1623,7 +1687,8 @@ export class PlayerControls {
 
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
-        this.playerModel.rotation.set(0, surf ? surf.yaw : roll ? roll.yaw : this.ride ? this.ride.yaw : this.yaw, 0);
+        this.playerModel.rotation.set(0, surf ? surf.yaw : roll ? roll.yaw : this.ride ? this.ride.yaw
+          : swimming && this._swimYaw != null ? this._swimYaw : this.yaw, 0);
         this.playerModel.up.set(0, 1, 0);
         this.camera.up.set(0, 1, 0);
 
@@ -1662,6 +1727,7 @@ export class PlayerControls {
     this.deltaSeconds = delta;
 
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, {
+      swimming: this.isSwimming && !this._climb && !this._surface ? (this.swimMoving ? 'swim' : 'tread') : null,
       isMoving: !!this.isMoving && !this._climb && !(this._surface && !this._surface.standing),
       climbing: !!this._climb || (!!this._surface && !this._surface.standing),
       climbMoving: (!!this._climb && !!this._climbMoving) || !!this._surface?.moving

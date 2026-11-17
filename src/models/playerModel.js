@@ -148,6 +148,15 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     else if (!options.climbing && glb._action?.pose === climbClip) glb.endPose();
     // (the clip only plays while actually climbing — held still on the wall it eases to a stop)
     if (options.climbing && glb._action?.pose === climbClip) glb.easePoseSpeed(options.climbMoving ? 1 : 0, dt);
+    // Swimming (PlayerControls.isSwimming — SWIM_CONFIG): Swimming.fbx moving, Treading
+    // Water.fbx still, looped over the whole body like the climb (what's in hand stays on the
+    // palms); only these two poses are taken over / ended here
+    const swimClip = glbCharacterConfig.swimClip;
+    const treadClip = glbCharacterConfig.treadClip;
+    const swimPose = glb._action?.pose === swimClip || glb._action?.pose === treadClip;
+    const wantSwim = options.swimming === 'swim' ? swimClip : options.swimming === 'tread' ? treadClip : null;
+    if (wantSwim && !glb.isDead && (!glb._action || swimPose)) glb.playPose(wantSwim, { fade: 0.35 });
+    else if (!wantSwim && swimPose) glb.endPose();
   }
 
   updateGLBCharacter(rig, dt, !!options.isMoving);

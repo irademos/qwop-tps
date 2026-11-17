@@ -8,6 +8,7 @@ import { updateExplosionEffects, setExplosionListener } from "../combat/explosio
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl, startBlockedStagger, isBlockedStaggered, playHitReaction } from "../models/playerModel.js";
 import { glbCharacterConfig, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
+import { preloadAnimation } from '../models/fluffyCharacter.ts';
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, registerWallProbe, setTerrainFloor } from '../environment/terrainHeight.js';
 import { setMapObstacles } from '../environment/obstacles.js';
@@ -3519,6 +3520,7 @@ async function initCore(runtimeContext) {
 
   const getPickupFallbackIcon = (itemId) => {
     if (itemId === 'coins') return '🪙';
+    if (itemId === 'swim') return '🌊';
     if (itemId === SHIELD_ITEM_ID) return '🛡️';
     if (itemId === 'pistol') return '🏹';
     if (itemId === PISTOL_AMMO_KEY) return '🔶';
@@ -10855,6 +10857,101 @@ async function initCore(runtimeContext) {
     const ground = _glbResolveHeight(x, z);
     return Number.isFinite(ground) ? Math.max(0, level - ground) : Infinity;
   };
+  // ── Swimming (PlayerControls SWIM_CONFIG): the water's surface for the controls, the swim
+  // energy bar (#swim-bar — full on starting to swim, drains while in deep water, slower
+  // treading), and out of breath → washed up on the nearest dry shore, one health less ──
+  const SWIM_ENERGY_S = 30;        // s of swimming on a full bar
+  const SWIM_TREAD_DRAIN = 0.5;    // treading water drains this × as fast
+  const SWIM_LOW = 0.25;           // the bar pulses red below this
+  const SWIM_DROWN_DAMAGE = 1;     // health segments lost running out (not in Story — no health)
+  const SWIM_SHORE_MAX_R = 160;    // m searched for dry land
+  const SWIM_SHORE_STEP = 1.5;     // m between search rings / points
+  let _swimEnergy = 1;
+  let _swimWas = false;
+  let _swimClipsLoaded = false;
+  const _swimBar = document.getElementById('swim-bar');
+  const _swimFill = document.getElementById('swim-bar-fill');
+  let _swimShown = null;
+  playerControls.swimLevel = (x, z) => {
+    if (town?.isIndoors()) return null;   // (the rooms sit under the seabed)
+    const level = _activeMap?.water?.(x, z);
+    return Number.isFinite(level) ? level : null;
+  };
+  // A dry, level spot on land (not a roof: within reach of the water's height)
+  const _isShoreSpot = (x, z, level) => {
+    if (_waterDepthAt(x, z) > 0.02) return false;
+    const y = getTerrainHeight(x, z);
+    if (!Number.isFinite(y) || (Number.isFinite(level) && y - level > 3)) return false;
+    for (const [dx, dz] of [[0.7, 0], [-0.7, 0], [0, 0.7], [0, -0.7]]) {
+      const y2 = getTerrainHeight(x + dx, z + dz);
+      if (!Number.isFinite(y2) || Math.abs(y2 - y) > 0.45 || _waterDepthAt(x + dx, z + dz) > 0.02) return false;
+    }
+    return true;
+  };
+  const _nearestShore = (x, z) => {
+    const level = _activeMap?.water?.(x, z);
+    for (let r = SWIM_SHORE_STEP; r <= SWIM_SHORE_MAX_R; r += SWIM_SHORE_STEP) {
+      const n = THREE.MathUtils.clamp(Math.ceil((2 * Math.PI * r) / SWIM_SHORE_STEP), 8, 120);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const sx = x + Math.sin(a) * r;
+        const sz = z + Math.cos(a) * r;
+        if (!_isShoreSpot(sx, sz, level)) continue;
+        // (a step further up the beach when that's dry too)
+        const ix = sx + Math.sin(a) * 1.5;
+        const iz = sz + Math.cos(a) * 1.5;
+        return _isShoreSpot(ix, iz, level) ? { x: ix, z: iz, yaw: a } : { x: sx, z: sz, yaw: a };
+      }
+    }
+    return null;
+  };
+  const _swimOutOfBreath = () => {
+    const p = playerModel.position;
+    const spot = _nearestShore(p.x, p.z) ?? (() => {
+      const sp = getSpawnPosition();
+      return sp ? { x: sp.x, z: sp.z, yaw: playerControls.yaw } : null;
+    })();
+    _swimEnergy = 1;
+    _swimWas = false;
+    if (spot) {
+      _psJumpVelY = 0;
+      window.phoneSwordAirborne = false;
+      playerControls.isSwimming = false;
+      _teleportPlayer(spot.x, spot.z, spot.yaw);   // (facing on up the beach)
+    }
+    showPickupToast('swim', 1, '', { text: 'Out of breath. Washed ashore' });
+    if (!story?.isActive()) window.localHealth = Math.max(0, statsState.health - SWIM_DROWN_DAMAGE);
+  };
+  const _updateSwim = (dt) => {
+    const p = playerModel?.position;
+    if (!p || !playerControls) return;
+    // (the clips are fetched the first time the player wades in)
+    if (!_swimClipsLoaded && _waterDepthAt(p.x, p.z) > 0.15) {
+      _swimClipsLoaded = true;
+      preloadAnimation(glbCharacterConfig.swimClip);
+      preloadAnimation(glbCharacterConfig.treadClip);
+    }
+    const swimming = !!playerControls.isSwimming && !playerDead;
+    if (swimming && !_swimWas) _swimEnergy = 1;
+    _swimWas = swimming;
+    if (swimming) {
+      _swimEnergy -= (dt / SWIM_ENERGY_S) * (playerControls.swimMoving ? 1 : SWIM_TREAD_DRAIN);
+      if (_swimEnergy <= 0) _swimOutOfBreath();
+    }
+    const show = swimming && !!playerControls.isSwimming;
+    if (show !== _swimShown) {
+      _swimShown = show;
+      _swimBar?.classList.toggle('hidden', !show);
+      document.body.classList.toggle('player-swimming', show);
+    }
+    if (show && _swimFill) {
+      _swimFill.style.width = `${Math.max(0, _swimEnergy) * 100}%`;
+      _swimBar.classList.toggle('swim-low', _swimEnergy < SWIM_LOW);
+    }
+  };
+  window.swimDebug = () => ({ energy: _swimEnergy, swimming: playerControls.isSwimming, moving: playerControls.swimMoving,
+    setEnergy: (v) => { _swimEnergy = v; }, depth: (x, z) => _waterDepthAt(x, z) });
+
   const _carryPlayer = (x, y, z, dYaw) => {
     if (!playerControls || !playerModel) return;
     playerControls.playerX = x;
@@ -11611,6 +11708,7 @@ async function initCore(runtimeContext) {
     // (Town's cart the same way — townCart.js)
     town?.cartBeforeControls(frameDelta);
     playerControls.update();
+    _updateSwim(frameDelta);
     _broomRide?.afterControls();
     town?.cartAfterControls();
     updateBloodEffects(frameDelta);
@@ -12610,6 +12708,10 @@ async function initCore(runtimeContext) {
           // (lands on what's under the feet — a jump under a bridge doesn't land on its deck)
           { includeSolidHit: false, reach: playerModel.position.y + 0.6 }
         )?.groundY;
+        // (falling into deep water: down to where they float — swimming)
+        const _sw = Number.isFinite(_gy)
+          ? playerControls?.swimSurfaceY?.(playerModel.position.x, playerModel.position.z, _gy) : null;
+        if (Number.isFinite(_sw)) return Math.max(_gy, _sw);
         return Number.isFinite(_gy) ? _gy : (_psGroundY ?? playerModel.position.y);
       };
       // (a broken position: back on the ground)
@@ -12625,7 +12727,8 @@ async function initCore(runtimeContext) {
       if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
-        if (!_classicMode && !_broomRide?.isRiding() && !town?.inCart() && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic (or on the broom)
+        if (!_classicMode && !_broomRide?.isRiding() && !town?.inCart() && !playerControls.isSwimming
+          && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic (or on the broom, or swimming)
           _psJumpVelY = PS_JUMP_FORCE;
           window.phoneSwordAirborne = true;
         }
