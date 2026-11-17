@@ -63,16 +63,18 @@ const CAMERA_UNDER_MIN_HEIGHT = 0.8;
 // While climbing every stick direction does something: forward or sideways (within
 // upMaxAngleDeg of the wall) climbs at speed m/s until level with the top (then they step onto
 // it), pulling back jumps off (onClimbJumpOff hook, bootstrapGameApp.js).
-// Swimming: water deeper than enterDepth over the ground under the feet (the `swimLevel` hook
-// gives the surface — bootstrapGameApp.js) floats the player at the surface instead of wading
+// Swimming: water deeper than enterDepth over the map's real ground (the `swimLevel` hook gives
+// the surface, `swimDepth` the water's depth there, under the sea's wading floor too —
+// bootstrapGameApp.js) with the feet in it floats the player at the surface instead of wading
 // on the bottom: the swim clip moving, treading water still (updateProceduralPlayerRig), slower,
 // the body turned toward where they swim. No jumping / rolling meanwhile; walking into a shore
 // wall still climbs out. Heights scale with the character's (heightScaleByUrl).
 export const SWIM_CONFIG = {
-  enterDepth: 0.5,   // m of water over the ground to start swimming
-  exitDepth: 0.4,    // m: back to wading below this (hysteresis)
-  swimSink: 0.3,     // m the feet's y sits under the surface swimming (the clip lies flat)
-  treadSink: 0.5,    // m treading water (upright, head out)
+  enterDepth: 0.7,   // m of water over the ground to start swimming
+  exitDepth: 0.6,    // m: back to wading below this (hysteresis)
+  inWater: 0.3,      // m the surface must be over what's under the feet (not on a deck / bridge)
+  swimSink: 0.4,     // m the feet's y sits under the surface swimming (the clip lies flat)
+  treadSink: 0.6,    // m treading water (upright, head out)
   easeRate: 5,       // 1/s the height eases to the swim height
   speedScale: 0.6,   // × walking speed
   turnRate: 7,       // 1/s the body turns toward the swim direction
@@ -177,6 +179,11 @@ export class PlayerControls {
     this.ride = null;
     // (x, z) → the water's surface Y there, or null (no water) — swimming (SWIM_CONFIG)
     this.swimLevel = null;
+    // (x, z) → m of water over the map's real ground there (Infinity off the map)
+    this.swimDepth = null;
+    // Out of breath (bootstrapGameApp.js): no moving (treading water) and sunk this many m more
+    this.swimLocked = false;
+    this.swimSinkExtra = 0;
     this.isSwimming = false;
     this.swimMoving = false;
     this._swimYaw = null;
@@ -1311,8 +1318,12 @@ export class PlayerControls {
     if (!Number.isFinite(level)) return null;
     const cfg = SWIM_CONFIG;
     const h = glbCharacterConfig.heightScaleByUrl[this.playerModel?.userData?.qwopRig?.characterUrl] ?? 1;
-    if (level - groundY <= (this.isSwimming ? cfg.exitDepth : cfg.enterDepth) * h) return null;
-    return Math.max(groundY, level - (this.swimMoving ? cfg.swimSink : cfg.treadSink) * h);
+    if (level - groundY < cfg.inWater * h) return null;   // (standing on something over the water)
+    const depthRaw = typeof this.swimDepth === 'function' ? this.swimDepth(x, z) : level - groundY;
+    const depth = Number.isFinite(depthRaw) ? depthRaw : 1e3;
+    if (depth <= (this.isSwimming ? cfg.exitDepth : cfg.enterDepth) * h) return null;
+    const sink = (this.swimMoving ? cfg.swimSink : cfg.treadSink) * h + (this.swimSinkExtra || 0);
+    return Math.max(level - depth, level - sink);
   }
 
   get isClimbing() {
@@ -1539,7 +1550,7 @@ export class PlayerControls {
       } else {
         movement.copy(moveDirection);
       }
-      if (this.holdStill) movement.set(0, 0, 0);
+      if (this.holdStill || this.swimLocked) movement.set(0, 0, 0);
 
       const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
         ? this.deltaSeconds
@@ -1548,9 +1559,9 @@ export class PlayerControls {
         * (this.isSwimming ? SWIM_CONFIG.speedScale : 1);
 
       // Auto-walk counts as full forward input along its direction for wall climbing
-      const autoMove = this.holdStill ? null : this._autoMove;
+      const autoMove = this.holdStill || this.swimLocked ? null : this._autoMove;
       this._autoMove = null;
-      const stepMove = this.holdStill ? null : this._stepMove;
+      const stepMove = this.holdStill || this.swimLocked ? null : this._stepMove;
       this._stepMove = null;
       let autoLen = autoMove ? Math.hypot(autoMove.x, autoMove.z) : 0;
       let climbInput = movement;

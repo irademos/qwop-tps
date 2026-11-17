@@ -641,6 +641,17 @@ body.has-mana.match-loadout #shield-health-display { top: 106px; }
 }
 @media (prefers-reduced-motion: reduce) { #swim-bar.swim-low { animation: none; } }
 body.player-swimming #shield-health-display { margin-top: 24px; }
+/* Out of breath: black over the screen while the player is moved to the shore */
+#swim-fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1500;
+  transition: opacity 0.7s ease;
+}
+#swim-fade.on { opacity: 1; }
 /* Story hides the health display (no health there): while swimming it shows the swim bar alone */
 body.story-mode.player-swimming #health-display { display: flex !important; }
 body.story-mode.player-swimming #health-display > :not(#swim-bar) { display: none !important; }

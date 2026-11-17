@@ -9975,6 +9975,7 @@ async function initCore(runtimeContext) {
   };
 
   const _resetForMenu = () => {
+    playerControls?.swimReset?.();   // (swimming's out-of-breath sequence — _swimReset)
     giant.release();
     cancelBowDraw();
     releaseBombAim(true);
@@ -10859,13 +10860,22 @@ async function initCore(runtimeContext) {
   };
   // ── Swimming (PlayerControls SWIM_CONFIG): the water's surface for the controls, the swim
   // energy bar (#swim-bar — full on starting to swim, drains while in deep water, slower
-  // treading), and out of breath → washed up on the nearest dry shore, one health less ──
+  // treading), and out of breath → held still treading water, sinking under, a fade to black
+  // and back up washed up on the nearest dry shore, one health less ──
   const SWIM_ENERGY_S = 30;        // s of swimming on a full bar
   const SWIM_TREAD_DRAIN = 0.5;    // treading water drains this × as fast
   const SWIM_LOW = 0.25;           // the bar pulses red below this
   const SWIM_DROWN_DAMAGE = 1;     // health segments lost running out (not in Story — no health)
   const SWIM_SHORE_MAX_R = 160;    // m searched for dry land
   const SWIM_SHORE_STEP = 1.5;     // m between search rings / points
+  // Out of breath: treading still, sinking SWIM_SINK_SPEED m/s (to SWIM_SINK_MAX m under);
+  // the screen fades to black from SWIM_FADE_AT s over SWIM_FADE_S, then up on the shore
+  const SWIM_SINK_SPEED = 0.8;
+  const SWIM_SINK_MAX = 1.8;
+  const SWIM_FADE_AT = 1.5;
+  const SWIM_FADE_S = 0.7;
+  let _swimDrown = null;           // { t, shoreDone } while out of breath
+  const _swimFade = document.getElementById('swim-fade');
   let _swimEnergy = 1;
   let _swimWas = false;
   let _swimClipsLoaded = false;
@@ -10877,6 +10887,7 @@ async function initCore(runtimeContext) {
     const level = _activeMap?.water?.(x, z);
     return Number.isFinite(level) ? level : null;
   };
+  playerControls.swimDepth = (x, z) => _waterDepthAt(x, z);
   // A dry, level spot on land (not a roof: within reach of the water's height)
   const _isShoreSpot = (x, z, level) => {
     if (_waterDepthAt(x, z) > 0.02) return false;
@@ -10905,7 +10916,25 @@ async function initCore(runtimeContext) {
     }
     return null;
   };
+  // Out of breath: no more moving, treading water and sinking under (_updateSwim), then
+  // _swimWashAshore under the black
   const _swimOutOfBreath = () => {
+    if (_swimDrown) return;
+    _swimDrown = { t: 0, shoreDone: false };
+    playerControls.swimLocked = true;
+    playerControls.swimSinkExtra = 0;
+    showPickupToast('swim', 1, '', { text: 'Out of breath' });
+  };
+  const _swimReset = () => {
+    _swimDrown = null;
+    if (playerControls) {
+      playerControls.swimLocked = false;
+      playerControls.swimSinkExtra = 0;
+    }
+    _swimFade?.classList.remove('on');
+  };
+  playerControls.swimReset = _swimReset;
+  const _swimWashAshore = () => {
     const p = playerModel.position;
     const spot = _nearestShore(p.x, p.z) ?? (() => {
       const sp = getSpawnPosition();
@@ -10913,13 +10942,15 @@ async function initCore(runtimeContext) {
     })();
     _swimEnergy = 1;
     _swimWas = false;
+    playerControls.swimLocked = false;
+    playerControls.swimSinkExtra = 0;
     if (spot) {
       _psJumpVelY = 0;
       window.phoneSwordAirborne = false;
       playerControls.isSwimming = false;
       _teleportPlayer(spot.x, spot.z, spot.yaw);   // (facing on up the beach)
     }
-    showPickupToast('swim', 1, '', { text: 'Out of breath. Washed ashore' });
+    showPickupToast('swim', 1, '', { text: 'Washed ashore' });
     if (!story?.isActive()) window.localHealth = Math.max(0, statsState.health - SWIM_DROWN_DAMAGE);
   };
   const _updateSwim = (dt) => {
@@ -10931,14 +10962,33 @@ async function initCore(runtimeContext) {
       preloadAnimation(glbCharacterConfig.swimClip);
       preloadAnimation(glbCharacterConfig.treadClip);
     }
+    if (_swimDrown) {
+      // Out of breath: sinking, the fade, then the shore (and the fade back in)
+      const d = _swimDrown;
+      d.t += dt;
+      if (playerDead) { _swimReset(); return; }
+      if (!d.shoreDone) {
+        playerControls.swimSinkExtra = Math.min(SWIM_SINK_MAX, d.t * SWIM_SINK_SPEED);
+        if (d.t >= SWIM_FADE_AT) _swimFade?.classList.add('on');
+        if (d.t >= SWIM_FADE_AT + SWIM_FADE_S) {
+          d.shoreDone = true;
+          d.t = 0;
+          _swimWashAshore();
+        }
+      } else if (d.t >= 0.25) {
+        // (a moment on the shore under the black, then it fades back in)
+        _swimFade?.classList.remove('on');
+        _swimDrown = null;
+      }
+    }
     const swimming = !!playerControls.isSwimming && !playerDead;
     if (swimming && !_swimWas) _swimEnergy = 1;
     _swimWas = swimming;
-    if (swimming) {
+    if (swimming && !_swimDrown) {
       _swimEnergy -= (dt / SWIM_ENERGY_S) * (playerControls.swimMoving ? 1 : SWIM_TREAD_DRAIN);
       if (_swimEnergy <= 0) _swimOutOfBreath();
     }
-    const show = swimming && !!playerControls.isSwimming;
+    const show = swimming && !(_swimDrown?.shoreDone);
     if (show !== _swimShown) {
       _swimShown = show;
       _swimBar?.classList.toggle('hidden', !show);
