@@ -26,8 +26,10 @@ const _defaultHandPos = new THREE.Vector3();
 const _gyroArmDir = new THREE.Vector3();
 const _staggerHand = new THREE.Vector3();
 
-// Unarmed gyro arm (game 'left' hand = the anatomical right arm): the hand follows the
-// direction the phone points like the sword grip does, one-handed, beside the body
+// Gyro-held hand (game 'left' hand = the anatomical right arm): the hand follows the
+// direction the phone points like the sword grip does, one-handed, beside the body — only while
+// something held in it asks for it (userData.gyroHandAt, refreshed each frame: Town's hose);
+// plain empty hands ('Hands') leave both arms to the clip
 const GYRO_ARM_MAX_AGE_MS = 500; // gyro older than this → both arms back on the clip
 const GYRO_ARM_X = -0.2;
 const GYRO_ARM_SPREAD = 0.3;
@@ -70,10 +72,12 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     // sets foamSwordMode=true and writes foamSwordHandTarget with the desired grip position.
     // Per-character hold (e.g. the small village boy grips lower and closer in)
     const grip = characterHold(rig.characterUrl).grip;
-    // Unarmed with the phone gyro live: it moves only the anatomical right arm ('left'),
-    // the clip animates the other one (both while there's no gyro)
+    // Something held in the hand with the phone gyro live (the hose): it moves only the
+    // anatomical right arm ('left'), the clip animates the other one
     const gyroQ = playerGroup.userData.gyroArmQuat;
-    const gyroLive = !!gyroQ && performance.now() - (playerGroup.userData.gyroArmTime || 0) < GYRO_ARM_MAX_AGE_MS;
+    const now = performance.now();
+    const gyroLive = !!gyroQ && now - (playerGroup.userData.gyroArmTime || 0) < GYRO_ARM_MAX_AGE_MS
+      && now - (playerGroup.userData.gyroHandAt || 0) < GYRO_ARM_MAX_AGE_MS;
     const armed = !!playerGroup.userData.foamSwordMode;
     const bubbleCast = !!playerGroup.userData.bubbleCast && !options.climbing;
     // The game 'right' hand (the anatomical left) busy: the lantern / the bubble's hand
