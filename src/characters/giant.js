@@ -63,7 +63,8 @@ const SWITCH_BLEND_S = 0.3;
 const STEP_OFF_FEET = 0.3;         // m over the ground: going down here steps off
 const CAM_FOLLOW = 1.4;            // 1/s: the camera yaw eases round behind the climber
 // Standing on the head (up past the top of the head)
-const HEAD_STAND_SHARE = 0.75;     // of the head's radius: the patch the player walks on
+const HEAD_STAND_SHARE = 0.9;      // of the head's radius: the patch the player walks on
+const HEAD_EDGE_S = 0.6;           // s of pushing on out at its edge before going over it
 const HEAD_WALK_SPEED = 1.6;       // m/s
 const ARM_LEAVE_MARGIN = 0.3;      // m out of an arm before it can be stepped onto again
 const RADIUS_PERCENTILE = 0.6;
@@ -595,8 +596,10 @@ export function createGiant(ctx) {
     const R = head.r * HEAD_STAND_SHARE;
     const dx = at.x - c.x, dz = at.z - c.z;
     const d = Math.hypot(dx, dz);
+    const outward = d > R && moving && (movement.x * dx + movement.z * dz) > 0;
+    st.edgeT = outward ? (st.edgeT ?? 0) + dt : 0;
     if (d > R) {
-      if (moving && (movement.x * dx + movement.z * dz) > 0) {
+      if (st.edgeT > HEAD_EDGE_S) {
         // Off the edge: back to hanging on the head's side there, facing it
         const o = placeOn(head, _q.set(c.x + dx / d * (head.r + 1), c.y - headTopLift, c.z + dz / d * (head.r + 1)));
         const from = _q.set(at.x, c.y, at.z).clone();
