@@ -373,9 +373,14 @@ export function createGiant(ctx) {
       _m.copy(_cr).multiplyScalar(sd).addScaledVector(UP, f);
       const rr = s.r + STANDOFF;
       _tan.copy(_ref).multiplyScalar(-Math.sin(climb.th)).addScaledVector(_bin, Math.cos(climb.th));
+      // (along / round it, at full speed whatever the slope — a hunched back climbs as quick)
+      let mu = _m.dot(_u);
+      let mt = _m.dot(_tan);
+      const ml = Math.hypot(mu, mt);
+      if (ml > 1e-3) { mu *= mag / ml; mt *= mag / ml; }
       const step = CLIMB_SPEED * dt;
-      climb.t += (_m.dot(_u) * step) / s.len;
-      climb.th += (_m.dot(_tan) * step) / rr;
+      climb.t += (mu * step) / s.len;
+      climb.th += (mt * step) / rr;
       // Down at the foot, near the ground: step off
       if (f < -0.3 && s.ends[0].includes('ground')) {
         holdOf(s, Math.max(s.t[0], climb.t), climb.th, _p).addScaledVector(UP, -HANG);
@@ -385,15 +390,24 @@ export function createGiant(ctx) {
       const end = climb.t < s.t[0] ? 0 : climb.t > s.t[1] ? 1 : -1;
       if (end >= 0) {
         climb.t = THREE.MathUtils.clamp(climb.t, s.t[0], s.t[1]);
+        let best = null;
+        let from = null;
         const next = s.ends[end].filter((k) => k !== 'ground').map((k) => segByKey.get(k)).filter(Boolean);
         if (next.length) {
           holdOf(s, climb.t, climb.th, _p);
-          const from = _p.clone();
-          let best = null;
+          from = _p.clone();
+          const mLen = _m.length() || 1;
           for (const n of next) {
             const o = placeOn(n, from);
-            if (!best || o.dist < best.o.dist) best = { n, o };
+            // (the piece the push carries on into: entering at its a end goes +u, at b −u —
+            // a hanging arm isn't where "up" off the chest leads)
+            const inward = (o.t - n.t[0] < n.t[1] - o.t ? 1 : -1) * _m.dot(_u) / mLen;
+            const score = o.dist - inward * n.len;
+            if (!best || score < best.score) best = { n, o, score, inward };
           }
+          if (best.inward < -0.3) { frameOf(s); best = null; } // (nowhere further that way: stays)
+        }
+        if (next.length && best) {
           const n = best.n;
           const span = n.t[1] - n.t[0];
           climb.seg = n;
@@ -447,6 +461,7 @@ export function createGiant(ctx) {
 
   const debug = () => ({
     root, character, pos, segs, climb, mode, target, island, active, steps,
+    feet: feet.map((f) => ({ min: f.min, armed: f.armed, h: f.bone.getWorldPosition(new THREE.Vector3()).y - pos.y })),
     teleportNear: (x, z) => { pos.set(x, pos.y, z); groundY = null; },
     stop: () => { mode = 'idle'; modeT = 1e9; },
     go: () => { mode = 'idle'; modeT = 0; },
