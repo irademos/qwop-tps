@@ -328,11 +328,12 @@ export function createTownMode(ctx) {
   const speech = createSpeech();
   const FEMININE = new Set(['Mabel', 'Wren', 'Agnes', 'Clover', 'Edda', 'Gilda', 'Ivy', 'Linnea', 'Nell',
     'Rosalind', 'Tilda', 'Vera', 'Yara', 'Cora', 'Elsie', 'Greta', 'Iona', 'Lark', 'Marigold', 'Kit']);
-  // How someone sounds: kids high, bandits / frog men gruff, the wizard / tree folk old
+  // How someone sounds: kids high, bandits / frog men gruff, the wizard / tree folk / old guy old, the frog mom female
   const voiceKind = (n) => {
     const role = n.role;
     if (role === 'kid' || n.def?.unhurt) return 'kid';
-    if (role === 'wizard' || n.url === glbCharacterConfig.treeCreatureUrl) return 'old';
+    if (role === 'wizard' || n.url === glbCharacterConfig.treeCreatureUrl || n.url === glbCharacterConfig.oldGuyUrl) return 'old';
+    if (n.url === glbCharacterConfig.frogMomUrl) return 'female';
     if (role === 'bandit' || role === 'banditBoss' || n.url === glbCharacterConfig.frogManUrl) return 'gruff';
     if (n.url === glbCharacterConfig.villageGirlUrl) return 'female';
     return FEMININE.has(firstName(n.name)) ? 'female' : 'male';
