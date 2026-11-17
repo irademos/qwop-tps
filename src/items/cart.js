@@ -22,7 +22,7 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // rising steeper than MAX_UP_SLOPE, a step up of more than MAX_STEP_UP (walls, houses, steps),
 // water deeper than MAX_WADE, a tree trunk. Down it goes any way: a drop steeper than it can follow
 // (FALL_STEP) and it's off the edge, falling with gravity (FALL_GRAVITY) until it lands. Dust
-// puffs up behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
+// cartoon dust puffs pop up behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
 // Holding something the gyro works (ctx.isHolding): the phone's busy with it, so the cart stops
 // and the rider turns in the bed to face the camera's way (the cart stays put); put away, the
 // phone's pose then is the new rest (ctx.onHoldEnd) — as on the broom.
@@ -67,13 +67,16 @@ const FALL_TIP_RATE = 2.5;                   // 1/s — falling, the pitch / rol
 const HARD_LANDING = 4;                      // m/s down landing: a thud
 // Dust behind the back wheels
 const DUST_MAX = 64;                         // puffs alive at once
-const DUST_PER_M = 4;                      // puffs a metre rolled (both wheels)
+const DUST_PER_M = 2.6;                    // puffs a metre rolled (both wheels)
 const DUST_MIN_SPEED = 0.4;                  // m/s — slower than this, none
-const DUST_LIFE = [0.9, 1.5];                // s
-const DUST_SIZE = [0.5, 1.8];              // m across, born → gone
-const DUST_RISE = 0.7;                      // m/s up
-const DUST_OPACITY = 1;
-const DUST_COLOR = 0xcbb488;
+const DUST_LIFE = [0.55, 0.85];              // s
+const DUST_SIZE = [0.35, 0.7];              // m across at full size
+const DUST_POP = 0.22;                       // share of its life popping in (overshooting)
+const DUST_SHRINK = 0.4;                     // … and shrinking away at the end
+const DUST_RISE = 0.45;                      // m/s up
+const DUST_LIGHT = '#f4e6c8';                // its colours: lit,
+const DUST_SHADE = '#d6bf94';                // shaded underside,
+const DUST_OUTLINE = '#6e5638';              // outline
 const MAX_WADE = 0.3;                        // m of water it rolls through
 const TRUNK_PROBE_R = 0.12;                  // m: a corner this near a trunk is against it
 const TILT_DEAD = 0.1;                       // sin of the tilt — under this, no lean
@@ -144,35 +147,74 @@ export function createCartModel() {
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
-// A soft round puff (shared by every cart's dust)
-let dustTexture = null;
-const getDustTexture = () => {
-  if (dustTexture) return dustTexture;
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.5, 'rgba(255,255,255,0.55)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  dustTexture = new THREE.CanvasTexture(c);
-  dustTexture.colorSpace = THREE.SRGBColorSpace;
-  return dustTexture;
+// Cartoon puffs (shared by every cart's dust): a little cloud of overlapping circles in a flat
+// cream, darker underneath, a highlight on top and a dark outline — a few shapes for variety
+const DUST_VARIANTS = 3;
+let dustTextures = null;
+const getDustTextures = () => {
+  if (dustTextures) return dustTextures;
+  dustTextures = [];
+  for (let v = 0; v < DUST_VARIANTS; v++) {
+    const S = 128;
+    const c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d');
+    // (the cloud's circles: a big middle one and a few round it, fitting inside the canvas)
+    const blobs = [[64, 70, 30]];
+    const n = 3 + v;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + v * 0.7;
+      const r = 17 + ((i * 7 + v * 5) % 9);
+      blobs.push([64 + Math.cos(a) * 26, 68 + Math.sin(a) * 20, r]);
+    }
+    const shape = (grow) => {
+      g.beginPath();
+      for (const [x, y, r] of blobs) { g.moveTo(x + r + grow, y); g.arc(x, y, r + grow, 0, Math.PI * 2); }
+    };
+    g.fillStyle = DUST_OUTLINE;
+    shape(4);
+    g.fill();
+    g.save();
+    shape(0);
+    g.clip();
+    // (shaded all over, then the lit circles shifted up over it — a dark rim stays underneath)
+    g.fillStyle = DUST_SHADE;
+    g.fillRect(0, 0, S, S);
+    g.fillStyle = DUST_LIGHT;
+    g.beginPath();
+    for (const [x, y, r] of blobs) { g.moveTo(x - 3 + r * 0.92, y - 7); g.arc(x - 3, y - 7, r * 0.92, 0, Math.PI * 2); }
+    g.fill();
+    // (highlight: a small spot up on the middle one)
+    g.fillStyle = 'rgba(255,255,255,0.9)';
+    g.beginPath();
+    g.ellipse(52, 54, 9, 6, -0.5, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    dustTextures.push(t);
+  }
+  return dustTextures;
 };
+// Pop in past its size and settle (an overshoot), then shrink away
+const easeOutBack = (x) => 1 + 2.70158 * (x - 1) ** 3 + 1.70158 * (x - 1) ** 2;
+const puffScale = (u) => (u < DUST_POP ? easeOutBack(u / DUST_POP)
+  : u < 1 - DUST_SHRINK ? 1 + 0.12 * ((u - DUST_POP) / (1 - DUST_POP - DUST_SHRINK))
+    : 1.12 * (1 - ((u - 1 + DUST_SHRINK) / DUST_SHRINK) ** 2));
 
 /** Dust puffs: { emit(x, y, z, vx, vz), update(dt), clear() } — sprites in `parent`. */
 function createCartDust(parent) {
   const pool = [];
   let next = 0;
+  const textures = getDustTextures();
   for (let i = 0; i < DUST_MAX; i++) {
-    const mat = new THREE.SpriteMaterial({ map: getDustTexture(), color: DUST_COLOR, transparent: true, depthWrite: false, opacity: 0 });
+    // (crisp edges, drawn solid — alphaTest, no blending to sort)
+    const mat = new THREE.SpriteMaterial({ map: textures[i % textures.length], alphaTest: 0.5, transparent: false });
     const sp = new THREE.Sprite(mat);
     sp.visible = false;
     sp.renderOrder = 2;
     parent.add(sp);
-    pool.push({ sp, age: 0, life: 1, vx: 0, vy: 0, vz: 0, spin: 0 });
+    pool.push({ sp, age: 0, life: 1, size: 1, vx: 0, vy: 0, vz: 0 });
   }
   return {
     emit(x, y, z, vx, vz) {
@@ -180,12 +222,14 @@ function createCartDust(parent) {
       next = (next + 1) % pool.length;
       p.age = 0;
       p.life = THREE.MathUtils.lerp(DUST_LIFE[0], DUST_LIFE[1], Math.random());
-      p.vx = vx + (Math.random() - 0.5) * 0.5;
-      p.vz = vz + (Math.random() - 0.5) * 0.5;
+      p.size = THREE.MathUtils.lerp(DUST_SIZE[0], DUST_SIZE[1], Math.random());
+      p.vx = vx + (Math.random() - 0.5) * 0.6;
+      p.vz = vz + (Math.random() - 0.5) * 0.6;
       p.vy = DUST_RISE * (0.6 + Math.random() * 0.8);
-      p.sp.position.set(x + (Math.random() - 0.5) * 0.15, y + 0.08, z + (Math.random() - 0.5) * 0.15);
-      p.sp.material.rotation = Math.random() * Math.PI * 2;
-      p.spin = (Math.random() - 0.5) * 1.2;
+      p.sp.position.set(x + (Math.random() - 0.5) * 0.2, y + p.size * 0.3, z + (Math.random() - 0.5) * 0.2);
+      // (a little tilt, never upside down — the shade stays underneath)
+      p.sp.material.rotation = (Math.random() - 0.5) * 0.6;
+      p.sp.scale.set(0.001, 0.001, 1);
       p.sp.visible = true;
     },
     update(dt) {
@@ -194,17 +238,14 @@ function createCartDust(parent) {
         p.age += dt;
         const u = p.age / p.life;
         if (u >= 1) { p.sp.visible = false; continue; }
-        const drag = Math.exp(-2.5 * dt);
+        const drag = Math.exp(-3 * dt);
         p.vx *= drag;
         p.vz *= drag;
         p.sp.position.x += p.vx * dt;
         p.sp.position.y += p.vy * dt;
         p.sp.position.z += p.vz * dt;
-        p.sp.material.rotation += p.spin * dt;
-        const size = THREE.MathUtils.lerp(DUST_SIZE[0], DUST_SIZE[1], 1 - (1 - u) * (1 - u));
-        p.sp.scale.set(size, size, 1);
-        // (quick to show, slow to fade)
-        p.sp.material.opacity = DUST_OPACITY * Math.min(1, u * 6) * (1 - u) * (1 - u);
+        const k = Math.max(0.001, p.size * puffScale(u));
+        p.sp.scale.set(k, k, 1);
       }
     },
     clear() { for (const p of pool) p.sp.visible = false; },
