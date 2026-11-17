@@ -536,6 +536,16 @@ export class GLBCharacter {
       });
   }
 
+  /** Eases the playing pose clip's speed toward `target` (0 = held on its current frame). */
+  easePoseSpeed(target, dt, rate = 10) {
+    const f = this.fluffy;
+    if (!this._action?.pose || !f || !('clipSpeed' in f)) return;
+    const k = 1 - Math.exp(-rate * Math.max(0, dt || 0));
+    let v = f.clipSpeed + (target - f.clipSpeed) * k;
+    if (Math.abs(v - target) < 0.01) v = target;
+    f.clipSpeed = v;
+  }
+
   /** Back to walk / idle from playPose(). */
   endPose() {
     if (this._action?.pose) this._endAction();

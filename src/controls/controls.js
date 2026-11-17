@@ -1405,7 +1405,9 @@ export class PlayerControls {
     const upMin = Math.cos(THREE.MathUtils.degToRad(cfg.upMaxAngleDeg)) * mag;
     this.playerX = climb.x;
     this.playerZ = climb.z;
+    this._climbMoving = false;
     if (mag > cfg.inputThreshold && along >= upMin) {
+      this._climbMoving = true; // (the climb clip only plays while this is on — playerModel.js)
       this.playerY += cfg.speed * mag * deltaSeconds;
       if (this.playerY >= climb.topY) {
         const topX = climb.x + climb.dirX * (cfg.probeDist + cfg.topStep);
@@ -1645,7 +1647,8 @@ export class PlayerControls {
 
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, {
       isMoving: !!this.isMoving && !this._climb,
-      climbing: !!this._climb
+      climbing: !!this._climb,
+      climbMoving: !!this._climb && !!this._climbMoving
     });
 
     // Arrow keys turn the camera (or shift the gyro reference while the camera gyro is active)

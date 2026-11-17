@@ -18,9 +18,11 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // tipped), back it backs up (BACK_SPEED), leaned left / right it turns that way (TURN_RATE,
 // gentler when slow — TURN_STILL at a stop). The joystick / WASD do the same (the only way
 // without a gyro). It follows the ground under its wheels (tipping with slopes — pitch / roll),
-// rolls a little downhill (SLOPE_PULL), and stops at what it can't roll over: a rise of more
-// than MAX_RISE or a drop of more than MAX_DROP under a corner of its bed (walls, houses,
-// steps), water deeper than MAX_WADE, a tree trunk. The camera eases round behind it.
+// rolls a little downhill (SLOPE_PULL), and stops at what it can't roll over: ground ahead
+// rising steeper than MAX_UP_SLOPE, a step up of more than MAX_STEP_UP (walls, houses, steps),
+// water deeper than MAX_WADE, a tree trunk. Down it goes any way: a drop steeper than it can follow
+// (FALL_STEP) and it's off the edge, falling with gravity (FALL_GRAVITY) until it lands. Dust
+// soft dust puffs rise behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
 // Holding something the gyro works (ctx.isHolding): the phone's busy with it, so the cart stops
 // and the rider turns in the bed to face the camera's way (the cart stays put); put away, the
 // phone's pose then is the new rest (ctx.onHoldEnd) — as on the broom.
@@ -46,7 +48,7 @@ export const CART_BACK = (MODEL_MID_Z - MODEL_BED_BACK_Z) * CART_SCALE;   // m b
 const WHEEL_R = MODEL_WHEEL_R * CART_SCALE;
 const STAND_Z = 0.05;                        // m: where the rider crouches, ahead of the middle
 
-const MAX_SPEED = 4.2;                       // m/s at full tilt
+const MAX_SPEED = 5.4;                       // m/s at full tilt
 const BACK_SPEED = 0.45;                     // × MAX_SPEED backing up
 const ACCEL = 1.5;                           // 1/s — how fast the speed follows the tilt
 const BRAKE = 3.5;                           // 1/s — slowing (no tilt, or the other way)
@@ -54,8 +56,28 @@ const TURN_RATE = 1.5;                       // rad/s at full sideways lean, rol
 const TURN_STILL = 0.55;                     // rad/s at full lean, stopped (pushed round)
 const TURN_FULL_SPEED = 1.5;                 // m/s — at this speed or more it turns at TURN_RATE
 const SLOPE_PULL = 2.5;                      // m/s² downhill per unit of slope along it
-const MAX_RISE = 0.45;                       // m a bed corner can be over the ground under the middle
-const MAX_DROP = 1.1;                        // m … under it
+const MAX_UP_SLOPE = 0.9;                    // rise / run it rolls up (~42°) — ground ahead of it, the way it rolls (down: any)
+const MAX_STEP_UP = 0.3;                     // m its middle can step up in one go (a kerb; more is a wall)
+const TURN_SLOPE_SLACK = 0.6;                // turning on the spot: corners may rise this much steeper (it's already there)
+const AIR_CLEAR = 0.1;                       // m — in the air, ground over its bottom by this much is a wall
+const FALL_STEP = 0.12;                      // m a frame (+ FALL_STEP_PER_M × the distance rolled) it follows the ground down
+const FALL_STEP_PER_M = 1.3;                 // … past that it's off an edge and falls
+const FALL_GRAVITY = 18;                     // m/s² falling (the jump's gravity)
+const FALL_TIP_RATE = 2.5;                   // 1/s — falling, the pitch / roll easing toward the ground under it
+const HARD_LANDING = 4;                      // m/s down landing: a thud
+// Dust behind the back wheels
+const DUST_MAX = 64;                         // puffs alive at once
+const DUST_PER_M = 2.6;                      // puffs a metre rolled (both wheels)
+const DUST_MIN_SPEED = 0.5;                  // m/s — slower than this, none
+const DUST_LIFE = [0.7, 1.1];                // s
+const DUST_SIZE = [0.35, 0.6];               // m across, grown
+const DUST_POP = 0.3;                        // share of its life swelling up
+const DUST_FADE = 0.6;                       // … and fading out at the end
+const DUST_OPACITY = 0.75;
+const DUST_BLUR_PX = 4;                      // soft edges (of 128 px)
+const DUST_RISE = 0.35;                      // m/s up
+const DUST_LIGHT = '#e9dcc0';                // its colours: lit,
+const DUST_SHADE = '#cdb894';                // a little darker underneath
 const MAX_WADE = 0.3;                        // m of water it rolls through
 const TRUNK_PROBE_R = 0.12;                  // m: a corner this near a trunk is against it
 const TILT_DEAD = 0.1;                       // sin of the tilt — under this, no lean
@@ -125,6 +147,115 @@ export function createCartModel() {
 }
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+// Dust puffs (shared by every cart's dust): a little cloud of overlapping circles, soft-edged,
+// a touch darker underneath — a few shapes for variety
+const DUST_VARIANTS = 3;
+let dustTextures = null;
+const getDustTextures = () => {
+  if (dustTextures) return dustTextures;
+  dustTextures = [];
+  for (let v = 0; v < DUST_VARIANTS; v++) {
+    const S = 128;
+    const c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d');
+    // (the cloud's circles: a big middle one and a few round it, fitting inside the canvas)
+    const blobs = [[64, 70, 30]];
+    const n = 3 + v;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + v * 0.7;
+      const r = 17 + ((i * 7 + v * 5) % 9);
+      blobs.push([64 + Math.cos(a) * 26, 68 + Math.sin(a) * 20, r]);
+    }
+    const shape = (grow) => {
+      g.beginPath();
+      for (const [x, y, r] of blobs) { g.moveTo(x + r + grow, y); g.arc(x, y, r + grow, 0, Math.PI * 2); }
+    };
+    // (soft edges: the whole cloud drawn blurred)
+    g.filter = `blur(${DUST_BLUR_PX}px)`;
+    g.fillStyle = '#fff';
+    shape(-2);
+    g.fill();
+    g.filter = 'none';
+    g.save();
+    g.globalCompositeOperation = 'source-atop';
+    // (shaded all over, then the lit circles shifted up over it — a dark rim stays underneath)
+    g.fillStyle = DUST_SHADE;
+    g.fillRect(0, 0, S, S);
+    g.fillStyle = DUST_LIGHT;
+    g.beginPath();
+    for (const [x, y, r] of blobs) { g.moveTo(x + r * 0.9, y - 6); g.arc(x, y - 6, r * 0.9, 0, Math.PI * 2); }
+    g.filter = `blur(${DUST_BLUR_PX * 1.5}px)`;
+    g.fill();
+    g.restore();
+    // (and faded toward its edge — soft even where the canvas can't blur, e.g. older Safari)
+    const fade = g.createRadialGradient(64, 66, 28, 64, 66, 62);
+    fade.addColorStop(0, 'rgba(0,0,0,1)');
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    g.globalCompositeOperation = 'destination-in';
+    g.fillStyle = fade;
+    g.fillRect(0, 0, S, S);
+    g.globalCompositeOperation = 'source-over';
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    dustTextures.push(t);
+  }
+  return dustTextures;
+};
+// Swells quickly, keeps spreading a little; fades in fast and out slowly
+const puffScale = (u) => 0.45 + 0.55 * (1 - (1 - Math.min(1, u / DUST_POP)) ** 2) + 0.25 * u;
+const puffOpacity = (u) => DUST_OPACITY * Math.min(1, u / 0.12) * (u < 1 - DUST_FADE ? 1 : (1 - u) / DUST_FADE);
+
+/** Dust puffs: { emit(x, y, z, vx, vz), update(dt), clear() } — sprites in `parent`. */
+function createCartDust(parent) {
+  const pool = [];
+  let next = 0;
+  const textures = getDustTextures();
+  for (let i = 0; i < DUST_MAX; i++) {
+    const mat = new THREE.SpriteMaterial({ map: textures[i % textures.length], transparent: true, depthWrite: false, opacity: 0 });
+    const sp = new THREE.Sprite(mat);
+    sp.visible = false;
+    sp.renderOrder = 2;
+    parent.add(sp);
+    pool.push({ sp, age: 0, life: 1, size: 1, vx: 0, vy: 0, vz: 0 });
+  }
+  return {
+    emit(x, y, z, vx, vz) {
+      const p = pool[next];
+      next = (next + 1) % pool.length;
+      p.age = 0;
+      p.life = THREE.MathUtils.lerp(DUST_LIFE[0], DUST_LIFE[1], Math.random());
+      p.size = THREE.MathUtils.lerp(DUST_SIZE[0], DUST_SIZE[1], Math.random());
+      p.vx = vx + (Math.random() - 0.5) * 0.6;
+      p.vz = vz + (Math.random() - 0.5) * 0.6;
+      p.vy = DUST_RISE * (0.6 + Math.random() * 0.8);
+      p.sp.position.set(x + (Math.random() - 0.5) * 0.2, y + p.size * 0.3, z + (Math.random() - 0.5) * 0.2);
+      // (a little tilt, never upside down — the shade stays underneath)
+      p.sp.material.rotation = (Math.random() - 0.5) * 0.6;
+      p.sp.scale.set(0.001, 0.001, 1);
+      p.sp.visible = true;
+    },
+    update(dt) {
+      for (const p of pool) {
+        if (!p.sp.visible) continue;
+        p.age += dt;
+        const u = p.age / p.life;
+        if (u >= 1) { p.sp.visible = false; continue; }
+        const drag = Math.exp(-3 * dt);
+        p.vx *= drag;
+        p.vz *= drag;
+        p.sp.position.x += p.vx * dt;
+        p.sp.position.y += p.vy * dt;
+        p.sp.position.z += p.vz * dt;
+        const k = Math.max(0.001, p.size * puffScale(u));
+        p.sp.scale.set(k, k, 1);
+        p.sp.material.opacity = puffOpacity(u);
+      }
+    },
+    clear() { for (const p of pool) p.sp.visible = false; },
+  };
+}
 const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
 const _v = new THREE.Vector3();
 
@@ -142,7 +273,9 @@ const _v = new THREE.Vector3();
 export function createCartRide(ctx) {
   const model = createCartModel();
   ctx.parent.add(model.group);
-  const st = { x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
+  const dust = createCartDust(ctx.parent);
+  let dustDue = 0;
+  const st = { vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
   const ride = { y: 0, yaw: 0, camDist: 0 }; // (controls.ride)
   let riding = false;
   let holding = false;
@@ -164,21 +297,34 @@ export function createCartRide(ctx) {
     z: z - Math.sin(yaw) * lx + Math.cos(yaw) * lz,
   });
   const CORNERS = [[CART_HALF_WIDTH, CART_FRONT], [-CART_HALF_WIDTH, CART_FRONT], [CART_HALF_WIDTH, -CART_BACK], [-CART_HALF_WIDTH, -CART_BACK], [0, CART_FRONT], [0, -CART_BACK]];
-  // Whether the cart fits at a pose: each corner of its bed over ground it can roll on
-  const fits = (x, z, yaw) => {
-    const ref = groundAt(x, z);
-    if (!Number.isFinite(ref) || ctx.waterDepth(x, z) > MAX_WADE) return false;
+  // Whether the cart fits at a pose. `roll` (rolling there): { dir — +1 forward / −1 back / 0
+  // turning on the spot, y — its height now, air — in the air }; without it (parking) every
+  // corner's slope counts. Rolling, only the ground ahead the way it goes counts: up it's
+  // limited (MAX_UP_SLOPE, MAX_STEP_UP), down never — off an edge it falls.
+  const fits = (x, z, yaw, roll = null) => {
+    const mid = groundAt(x, z);
+    if (!Number.isFinite(mid) || ctx.waterDepth(x, z) > MAX_WADE) return false;
+    if (roll && !roll.air && mid - roll.y > MAX_STEP_UP) return false;
     for (const [lx, lz] of CORNERS) {
       const p = worldXZ(x, z, yaw, lx, lz);
       const g = groundAt(p.x, p.z);
-      if (!Number.isFinite(g) || g - ref > MAX_RISE || ref - g > MAX_DROP) return false;
+      if (!Number.isFinite(g)) return false;
+      const ahead = !roll || roll.dir === 0 || Math.sign(lz) === roll.dir;
+      if (roll?.air) {
+        // (the ground it's leaving is still under its back end)
+        if (ahead && g > roll.y + AIR_CLEAR) return false;
+      } else {
+        const limit = roll?.dir === 0 ? MAX_UP_SLOPE + TURN_SLOPE_SLACK : MAX_UP_SLOPE;
+        if (ahead && (g - mid) / Math.abs(lz) > limit) return false;
+      }
       if (ctx.waterDepth(p.x, p.z) > MAX_WADE) return false;
       if (pushOutOfObstacles(p.x, p.z, g + 0.4, TRUNK_PROBE_R)) return false;
     }
     return true;
   };
-  // Onto the ground under its wheels (instantly, or eased)
-  const settle = (dt) => {
+  // Onto the ground under its wheels (instantly, or eased; down by as much as it can follow —
+  // `moved` m rolled this frame — and off an edge it falls)
+  const settle = (dt, moved = 0) => {
     const h = (lx, lz) => {
       const p = worldXZ(st.x, st.z, st.yaw, lx, lz);
       const g = groundAt(p.x, p.z);
@@ -195,11 +341,49 @@ export function createCartRide(ctx) {
     const y = (front + back) / 2;
     const pitch = Math.atan2(back - front, CART_WHEELBASE); // (+: nose down)
     const roll = Math.atan2((fl + bl) / 2 - (fr + br) / 2, CART_TRACK); // (+: the left side up)
-    const k = st.settled && dt > 0 ? ease(SETTLE_RATE, dt) : 1;
-    st.y += (y - st.y) * k;
+    if (!st.settled || !(dt > 0)) {
+      Object.assign(st, { y, pitch, roll, vy: 0, air: false, settled: true });
+      return null;
+    }
+    if (!st.air && st.y - y > FALL_STEP + FALL_STEP_PER_M * Math.abs(moved)) {
+      // Off an edge: falling (going on down the slope it was on)
+      st.air = true;
+      st.vy = Math.min(0, -st.v * Math.sin(st.pitch));
+    }
+    if (st.air) {
+      st.vy -= FALL_GRAVITY * dt;
+      st.y += st.vy * dt;
+      const kt = ease(FALL_TIP_RATE, dt);
+      st.pitch += (pitch - st.pitch) * kt;
+      st.roll += (roll - st.roll) * kt;
+      if (st.y > y) return null;
+      // Landed
+      const hard = st.vy < -HARD_LANDING;
+      Object.assign(st, { y, vy: 0, air: false });
+      return hard ? 'thud' : null;
+    }
+    // On the ground: down at once (no lag to mistake for an edge), up eased
+    st.y = y < st.y ? y : st.y + (y - st.y) * ease(SETTLE_RATE, dt);
+    const k = ease(SETTLE_RATE, dt);
     st.pitch += (pitch - st.pitch) * k;
     st.roll += (roll - st.roll) * k;
-    st.settled = true;
+    return null;
+  };
+  // Dust behind the back wheels, rolling on the ground (not in water)
+  const kickDust = (moved, dt) => {
+    if (st.air || Math.abs(st.v) < DUST_MIN_SPEED) { dustDue = 0; return; }
+    dustDue += Math.abs(moved) * DUST_PER_M * Math.min(1.5, Math.abs(st.v) / MAX_SPEED + 0.4);
+    const back = st.v >= 0 ? -1 : 1; // (kicked out behind the way it's going)
+    const vx = Math.sin(st.yaw) * back * Math.abs(st.v) * 0.1;
+    const vz = Math.cos(st.yaw) * back * Math.abs(st.v) * 0.1;
+    while (dustDue >= 1) {
+      dustDue -= 1;
+      const side = Math.random() < 0.5 ? 1 : -1;
+      const p = worldXZ(st.x, st.z, st.yaw, side * CART_TRACK / 2, st.v >= 0 ? -CART_WHEELBASE / 2 - WHEEL_R * 0.6 : CART_WHEELBASE / 2 + WHEEL_R * 0.6);
+      if (ctx.waterDepth(p.x, p.z) > 0.02) continue;
+      const g = groundAt(p.x, p.z);
+      dust.emit(p.x, Number.isFinite(g) ? g : st.y, p.z, vx, vz);
+    }
   };
   const placeModel = () => {
     model.group.position.set(st.x, st.y, st.z);
@@ -215,6 +399,7 @@ export function createCartRide(ctx) {
   /** Parks it at a pose (on the ground there). */
   const place = (x, z, yaw) => {
     Object.assign(st, { x, z, yaw, v: 0, settled: false });
+    dust.clear();
     settle(0);
     placeModel();
   };
@@ -244,6 +429,8 @@ export function createCartRide(ctx) {
     if (!riding) return;
     riding = false;
     st.v = 0;
+    // (out mid-fall: it lands)
+    if (st.air) { st.settled = false; settle(0); placeModel(); }
     const c = ctx.getControls();
     if (c) {
       if (c.ride === ride) c.ride = null;
@@ -272,10 +459,11 @@ export function createCartRide(ctx) {
 
   // Before the controls move the player: the speed, the turn, the ground, the camera
   const update = (dt) => {
+    dt = Math.min(0.1, Math.max(0, dt));
+    dust.update(dt);
     if (!riding) return;
     const c = ctx.getControls();
     if (!c) return;
-    dt = Math.min(0.1, Math.max(0, dt));
     st.t += dt;
     // (moved by someone else — a teleport: that's out of the cart)
     const s0 = standPoint();
@@ -285,23 +473,32 @@ export function createCartRide(ctx) {
       holding = hold;
       if (!hold) ctx.onHoldEnd?.();
     }
-    const { ix, iz } = holding ? { ix: 0, iz: 0 } : input();
+    const { ix, iz } = holding || st.air ? { ix: 0, iz: 0 } : input();
     // Speed: toward the lean (backing up slower), braking quicker; a little pull downhill
     const want = (iz >= 0 ? iz : iz * BACK_SPEED) * MAX_SPEED;
     const braking = Math.abs(want) < Math.abs(st.v) || want * st.v < 0;
-    st.v += (want - st.v) * ease(braking ? BRAKE : ACCEL, dt);
-    if (!holding) st.v += Math.sin(st.pitch) * SLOPE_PULL * dt;
-    if (Math.abs(st.v) < 0.02 && Math.abs(want) < 0.01) st.v = 0;
+    // (in the air: it keeps going as it was)
+    if (!st.air) {
+      st.v += (want - st.v) * ease(braking ? BRAKE : ACCEL, dt);
+      if (!holding) st.v += Math.sin(st.pitch) * SLOPE_PULL * dt;
+      if (Math.abs(st.v) < 0.02 && Math.abs(want) < 0.01) st.v = 0;
+    }
     // Turning: the sideways lean (left +), quicker the faster it rolls
     const turnRate = TURN_STILL + (TURN_RATE - TURN_STILL) * Math.min(1, Math.abs(st.v) / TURN_FULL_SPEED);
     const yaw = wrap(st.yaw + ix * turnRate * dt);
     const step = st.v * dt;
     const nx = st.x + Math.sin(yaw) * step;
     const nz = st.z + Math.cos(yaw) * step;
-    if (fits(nx, nz, yaw)) {
+    let moved = 0;
+    const dir = Math.abs(step) < 1e-6 ? 0 : Math.sign(step);
+    // (on the ground: steps up measured from the ground under its middle — not its wheels'
+    // average, which sits under a crest; in the air: from its bottom)
+    const fromY = st.air ? st.y : groundAt(st.x, st.z);
+    if (fits(nx, nz, yaw, { dir, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air })) {
       Object.assign(st, { x: nx, z: nz, yaw });
-      model.spin(step);
-    } else if (fits(st.x, st.z, yaw)) {
+      moved = step;
+      if (!st.air) model.spin(step);
+    } else if (fits(st.x, st.z, yaw, { dir: 0, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air })) {
       // (up against something: turning still works)
       st.yaw = yaw;
       if (Math.abs(st.v) > 1 && st.t - st.bumpAt > 0.6) { st.bumpAt = st.t; ctx.onBump?.(); }
@@ -310,7 +507,8 @@ export function createCartRide(ctx) {
       if (Math.abs(st.v) > 1 && st.t - st.bumpAt > 0.6) { st.bumpAt = st.t; ctx.onBump?.(); }
       st.v = 0;
     }
-    settle(dt);
+    if (settle(dt, moved) === 'thud' && st.t - st.bumpAt > 0.3) { st.bumpAt = st.t; ctx.onBump?.(); }
+    kickDust(moved, dt);
     placeModel();
     const s = standPoint();
     c.playerX = s.x;
