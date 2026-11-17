@@ -106,7 +106,7 @@ export function installTownCart(T, ctx) {
       if (!setupTried && T.active && T.ready && T.layout) { setupTried = true; setup(); }
       return;
     }
-    if (!ride.isRiding()) return;
+    if (!ride.isRiding()) { ride.update(dt); return; } // (its dust settling)
     if (!T.active || ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom || T.inCanoe()) { leave({ step: false }); return; }
     if (ride.update(dt) === 'left') leave({ step: false });
   };

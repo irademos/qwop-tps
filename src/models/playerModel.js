@@ -146,6 +146,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const climbClip = glbCharacterConfig.climbClip;
     if (options.climbing && !glb.isDead && (!glb._action || glb._action.pose === climbClip)) glb.playPose(climbClip, { fade: 0.15 });
     else if (!options.climbing && glb._action?.pose === climbClip) glb.endPose();
+    // (the clip only plays while actually climbing — held still on the wall it eases to a stop)
+    if (options.climbing && glb._action?.pose === climbClip) glb.easePoseSpeed(options.climbMoving ? 1 : 0, dt);
   }
 
   updateGLBCharacter(rig, dt, !!options.isMoving);

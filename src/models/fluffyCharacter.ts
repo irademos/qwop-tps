@@ -659,6 +659,10 @@ export class FluffyCharacter {
     return d > 0 ? THREE.MathUtils.clamp(this.anim.action.time / d, 0, 1) : 1
   }
 
+  /** Playback speed of the current clip (1 = as authored, 0 = held on its frame). */
+  get clipSpeed(): number { return this.anim ? this.anim.speed : 1 }
+  set clipSpeed(v: number) { if (this.anim) this.anim.speed = v }
+
   /** True once a `loop: false` clip has reached its end (and is holding the last frame). */
   get clipFinished(): boolean {
     return !!this.anim && this.anim.action.loop === THREE.LoopOnce && !this.anim.action.isRunning()
