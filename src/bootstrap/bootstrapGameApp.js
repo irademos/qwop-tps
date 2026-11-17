@@ -4947,7 +4947,15 @@ async function initCore(runtimeContext) {
   // stageBoss.js): used while still locked (else, with others still locked, a random locked one)
   // — or always when an earlier stage has that character too (the frog fisher at 4, Wren at 8)
   const PS_STORY_BOSSES = { 2: 'pumpkin', 3: 'gemhorn', 4: 'frog', 5: 'tree', 7: 'antler', 8: 'antler' };
-  const PS_WAND_ENEMY_CHARACTER = 'wizard'; // wand casters are always wizards (and only wizards)
+  // Wand casters are wizards or old guys (and only they cast — never swordsmen / bombers);
+  // the old guy only once he's unlocked in Showdown (Endless: any time)
+  const PS_WAND_ENEMY_CHARACTERS = ['wizard', 'oldGuy'];
+  const PS_WAND_ENEMY_CHARACTER = PS_WAND_ENEMY_CHARACTERS[0];
+  const _isWandCharacter = (k) => PS_WAND_ENEMY_CHARACTERS.includes(k);
+  const _pickWandCharacter = (pool = PS_WAND_ENEMY_CHARACTERS) => {
+    const list = PS_WAND_ENEMY_CHARACTERS.filter((k) => pool.includes(k));
+    return list.length ? list[Math.floor(Math.random() * list.length)] : PS_WAND_ENEMY_CHARACTER;
+  };
   const PS_ARCHER_CHARACTER = 'tree';       // archers are always tree creatures (and only tree creatures)
   // A wizard's bubble after a hit (Showdown stages: PS_WAND_BUBBLE; Endless: stronger by the wave — _endlessWandBubble)
   const PS_WAND_BUBBLE = { chance: 0.35, cooldownMs: [12000, 18000] };
@@ -6116,7 +6124,7 @@ async function initCore(runtimeContext) {
     _psEnemyQueue = [];
     // (swordsmen / bombers: not the wizards — wand casters — nor the tree creatures — archers)
     const _fullPool = _psEnemyCharacterPool();
-    const _charPool = _fullPool.filter((k) => k !== PS_WAND_ENEMY_CHARACTER && k !== PS_ARCHER_CHARACTER);
+    const _charPool = _fullPool.filter((k) => !_isWandCharacter(k) && k !== PS_ARCHER_CHARACTER);
     if (!_charPool.length) _charPool.push(PS_ENEMY_BASE_CHARACTER);
     // Archers (tree creatures) once the tree creature is won, a rising share
     const _archerChance = !_classicMode && _fullPool.includes(PS_ARCHER_CHARACTER)
@@ -6161,7 +6169,7 @@ async function initCore(runtimeContext) {
       const _wand = !isBoss && !_bomber && Math.random() < _wandChance;
       const _archer = !isBoss && !_bomber && !_wand && Math.random() < _archerChance;
       const charKey = isBoss ? _psStageBoss.key
-        : _wand ? PS_WAND_ENEMY_CHARACTER
+        : _wand ? _pickWandCharacter([PS_WAND_ENEMY_CHARACTER, ..._fullPool])
         : _archer ? PS_ARCHER_CHARACTER
         : _charPool[Math.floor(Math.random() * _charPool.length)];
       // (a roam quest's final enemy is Pemberton — _psStageBoss.key 'villager')
@@ -9342,8 +9350,8 @@ async function initCore(runtimeContext) {
     : Math.min(ENDLESS_KIND_GROWTH[kind].max, 1 + Math.floor((w - ENDLESS_FROM[kind]) / ENDLESS_KIND_GROWTH[kind].every)));
   // (swordsmen / bombers / shield bearers: wand casters are wizards, archers tree creatures;
   // a champion can be any of them)
-  const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn'];
-  const ENDLESS_CHAMPION_CHARACTERS = [...ENDLESS_CHARACTERS, 'tree', 'wizard'];
+  const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'frogMom'];
+  const ENDLESS_CHAMPION_CHARACTERS = [...ENDLESS_CHARACTERS, 'tree', 'wizard', 'oldGuy'];
   // A wizard's bubble in Endless: more often, and sooner again, the harder the wave
   const _endlessWandBubble = (w) => ({
     chance: Math.min(0.85, 0.35 + 0.04 * (w - ENDLESS_FROM.wand)),
@@ -9487,7 +9495,7 @@ async function initCore(runtimeContext) {
   // its own pick (`ps_endless_char_<key | guest>`), apart from Showdown's.
   const ENDLESS_UNLOCKS = [
     ['villageBoy', 0], ['villageGirl', 2], ['frog', 3], ['pumpkin', 4], ['antler', 5],
-    ['gemhorn', 6], ['tree', 7], ['wizard', 8], ['villager', 10],
+    ['gemhorn', 6], ['tree', 7], ['frogMom', 7], ['wizard', 8], ['oldGuy', 9], ['villager', 10],
   ];
   const _endlessUnlockWave = (key) => ENDLESS_UNLOCKS.find(([k]) => k === key)?.[1] ?? Infinity;
   const _endlessUnlocked = (key, cleared = _endlessStats?.cleared || 0) => _endlessUnlockWave(key) <= cleared;
@@ -9761,7 +9769,7 @@ async function initCore(runtimeContext) {
     // (the next of the wave's line-up — taken off it once it's really spawned)
     const kind = champion ? 'champion' : (e.kinds?.[e.kinds.length - 1] ?? 'sword');
     const pool = champion ? ENDLESS_CHAMPION_CHARACTERS : ENDLESS_CHARACTERS;
-    const charKey = kind === 'wand' ? PS_WAND_ENEMY_CHARACTER
+    const charKey = kind === 'wand' ? _pickWandCharacter()
       : kind === 'archer' ? PS_ARCHER_CHARACTER
       : pool[Math.floor(Math.random() * pool.length)];
     const url = MATCH_CHARACTERS[charKey].url;

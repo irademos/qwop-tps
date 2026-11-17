@@ -48,6 +48,8 @@ const CIVILIAN_URLS = [
   glbCharacterConfig.frogManUrl,
   glbCharacterConfig.villageBoyUrl,
   glbCharacterConfig.villageGirlUrl,
+  glbCharacterConfig.frogMomUrl,
+  glbCharacterConfig.oldGuyUrl,
 ];
 export const characterForRole = (role) => {
   if (role === 'guard' || role === 'nightGuard') return glbCharacterConfig.antlerGuyUrl;
@@ -87,7 +89,7 @@ export const speciesOf = (n) => {
   const url = n?.url;
   if (url === glbCharacterConfig.pumpkinUrl) return 'pumpkin';
   if (url === glbCharacterConfig.treeCreatureUrl) return 'tree';
-  if (url === glbCharacterConfig.frogManUrl) return 'frog';
+  if (url === glbCharacterConfig.frogManUrl || url === glbCharacterConfig.frogMomUrl) return 'frog';
   if (url === glbCharacterConfig.antlerGuyUrl) return 'antler';
   if (url === glbCharacterConfig.url) return 'gem';
   if (url === glbCharacterConfig.wizardUrl) return 'wizard';

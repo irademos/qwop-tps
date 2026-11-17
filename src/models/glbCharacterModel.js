@@ -70,7 +70,8 @@ export const glbCharacterConfig = {
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
   treeCreatureUrl: '/models/glb_characters/tree_creature.glb', // Multiplayer roster / Showdown unlock
   mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Classic only
-  frogMomUrl: '/models/glb_characters/frog_mom.glb',       // Story: sitting on Tree Island (src/story/frogMom.js)
+  frogMomUrl: '/models/glb_characters/frog_mom.glb',       // Story: sitting on Tree Island (src/story/frogMom.js); roster / Showdown + Endless unlock; Town townsfolk
+  oldGuyUrl: '/models/glb_characters/old_guy.glb',         // Old guy: roster / Showdown + Endless unlock; wand caster like the wizard; Town townsfolk
   giantUrl: '/models/glb_characters/giant.glb?v=1',       // Tree Island's giant (src/characters/giant.js); bump ?v= here and in keepTextureUrls
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
   walkClip: '/models/animations/Old Man Walk.fbx',
