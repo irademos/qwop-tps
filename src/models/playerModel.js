@@ -58,7 +58,6 @@ const LANTERN_HAND = Object.freeze({ x: 0.3, y: 0.52, z: 0.18 });
 // palm toward the bubble's edge, while it lasts — the sword / wand / bomb go one-handed too
 export const BUBBLE_HAND = Object.freeze({ x: 0.38, y: 0.92, z: 0.6 });
 
-const CLIMB_HAND_CYCLES_PER_M = 1.2; // hand-over-hand cycles per m of wall climbed
 
 export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds, options = {}) {
   const rig = playerGroup?.userData?.qwopRig;
@@ -85,7 +84,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     // A held two-hand pose (userData.handPose = { left, right }, group-local points — Story's
     // flute): both arms on the IK, the hands there (nothing in hand)
     const handPose = !armed && !options.climbing ? playerGroup.userData.handPose : null;
-    rig.glbCharacter?.setArmIKHands(armed || options.climbing || handPose
+    rig.glbCharacter?.setArmIKHands(armed || handPose
       ? { left: true, right: true }
       : { left: gyroLive, right: lantern });
     if (lantern) {
@@ -138,17 +137,15 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   // Blocked stagger (startBlockedStagger): the free hand lets go and flails out
   if (rig.floatingHands && !options.climbing) applyStaggerHand(playerGroup, rig, dt);
 
-  // Wall climbing (PlayerControls._updateClimb): hand over hand up the wall in front,
-  // overriding the weapon grip while it lasts; scaled per character (holdByUrl `climb`),
-  // so smaller characters (village boy / girl) don't over-stretch their arms
-  if (options.climbing && rig.floatingHands) {
-    const grip = characterHold(rig.characterUrl).climb;
-    const phase = (options.climbPhase || 0) * CLIMB_HAND_CYCLES_PER_M * Math.PI * 2;
-    for (const side of ['left', 'right']) {
-      const reach = side === 'left' ? Math.sin(phase) : -Math.sin(phase);
-      _fsHandTarget.set(side === 'left' ? -0.25 : 0.25, 1.75 + reach * 0.2, 0.35).multiplyScalar(grip);
-      rig.floatingHands[side].position.lerp(_fsHandTarget, 1 - Math.exp(-12 * dt));
-    }
+  // Wall climbing (PlayerControls._updateClimb): the climb clip (Climb.fbx) loops over the
+  // whole body while it lasts — the arms included (whatever's in hand stays on the palms —
+  // GLBCharacter.solveArm); back to walk / idle when it ends (only the climb's own pose —
+  // a ride's sitting / crouching is left alone)
+  const glb = rig.glbCharacter;
+  if (glb) {
+    const climbClip = glbCharacterConfig.climbClip;
+    if (options.climbing && !glb.isDead && (!glb._action || glb._action.pose === climbClip)) glb.playPose(climbClip, { fade: 0.15 });
+    else if (!options.climbing && glb._action?.pose === climbClip) glb.endPose();
   }
 
   updateGLBCharacter(rig, dt, !!options.isMoving);

@@ -186,6 +186,7 @@ export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, s
 export const ARRIVAL_SNAP_DIST = 8;         // m — Town entered from somewhere (the sea start's landing): the walkable spot this close, else the spawn
 export const CANOE_BOARD_DIST = 3;          // m from its middle: 🛶 Get in
 export const CANOE_SHORE_DIST = 4;          // m — 🛶 Get out with dry ground this close
+export const CART_ACT_DIST = 2.2;           // m from the cart's middle: Get in the cart (townCart.js)
 export const CANOE_STAND_Z = -0.35;         // m along it (bow = +): where the player stands
 export const CANOE_MIN_DEPTH = 0.25;        // m of water it needs under it (else it runs aground)
 export const CANOE_PADDLE_BACK = 0.6;       // backing up: this much as hard as paddling on

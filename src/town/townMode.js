@@ -116,6 +116,7 @@ import { installTownLights } from './townLights.js';
 import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
 import { installTownCanoe } from './townCanoe.js';
+import { installTownCart } from './townCart.js';
 import { installTownTrees } from './townTrees.js';
 import { installTownBook } from './townBook.js';
 
@@ -805,6 +806,7 @@ export function createTownMode(ctx) {
     save();
     flushCloud();
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
+    T.resetCart();
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;
     T.closeMarket();
@@ -991,6 +993,7 @@ export function createTownMode(ctx) {
   installTownFarming(T, ctx);
   installTownTrees(T, ctx);
   installTownCanoe(T, ctx);
+  installTownCart(T, ctx);
   installTownBook(T, ctx);
 
   // ── The town book's Town page (townBook.js): everyone in town, their coins and a few stats ──
@@ -1124,7 +1127,12 @@ export function createTownMode(ctx) {
     interactLabel: () => (T.active && T.acts.length ? T.acts[0].label : T.active && T.inCanoe() ? null : undefined),
     // Whether the player can be on the flying broom (bootstrapGameApp.js / src/items/broom.js):
     // out in town — not in a room / jail / the canoe, nor fishing, holding something or carried off
-    canRide: () => !!(T.active && T.ready && !T.inRoom && !T.jail && !T.sequence && !T.inCanoe() && !T.held),
+    canRide: () => !!(T.active && T.ready && !T.inRoom && !T.jail && !T.sequence && !T.inCanoe() && !T.inCart() && !T.held),
+    // In the cart (townCart.js / src/items/cart.js): it rolls before the controls place the
+    // player, then sits them in its bed after (bootstrapGameApp.js, next to the broom)
+    inCart: () => !!(T.active && T.ready && T.inCart()),
+    cartBeforeControls: (dt) => T.cartBeforeControls(dt),
+    cartAfterControls: () => T.cartAfterControls(),
     // Standing in the canoe (townCanoe.js): the oar is the only thing in hand
     inCanoe: () => !!(T.active && T.ready && T.inCanoe()),
     // (dev console)

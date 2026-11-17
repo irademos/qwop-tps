@@ -1407,7 +1407,6 @@ export class PlayerControls {
     this.playerZ = climb.z;
     if (mag > cfg.inputThreshold && along >= upMin) {
       this.playerY += cfg.speed * mag * deltaSeconds;
-      this.climbPhase = (this.climbPhase || 0) + mag * deltaSeconds;
       if (this.playerY >= climb.topY) {
         const topX = climb.x + climb.dirX * (cfg.probeDist + cfg.topStep);
         const topZ = climb.z + climb.dirZ * (cfg.probeDist + cfg.topStep);
@@ -1646,8 +1645,7 @@ export class PlayerControls {
 
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, {
       isMoving: !!this.isMoving && !this._climb,
-      climbing: !!this._climb,
-      climbPhase: this.climbPhase || 0
+      climbing: !!this._climb
     });
 
     // Arrow keys turn the camera (or shift the gyro reference while the camera gyro is active)
