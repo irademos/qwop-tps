@@ -5062,12 +5062,12 @@ async function initCore(runtimeContext) {
   }
 
   // ── Sword Showdown: player bombs (bought in the shop, thrown with the 💣 button) ──
-  // Throwing puts away whatever is held, plays Throw.fbx (bomb in the right palm until
+  // Throwing puts away whatever is held, plays the Throw clip (bomb in the right palm until
   // the release point) and re-equips it once the clip is over. The bomb flies and blasts
   // like a bomber's (combat/playerBomb.js).
   const PLAYER_BOMB_THROW_DIST = 8;         // m ahead of the player where the bomb lands
   const MATCH_BOMB_AIM_RANGE = 14;          // Multiplayer battles: bombs land on the closest opponent this near
-  const PLAYER_BOMB_RELEASE_AT = 0.3;       // fraction of Throw.fbx where the bomb leaves the hand
+  const PLAYER_BOMB_RELEASE_AT = 0.3;       // fraction of the Throw clip where the bomb leaves the hand
   const PLAYER_BOMB_WINDUP_MS = 700;        // release time when the character hasn't loaded
   const PLAYER_BOMB_CLIP_TIMEOUT_MS = 2500; // release anyway if the clip is slow to load
   const PLAYER_BOMB_HAND = 'left';          // mirrored label: the anatomical right arm
@@ -5627,7 +5627,7 @@ async function initCore(runtimeContext) {
   };
   // ── Dodge roll: a swipe on the touch screen (PlayerControls.onSwipe) or on the phone
   // controller ('roll' message) rolls the player that way (PlayerControls.startRoll moves them,
-  // Roll.fbx plays over the body). Whatever is held is put away for the roll and comes back
+  // the Roll clip plays over the body). Whatever is held is put away for the roll and comes back
   // after, like a bomb throw.
   let playerRoll = null; // { restoreIds }
   const tryPlayerRoll = (dx, dy) => {

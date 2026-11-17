@@ -8,7 +8,7 @@
 //     control (arm IK) can run after the clip and before the fur springs
 //
 // Loads a rigged GLB exported by the Character Maker (Mixamo-named skeleton,
-// optional painted hair meshes `Hair_N`), plays Mixamo FBX animations on it by
+// optional painted hair meshes `Hair_N`), plays Mixamo animations (from animations.glb) on it by
 // retargeting, and adds the same "fluffy" secondary motion, hair swing and
 // shell fur as the editor's pose tester.
 //
@@ -17,13 +17,12 @@
 //
 //   const character = await loadFluffyCharacter('/models/character.glb', { enabled: true, shells: 12 })
 //   scene.add(character.root)
-//   await character.play('/assets/animations/Old Man Walk.fbx', { inPlace: true })
+//   await character.play('/models/animations/animations.glb#Old Man Walk', { inPlace: true })
 //   // every frame:
 //   character.update(delta)
 
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 // ── Settings ──────────────────────────────────────────────────────────────
@@ -75,14 +74,67 @@ interface AnimationSource extends AnimationTemplate {
 }
 
 const animationCache = new Map<string, Promise<AnimationTemplate>>()
+const libraryCache = new Map<string, Promise<THREE.Group & { animations: THREE.AnimationClip[] }>>()
+
+// All clips live in one GLB (`public/models/animations/animations.glb`), one action per
+// clip named after the Mixamo FBX it came from, each on its own armature. A clip is
+// addressed as `<glb url>#<action name>`.
+function loadLibrary(file: string) {
+  let p = libraryCache.get(file)
+  if (!p) {
+    p = new GLTFLoader().loadAsync(file).then((gltf) => {
+      const scene = gltf.scene as THREE.Group & { animations: THREE.AnimationClip[] }
+      scene.animations = gltf.animations
+      return scene
+    })
+    p.catch(() => libraryCache.delete(file))
+    libraryCache.set(file, p)
+  }
+  return p
+}
+
+// The clip's armature on its own (its world = the armature's own transform), bones renamed
+// back to their Mixamo names (the loader made the 13 armatures' names unique with `_N`) and
+// the clip's keys moved to start at 0 (Blender exports them from frame 1 = 1/30 s).
+function takeClip(library: THREE.Group & { animations: THREE.AnimationClip[] }, name: string, url: string) {
+  const src = library.animations.find(a => a.name === name)
+  if (!src) throw new Error(`${url}: no animation named "${name}"`)
+  const target = library.getObjectByName(trackNodeName(src.tracks[0]?.name))
+  if (!target) throw new Error(`${url}: the armature of "${name}" is missing`)
+  let root: THREE.Object3D = target
+  while (root.parent && root.parent !== library) root = root.parent
+  root = root.clone(true) // the library keeps its own copy (the same clip may be asked for again)
+  const renames = new Map<string, string>()
+  root.traverse((o) => {
+    if (o === root) return
+    const bare = o.name.replace(/_\d+$/, '')
+    if (bare !== o.name) { renames.set(o.name, bare); o.name = bare }
+  })
+  const start = Math.min(...src.tracks.map(t => t.times[0] ?? 0))
+  const tracks = src.tracks.map((t) => {
+    const track = t.clone()
+    const node = trackNodeName(track.name)
+    const bare = renames.get(node)
+    if (bare) track.name = bare + track.name.slice(node.length)
+    if (start > 0) track.shift(-start)
+    return track
+  })
+  return { root: root as THREE.Group, clip: new THREE.AnimationClip(name, -1, tracks) }
+}
+
+function trackNodeName(trackName = '') {
+  return THREE.PropertyBinding.parseTrackName(trackName).nodeName
+}
 
 function loadAnimationTemplate(url: string): Promise<AnimationTemplate> {
   let p = animationCache.get(url)
   if (!p) {
-    p = new FBXLoader().loadAsync(url).then((root) => {
-      const clip = root.animations[0]
-      if (!clip) throw new Error(`${url} contains no animation`)
-      // The loaded hierarchy sits in the clip's rest (T-)pose until a mixer drives it
+    const hash = url.indexOf('#')
+    if (hash < 0) return Promise.reject(new Error(`${url}: expected <animations.glb>#<clip name>`))
+    const file = url.slice(0, hash), name = decodeURIComponent(url.slice(hash + 1))
+    p = loadLibrary(file).then((library) => {
+      const { root, clip } = takeClip(library, name, url)
+      // The armature sits in the clip's rest (T-)pose until a mixer drives it
       root.updateMatrixWorld(true)
       const restWorldQuats = new Map<string, THREE.Quaternion>()
       const restWorldPositions = new Map<string, THREE.Vector3>()
@@ -107,7 +159,7 @@ export function preloadAnimation(url: string) {
   loadAnimationTemplate(url).catch(() => {})
 }
 
-// Each character gets its own copy of the FBX hierarchy so several characters
+// Each character gets its own copy of the clip's armature so several characters
 // can play the same clip independently.
 async function loadAnimation(url: string): Promise<AnimationSource> {
   const tpl = await loadAnimationTemplate(url)
@@ -604,10 +656,10 @@ export class FluffyCharacter {
 
   // ── Animation
 
-  /** Plays a Mixamo FBX clip (looping unless `loop: false`), retargeted by bone name. */
-  async play(fbxUrl: string, opts: PlayOptions = {}) {
+  /** Plays a Mixamo clip (`animations.glb#<name>`, looping unless `loop: false`), retargeted by bone name. */
+  async play(clipUrl: string, opts: PlayOptions = {}) {
     const token = ++this.playToken
-    const source = await loadAnimation(fbxUrl)
+    const source = await loadAnimation(clipUrl)
     if (token !== this.playToken) return // superseded by a later play()/stop()
     const excluded = this.bonesUnder(opts.excludeBones ?? [])
     // Snapshot the current pose before the retargeter resets the rig to rest

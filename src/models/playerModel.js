@@ -137,7 +137,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   // Blocked stagger (startBlockedStagger): the free hand lets go and flails out
   if (rig.floatingHands && !options.climbing) applyStaggerHand(playerGroup, rig, dt);
 
-  // Wall climbing (PlayerControls._updateClimb): the climb clip (Climb.fbx) loops over the
+  // Wall climbing (PlayerControls._updateClimb): the Climb clip loops over the
   // whole body while it lasts — the arms included (whatever's in hand stays on the palms —
   // GLBCharacter.solveArm); back to walk / idle when it ends (only the climb's own pose —
   // a ride's sitting / crouching is left alone)
@@ -148,8 +148,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     else if (!options.climbing && glb._action?.pose === climbClip) glb.endPose();
     // (the clip only plays while actually climbing — held still on the wall it eases to a stop)
     if (options.climbing && glb._action?.pose === climbClip) glb.easePoseSpeed(options.climbMoving ? 1 : 0, dt);
-    // Swimming (PlayerControls.isSwimming — SWIM_CONFIG): Swimming.fbx moving, Treading
-    // Water.fbx still, looped over the whole body like the climb (what's in hand stays on the
+    // Swimming (PlayerControls.isSwimming — SWIM_CONFIG): the Swimming clip moving, Treading
+    // Water still, looped over the whole body like the climb (what's in hand stays on the
     // palms); only these two poses are taken over / ended here
     const swimClip = glbCharacterConfig.swimClip;
     const treadClip = glbCharacterConfig.treadClip;
