@@ -450,7 +450,7 @@ export function createShowdownTutorial(ctx) {
       'You just bought a bomb! When you run out of bombs, bubbles, shields or arrows, your coins are spent on a new one automatically.');
     await delay(4000);
     panel(10, TOTAL, 'THROW A BOMB',
-      'Bombs reach distant enemies. Face the group and tap 💣 — the bomb lands where the ring is.');
+      'Bombs reach distant enemies. Hold 💣 to see the arc it will fly along — tip the phone up to throw further, down for nearer, turn it to aim — and let go when it lands on the ring.');
     frameHandler = () => {
       setHighlight('bomb');
       const p = ctx.playerModel.position;

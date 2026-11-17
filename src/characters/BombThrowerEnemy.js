@@ -52,7 +52,7 @@ const THROW_CLIP_TIMEOUT_MS = 2500; // throw anyway if the clip hasn't reached t
 // The GLB's floating-hand labels are mirrored: 'left' is the anatomical right arm (see glbCharacterModel.js)
 const BOMB_HAND         = 'left';
 const BLAST_STUN_MS     = 1400; // flying-back clip when caught in another thrower's blast
-const BOMB_SPEED        = 6;    // m/s initial horizontal speed (slow, readable lob)
+export const BOMB_SPEED = 6;      // m/s initial horizontal speed (slow, readable lob)
 export const BOMB_GRAVITY = 8;  // m/s² downward acceleration (low → floaty arc)
 const BOMB_SCALE        = 0.55;
 const BOMB_EXPLOSION_RADIUS = 2.8;  // m — blast radius for player damage
@@ -125,14 +125,14 @@ export function createHeldBombMesh(gltf) {
  * Initial velocity of a lob from `origin` landing on `targetPos`: fixed horizontal
  * speed, vertical speed solved for the flight time under BOMB_GRAVITY.
  */
-export function computeBombLobVelocity(origin, targetPos, out = new THREE.Vector3()) {
+export function computeBombLobVelocity(origin, targetPos, out = new THREE.Vector3(), speed = BOMB_SPEED) {
   const dx = targetPos.x - origin.x;
   const dz = targetPos.z - origin.z;
   const horizDist = Math.sqrt(dx * dx + dz * dz);
   const inv = 1 / Math.max(0.001, horizDist);
-  const tFlight = Math.max(0.001, horizDist / BOMB_SPEED);
+  const tFlight = Math.max(0.001, horizDist / speed);
   const vy = (targetPos.y - origin.y + 0.5 * BOMB_GRAVITY * tFlight * tFlight) / tFlight;
-  return out.set(dx * inv * BOMB_SPEED, vy, dz * inv * BOMB_SPEED);
+  return out.set(dx * inv * speed, vy, dz * inv * speed);
 }
 
 /** Removes a bomb mesh from the scene and frees its (cloned) resources. */
