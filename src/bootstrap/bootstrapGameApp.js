@@ -12,7 +12,7 @@ import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, registerWallProbe, setTerrainFloor } from '../environment/terrainHeight.js';
 import { setMapObstacles } from '../environment/obstacles.js';
 import { measureTrunk } from '../environment/treeTrunks.js';
-import { registerMapMeshes } from '../environment/mapCollision.js';
+import { registerMapMeshes, raycastMapSegment } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { presetStyleReference, setStyleReference, stylizeObject } from '../environment/artStyle.js';
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
@@ -50,8 +50,8 @@ import { appContext } from '../core/appContext.js';
 import { exposeDebugGlobals } from '../core/exposeDebugGlobals.js';
 import { keepScreenAwake } from '../core/wakeLock.js';
 import { EnemyPlayer, swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
-import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
-import { createPlayerBombs } from '../combat/playerBomb.js';
+import { BombThrowerEnemy, BOMB_DEFLECT_SPEED, BOMB_GRAVITY, BOMB_SPEED, computeBombLobVelocity } from '../characters/BombThrowerEnemy.js';
+import { createPlayerBombs, playerBombSpeed } from '../combat/playerBomb.js';
 import { createHeartBubbles } from '../combat/heartBubbles.js';
 import { createStageChests } from '../combat/stageChests.js';
 import { createComboMeter } from '../combat/comboMeter.js';
@@ -4741,7 +4741,7 @@ async function initCore(runtimeContext) {
     fireBullet: (origin, dir, shooter = enemy) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton',
       arrowShotOptions({ speed: PEMBERTON_BULLET_SPEED, gravityScale: 0, hostile: true, shooter })),
     holdAttacks: () => !!_psRangedTurn && _psRangedTurn !== enemy, // (another enemy's ranged turn)
-    throwBomb: (origin, target) => playerBombs.throw(origin, target, { getBlastTargets: () => _pembertonBombTargets, keepHeld: true }),
+    throwBomb: (origin, target) => playerBombs.throw(origin, target, { getBlastTargets: () => _pembertonBombTargets, keepHeld: true, speed: BOMB_SPEED }),
     onShieldBlock: () => duelCtx.onShieldHit(),
     wandRange: WAND_ENEMY_RANGE,
   });
@@ -5335,7 +5335,12 @@ async function initCore(runtimeContext) {
   const PS_CHEST_SIDE_MAX = 7;
   const _playerBombPalm = new THREE.Vector3();
   const _playerBombForward = new THREE.Vector3();
-  let playerBombThrow = null; // { restoreIds, startedAt, usesClip, released }
+  let playerBombThrow = null; // { restoreIds, startedAt, usesClip, released, target }
+  // (the 💣 button held: aiming — see the bomb aim below)
+  const _bombAim = {
+    active: false, startPitch: 0, dist: PLAYER_BOMB_THROW_DIST, phase: 0,
+    target: new THREE.Vector3(), restoreIds: []
+  };
   const getPlayerBombCount = () => Math.max(0, Math.floor(statsState.bombs || 0));
   const hasPlayerBomb = () => getPlayerBombCount() > 0;
   let lastPsBombButtonLabel = '';
@@ -5347,21 +5352,30 @@ async function initCore(runtimeContext) {
       button.textContent = label;
       lastPsBombButtonLabel = label;
     }
-    button.classList.toggle('ps-bomb-active', !!playerBombThrow);
-    button.classList.toggle('ps-bomb-empty', !playerBombThrow && !hasPlayerBomb());
+    button.classList.toggle('ps-bomb-active', !!playerBombThrow || _bombAim.active);
+    button.classList.toggle('ps-bomb-aiming', _bombAim.active);
+    button.classList.toggle('ps-bomb-empty', !playerBombThrow && !_bombAim.active && !hasPlayerBomb());
   };
-  const throwPlayerBomb = () => {
+  const _canThrowBomb = () => {
     if (!playerBombs || playerDead || playerBombThrow || _mpSwordOnly()) return false;
     if (_matchLoadout && !matchMode?.isFighting()) return false;
     if (!hasPlayerBomb()) return false;
+    return !playerModel.userData.qwopRig?.glbCharacter?.isDead; // (knocked down by a blast)
+  };
+  // `opts.target` = where it lands (the aim's — else PLAYER_BOMB_THROW_DIST ahead); `opts.restoreIds`
+  // = what the aim already put away (to come back after the throw)
+  const throwPlayerBomb = (opts = {}) => {
+    if (!_canThrowBomb()) return false;
     const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
-    if (glbCharacter?.isDead) return false; // knocked down by a blast
     setStat('bombs', getPlayerBombCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
-    const restoreIds = getEquippedInventoryItemIds();
-    restoreIds.forEach((itemId) => unequipInventoryItem(itemId));
+    const restoreIds = opts.restoreIds ?? getEquippedInventoryItemIds();
+    getEquippedInventoryItemIds().forEach((itemId) => unequipInventoryItem(itemId));
     playerControls?.refreshActionButtons?.();
-    playerBombThrow = { restoreIds, startedAt: Date.now(), usesClip: !!glbCharacter, released: false };
+    playerBombThrow = {
+      restoreIds, startedAt: Date.now(), usesClip: !!glbCharacter, released: false,
+      target: opts.target ?? null
+    };
     glbCharacter?.playAction(glbCharacterConfig.throwClip, _bubbleHandOut() ? { keepIK: { right: true } } : undefined);
     updatePsBombButton();
     return true;
@@ -5377,8 +5391,9 @@ async function initCore(runtimeContext) {
     playerModel.getWorldDirection(_playerBombForward).setY(0);
     if (_playerBombForward.lengthSq() < 1e-6) _playerBombForward.set(0, 0, 1);
     _playerBombForward.normalize();
-    let target = playerModel.position.clone().addScaledVector(_playerBombForward, PLAYER_BOMB_THROW_DIST);
-    if (_matchLoadout) {
+    let target = playerBombThrow?.target?.clone()
+      ?? playerModel.position.clone().addScaledVector(_playerBombForward, PLAYER_BOMB_THROW_DIST);
+    if (_matchLoadout && !playerBombThrow?.target) {
       // Battle: lob it at the closest opponent in range
       let best = null;
       let bestD = MATCH_BOMB_AIM_RANGE;
@@ -5388,8 +5403,10 @@ async function initCore(runtimeContext) {
       }
       if (best) target = best.position.clone();
     }
-    const groundY = getTerrainHeight(target.x, target.z);
-    if (Number.isFinite(groundY)) target.y = groundY;
+    if (!playerBombThrow?.target) {
+      const groundY = getTerrainHeight(target.x, target.z);
+      if (Number.isFinite(groundY)) target.y = groundY;
+    }
     if (_matchLoadout && matchMode?.throwLocalBomb(_playerBombPalm.clone(), target)) return;
     // (Town: the other players see it — and their games check it against them)
     if (townNet?.isOn() && town?.isActive()) townNet.sendBomb(_playerBombPalm, target);
@@ -5408,9 +5425,152 @@ async function initCore(runtimeContext) {
     }
     updatePsBombButton();
   };
+  // ── Bomb aim: the 💣 button held (on screen, or the phone's) shows the arc the bomb will fly
+  // along, with a ring where it lands; the phone's gyro aims it (turn it = which way — the gun's
+  // phone aim, _updateWeaponGyroAim — tip it up = further, down = nearer) or, without one, the
+  // camera (drag / look up = further); letting go throws it along that arc ──
+  const BOMB_AIM_MIN_DIST = 3;        // m — aimed all the way down
+  const BOMB_AIM_MAX_DIST = 16;       // m — aimed all the way up
+  const BOMB_AIM_UP_FULL = THREE.MathUtils.degToRad(30);   // phone / camera tipped up this far → the furthest
+  const BOMB_AIM_DOWN_FULL = THREE.MathUtils.degToRad(15); // …down this far → the nearest
+  const BOMB_AIM_SMOOTH = 14;         // 1/s — the landing spot eases after the aim
+  const BOMB_AIM_DOTS = 26;           // dots along the arc (they flow toward the landing spot)
+  const BOMB_AIM_STEPS = 32;          // arc segments checked against the map (it ends where it hits)
+  const BOMB_AIM_BLAST_R = 2.8;       // m — the ring (the blast's reach)
+  const _bombAimOrigin = new THREE.Vector3();
+  const _bombAimVel = new THREE.Vector3();
+  const _bombAimA = new THREE.Vector3();
+  const _bombAimB = new THREE.Vector3();
+  const _bombAimEnd = new THREE.Vector3();
+  const _bombAimM = new THREE.Matrix4();
+  const _bombAimView = (() => {
+    const group = new THREE.Group();
+    group.name = 'BombAimArc';
+    group.visible = false;
+    const dots = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.075, 10, 8),
+      new THREE.MeshBasicMaterial({ color: 0xffc061, transparent: true, opacity: 0.95, depthWrite: false }),
+      BOMB_AIM_DOTS
+    );
+    dots.frustumCulled = false;
+    dots.renderOrder = 5;
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xff7a1a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1, 48), ringMat);
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.9, 48), new THREE.MeshBasicMaterial({
+      color: 0xff7a1a, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false
+    }));
+    const land = new THREE.Group();
+    land.add(ring, disc);
+    land.children.forEach((m) => { m.rotation.x = -Math.PI / 2; m.renderOrder = 5; });
+    land.scale.setScalar(BOMB_AIM_BLAST_R);
+    group.add(dots, land);
+    scene.add(group);
+    return { group, dots, land, ringMat };
+  })();
+  const _canAimBomb = () => _canThrowBomb() && !!playerControls?.enabled && !_gamePaused && !_classicMode
+    && !playerRoll && !_bowDraw.active && !isPlayerFrozen() && !bossTalk.isOpen() && !_isSwordCalibPromptOpen();
+  // Where it lands for the aim now (eased) → _bombAim.target; draws the arc
+  const _updateBombAim = (dt) => {
+    const view = _bombAimView;
+    if (!_bombAim.active) { view.group.visible = false; return; }
+    if (playerDead || !playerControls || !(_canAimBomb() || _gamePaused)) { releaseBombAim(true); return; }
+    // The bomb in the throwing hand meanwhile
+    const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
+    if (glbCharacter) glbCharacter.getPalmWorldPosition(PLAYER_BOMB_HAND, _bombAimOrigin);
+    else _bombAimOrigin.copy(playerModel.position).setY(playerModel.position.y + 0.75);
+    playerBombs.setHeld(glbCharacter ? _bombAimOrigin : null);
+    // How far up it's aimed: the phone (the gyro aim's tilt), else the camera since the press
+    // (third person: a lower camera looks up)
+    let up;
+    if (_weaponAim.active) up = _weaponAim.phonePitch;
+    else {
+      const d = playerControls.pitch - _bombAim.startPitch;
+      up = playerControls.isFirstPersonView ? d : -d;
+    }
+    const want = up >= 0
+      ? THREE.MathUtils.lerp(PLAYER_BOMB_THROW_DIST, BOMB_AIM_MAX_DIST, Math.min(1, up / BOMB_AIM_UP_FULL))
+      : THREE.MathUtils.lerp(PLAYER_BOMB_THROW_DIST, BOMB_AIM_MIN_DIST, Math.min(1, -up / BOMB_AIM_DOWN_FULL));
+    const k = dt > 0 ? 1 - Math.exp(-BOMB_AIM_SMOOTH * dt) : 1;
+    _bombAim.dist += (want - _bombAim.dist) * k;
+    const yaw = playerControls.yaw;
+    const tx = playerModel.position.x + Math.sin(yaw) * _bombAim.dist;
+    const tz = playerModel.position.z + Math.cos(yaw) * _bombAim.dist;
+    const gy = getTerrainHeight(tx, tz);
+    _bombAim.target.set(tx, Number.isFinite(gy) ? gy : playerModel.position.y, tz);
+    // The arc (the bomb's own flight: computeBombLobVelocity + BOMB_GRAVITY), cut short where it
+    // would hit a wall / the ground on the way
+    computeBombLobVelocity(_bombAimOrigin, _bombAim.target, _bombAimVel, playerBombSpeed(_bombAimOrigin, _bombAim.target));
+    const horiz = Math.hypot(_bombAimVel.x, _bombAimVel.z);
+    const flight = horiz > 1e-3 ? Math.hypot(tx - _bombAimOrigin.x, tz - _bombAimOrigin.z) / horiz : 0;
+    const at = (t, out) => out.copy(_bombAimOrigin).addScaledVector(_bombAimVel, t).setY(
+      _bombAimOrigin.y + _bombAimVel.y * t - 0.5 * BOMB_GRAVITY * t * t
+    );
+    let tEnd = flight;
+    _bombAimEnd.copy(_bombAim.target);
+    at(0, _bombAimA);
+    for (let i = 1; i <= BOMB_AIM_STEPS; i++) {
+      at(flight * i / BOMB_AIM_STEPS, _bombAimB);
+      const hit = raycastMapSegment(_bombAimA, _bombAimB);
+      if (hit) {
+        const segLen = _bombAimA.distanceTo(_bombAimB) || 1;
+        const f = THREE.MathUtils.clamp(_bombAimA.distanceTo(hit.point) / segLen, 0, 1);
+        tEnd = flight * (i - 1 + f) / BOMB_AIM_STEPS;
+        _bombAimEnd.copy(hit.point);
+        break;
+      }
+      _bombAimA.copy(_bombAimB);
+    }
+    _bombAim.phase = (_bombAim.phase + dt * 1.6) % 1;
+    for (let i = 0; i < BOMB_AIM_DOTS; i++) {
+      const u = (i + _bombAim.phase) / BOMB_AIM_DOTS;
+      at(tEnd * u, _bombAimA);
+      // (smaller near the hand, so it doesn't crowd the view)
+      const s = 0.55 + 0.45 * Math.min(1, u * 3);
+      _bombAimM.makeScale(s, s, s).setPosition(_bombAimA);
+      view.dots.setMatrixAt(i, _bombAimM);
+    }
+    view.dots.instanceMatrix.needsUpdate = true;
+    view.land.position.copy(_bombAimEnd);
+    view.land.position.y += 0.06;
+    view.ringMat.opacity = 0.65 + 0.25 * Math.sin(performance.now() / 140);
+    view.group.visible = true;
+  };
+  const startBombAim = () => {
+    if (_bombAim.active || !_canAimBomb()) return false;
+    _bombAim.active = true;
+    _bombAim.startPitch = playerControls?.pitch ?? 0;
+    _bombAim.dist = PLAYER_BOMB_THROW_DIST;
+    _bombAim.restoreIds = getEquippedInventoryItemIds();
+    _bombAim.restoreIds.forEach((itemId) => unequipInventoryItem(itemId));
+    playerControls?.refreshActionButtons?.();
+    _updateBombAim(0);
+    updatePsBombButton();
+    return true;
+  };
+  // Let go: thrown along the arc (cancel: put back what was in hand, no bomb used)
+  const releaseBombAim = (cancel = false) => {
+    if (!_bombAim.active) return;
+    if (!cancel) _updateBombAim(0);
+    _bombAim.active = false;
+    _bombAimView.group.visible = false;
+    const restoreIds = _bombAim.restoreIds;
+    _bombAim.restoreIds = [];
+    if (_weaponAim.active) _stopWeaponGyroAim();
+    if (cancel || !throwPlayerBomb({ target: _bombAim.target.clone(), restoreIds })) {
+      playerBombs?.setHeld(null);
+      if (!playerDead && getEquippedInventoryItemIds().length === 0) {
+        restoreIds.forEach((itemId) => { if (inventoryState[itemId]?.count > 0) equipInventoryItem(itemId); });
+      }
+      playerControls?.refreshActionButtons?.();
+    }
+    updatePsBombButton();
+  };
   const updatePlayerBombs = (dt) => {
     if (!playerBombs) return;
     playerBombs.update(dt);
+    _updateBombAim(dt);
     const t = playerBombThrow;
     if (!t) {
       updatePsBombButton();
@@ -5452,7 +5612,7 @@ async function initCore(runtimeContext) {
   let playerRoll = null; // { restoreIds }
   const tryPlayerRoll = (dx, dy) => {
     if (!playerControls?.enabled || _classicMode || _gamePaused || playerDead) return false; // Classic: Block only
-    if (playerRoll || playerBombThrow || isPlayerFrozen() || _wandShieldHold || _bowDraw.active) return false;
+    if (playerRoll || playerBombThrow || _bombAim.active || isPlayerFrozen() || _wandShieldHold || _bowDraw.active) return false;
     if (bossTalk.isOpen() || _isSwordCalibPromptOpen()) return false;
     if (!(playerControls.moveSpeedScale > 0)) return false; // (the village intro holds the player still)
     if (_matchLoadout && !matchMode?.isFighting()) return false;
@@ -6951,7 +7111,8 @@ async function initCore(runtimeContext) {
   };
   const _updateWeaponGyroAim = (dt) => {
     const g = window.phoneSwordGyro;
-    const holding = !!playerControls && (pistol?.holder === playerControls || shield?.holder === playerControls);
+    // (also a bomb being aimed: its turn aims it, its tilt — read by _updateBombAim — is how far)
+    const holding = !!playerControls && (pistol?.holder === playerControls || shield?.holder === playerControls || _bombAim.active);
     if (!holding || playerDead || !g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) {
       if (_weaponAim.active) _stopWeaponGyroAim();
       return;
@@ -6992,6 +7153,8 @@ async function initCore(runtimeContext) {
     playerControls.yaw = _weaponAim.baseYaw + yawOffset;
     _weaponAim.lastYaw = playerControls.yaw;
     // Read by PlayerControls (aim direction + camera pitch) and the pistol (arms + gun pitch)
+    // (not for a bomb: the camera stays put so the arc's landing spot stays in view)
+    if (_bombAim.active) { playerControls.weaponAimPitch = null; return; }
     playerControls.weaponAimPitch = THREE.MathUtils.clamp(
       _weaponAim.phonePitch * WEAPON_AIM_PITCH_GAIN, WEAPON_AIM_PITCH_MIN, WEAPON_AIM_PITCH_MAX
     );
@@ -7328,6 +7491,8 @@ async function initCore(runtimeContext) {
     if (_wandActive) { _wandActive = false; if (foamSword) foamSword.wand = false; }
     if (_rodActive) { _rodActive = false; if (foamSword) foamSword.rod = false; }
     if (_oarActive) { _oarActive = false; if (foamSword) foamSword.oar = false; }
+    _bombAim.restoreIds = [];
+    releaseBombAim(true);
     playerBombThrow = null;
     playerBombs?.setHeld(null);
     lastEquippedBeforeShield = null;
@@ -7374,7 +7539,7 @@ async function initCore(runtimeContext) {
   const _bowDrawAmount = () => (_bowDraw.active ? THREE.MathUtils.clamp((performance.now() - _bowDraw.startMs) / (BOW_DRAW_S * 1000), 0, 1) : 0);
   const _ownsBow = () => (inventoryState.pistol?.count ?? 0) > 0;
   const _canDrawBow = () => !!playerControls?.enabled && !playerDead && !_gamePaused && !_classicMode && !story?.isActive()
-    && !_mpSwordOnly() && !town?.inCanoe?.() && _ownsBow() && !playerRoll && !playerBombThrow
+    && !_mpSwordOnly() && !town?.inCanoe?.() && _ownsBow() && !playerRoll && !playerBombThrow && !_bombAim.active
     && !isPlayerFrozen() && !_wandShieldHold && !_bubbleHandOut() && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
     && !(_matchLoadout && !matchMode?.isFighting());
   // Back to what was in hand before the draw (nothing: empty hands — Town)
@@ -7520,6 +7685,7 @@ async function initCore(runtimeContext) {
 
   const _handlePhoneAction = (action) => {
     if (action === 'bowUp') { releaseBowDraw(); return; } // (always let go)
+    if (action === 'bombUp') { releaseBombAim(_gamePaused); return; } // (always let go)
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
     if (action === 'heldUp') { town?.useHeld(false); return; } // (always let go)
     if (action === 'heldDown') { if (!_gamePaused) town?.useHeld(true); return; }
@@ -7540,7 +7706,11 @@ async function initCore(runtimeContext) {
     const appStateRef = window.appState;
     if (action === 'jump') {
       if (!playerControls.isInWater) window.phoneSwordJumpPressed = true;
+    } else if (action === 'bombDown') {
+      // Held: the arc shows, the phone aims it (bombUp throws — handled above, so it always lets go)
+      startBombAim();
     } else if (action === 'bomb') {
+      // (an older phone page: thrown at once, straight ahead)
       appStateRef?.throwBomb?.();
     } else if (action === 'bubble') {
       appStateRef?.activateBubble?.();
@@ -7650,6 +7820,7 @@ async function initCore(runtimeContext) {
       // (the bow is only out while its button's held: the phone keeps showing what goes back)
       equipped: ((_bowDraw.active || _bowDraw.restoreAt) ? _bowDraw.prev : _heldWeaponId()) ?? (_townLoadout ? 'none' : FOAM_SWORD_ITEM_ID),
       drawing: _bowDraw.active,
+      bombAiming: _bombAim.active,
       // Town: the sword is bought; 🗡 / ✋ puts everything away; the fishing rod once bought
       hasSword: _townLoadout ? _townLoadout.hasSword : true,
       hasRod: isRodAllowed(),
@@ -8281,6 +8452,10 @@ async function initCore(runtimeContext) {
     activateBubble: () => activatePlayerBubble(),
     getBombCount: () => getPlayerBombCount(),
     throwBomb: () => throwPlayerBomb(),
+    // The 💣 button held: aim (the arc), let go: thrown along it
+    startBombAim: () => startBombAim(),
+    releaseBombAim: (cancel) => releaseBombAim(cancel),
+    isBombAiming: () => _bombAim.active,
     // Magic wand: owned (Showdown / the tutorial) or picked up in a Multiplayer battle
     isWandAllowed: () => isWandAllowed(),
     // Town: nothing in hand is allowed (✋ Hands), and the sword has to be bought
@@ -9758,6 +9933,7 @@ async function initCore(runtimeContext) {
 
   const _resetForMenu = () => {
     cancelBowDraw();
+    releaseBombAim(true);
     hitFeel.cancel();
     swordCombo.clear();
     swordTrail.clear();
@@ -12154,7 +12330,7 @@ async function initCore(runtimeContext) {
 
       // ── Phone Sword: camera auto-aim at closest enemy (not while the phone aims a gun / shield) ──
       // (not while the bow is drawn: the press turned it once — _bowSnap — the aiming is the player's)
-      if (playerControls && hordeEnemies.length > 0 && !_weaponAim.active && !_bowDraw.active) {
+      if (playerControls && hordeEnemies.length > 0 && !_weaponAim.active && !_bowDraw.active && !_bombAim.active) {
         const _now = performance.now();
 
         // Detect manual camera movement: if yaw changed and we didn't set it, player moved camera

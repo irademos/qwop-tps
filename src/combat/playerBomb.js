@@ -12,6 +12,7 @@ import { getGroundBelow } from '../environment/terrainHeight.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
   BOMB_GRAVITY,
+  BOMB_SPEED,
   BOMB_LIFETIME_MS,
   blastEnemiesAt,
   computeBombLobVelocity,
@@ -25,6 +26,17 @@ import {
 const ENEMY_CONTACT_RADIUS = 0.6; // m — bomb touching an enemy's body (centre at half height)
 const ENEMY_CENTER_HEIGHT = 0.5;
 const BOMB_WALL_STANDOFF = 0.15; // m — explode just in front of the wall it hit
+
+// A player's throw flies faster the further it goes, so a long one stays a readable lob
+// instead of climbing out of view: the flight takes AIM_FLIGHT_BASE_S + AIM_FLIGHT_PER_M × the
+// distance (8 m ≈ 1.4 s, about the old fixed 6 m/s; 16 m ≈ 1.9 s)
+const AIM_FLIGHT_BASE_S = 0.9;
+const AIM_FLIGHT_PER_M = 0.06;
+/** Horizontal speed (m/s) of a player bomb lobbed from `origin` to `target`. */
+export function playerBombSpeed(origin, target) {
+  const d = Math.hypot(target.x - origin.x, target.z - origin.z);
+  return Math.max(BOMB_SPEED * 0.6, d / (AIM_FLIGHT_BASE_S + AIM_FLIGHT_PER_M * d));
+}
 
 const _enemyCenter = new THREE.Vector3();
 const _prevPos = new THREE.Vector3();
@@ -78,7 +90,8 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
 
     /**
      * Lobs a bomb from `origin` so it lands on `target` (both world space).
-     * `opts.getBlastTargets` overrides who this bomb's blast can hit (Multiplayer battles).
+     * `opts.getBlastTargets` overrides who this bomb's blast can hit (Multiplayer battles);
+     * `opts.speed` its horizontal speed (default: playerBombSpeed — the aim arc's).
      */
     throw(origin, target, opts = {}) {
       const mesh = createBombMesh(gltf);
@@ -87,7 +100,7 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
       scene.add(mesh);
       bombs.push({
         mesh,
-        vel: computeBombLobVelocity(origin, target),
+        vel: computeBombLobVelocity(origin, target, new THREE.Vector3(), opts.speed ?? playerBombSpeed(origin, target)),
         spawnTime: Date.now(),
         getBlastTargets: opts.getBlastTargets ?? null
       });

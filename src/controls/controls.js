@@ -633,48 +633,55 @@ export class PlayerControls {
     // shoulder), let go to loose — then what was in hand comes back (bootstrapGameApp.js _bowDraw)
     this.psBowBtn = createButton('ps-bow-btn', 'mobile-primary-action ps-weapon-btn ps-bow-btn', 'Bow');
     this.psBowBtn.setAttribute('aria-label', 'Hold to draw the bow, let go to shoot');
-    {
-      let bowTouch = false;
-      // The finger holding the bow: followed on the window, so only that finger lifting lets go —
-      // nothing that happens to the button meanwhile (the bow coming out, the weapon buttons
-      // changing, the button's label redrawn under the finger) ends the draw
-      let bowTouchId = null;
+    // A button held down (the bow, a bomb): `start()` on the press (true = it took — the button
+    // grows while held, `ps-held`, so the finger doesn't slip off it), `release(cancel)` when that
+    // finger lifts. The finger is followed on the window, so only it lifting lets go — nothing
+    // that happens to the button meanwhile (the bow coming out, the weapon buttons changing, the
+    // button's label redrawn under the finger) ends it
+    const bindHold = (button, { start, release, isHeld }) => {
+      let touchUsed = false;
+      let touchId = null;
       const down = (event) => {
         if (event) this.safePreventDefault(event);
         if (!this.enabled) return;
-        if (getAppState()?.startBowDraw?.()) this.psBowBtn.classList.add('ps-bow-drawing');
+        if (start()) button.classList.add('ps-held');
       };
       const up = (cancel) => {
-        bowTouchId = null;
-        this.psBowBtn.classList.remove('ps-bow-drawing');
-        getAppState()?.releaseBowDraw?.(cancel);
+        touchId = null;
+        button.classList.remove('ps-held');
+        release(cancel);
       };
-      const touchOf = (e) => Array.from(e.changedTouches || []).find((t) => t.identifier === bowTouchId);
-      this.psBowBtn.addEventListener('touchstart', (e) => {
-        bowTouch = true;
+      const touchOf = (e) => Array.from(e.changedTouches || []).find((t) => t.identifier === touchId);
+      button.addEventListener('touchstart', (e) => {
+        touchUsed = true;
         this.lastTouchButtonTime = performance.now();
-        if (bowTouchId !== null) { this.safePreventDefault(e); return; } // (a second finger on it)
-        bowTouchId = e.changedTouches?.[0]?.identifier ?? null;
+        if (touchId !== null) { this.safePreventDefault(e); return; } // (a second finger on it)
+        touchId = e.changedTouches?.[0]?.identifier ?? null;
         down(e);
       }, { passive: false });
       window.addEventListener('touchend', (e) => {
-        if (bowTouchId === null || !touchOf(e)) return;
-        if (e.target === this.psBowBtn || this.psBowBtn.contains(e.target)) this.safePreventDefault(e);
+        if (touchId === null || !touchOf(e)) return;
+        if (e.target === button || button.contains(e.target)) this.safePreventDefault(e);
         up(false);
       }, { passive: false, capture: true });
-      // (the system taking the touch over: loose what's drawn rather than throw it away)
+      // (the system taking the touch over: let go rather than throw it away)
       window.addEventListener('touchcancel', (e) => {
-        if (bowTouchId === null || !touchOf(e)) return;
+        if (touchId === null || !touchOf(e)) return;
         up(false);
       }, { passive: false, capture: true });
-      this.psBowBtn.addEventListener('mousedown', (e) => {
-        if (bowTouch || (performance.now() - this.lastTouchButtonTime) <= 550) return;
+      button.addEventListener('mousedown', (e) => {
+        if (touchUsed || (performance.now() - this.lastTouchButtonTime) <= 550) return;
         down(e);
       });
-      this.psBowBtn.addEventListener('mouseup', () => { if (!bowTouch) up(false); });
-      this.psBowBtn.addEventListener('mouseleave', () => { if (!bowTouch && getAppState()?.isBowDrawing?.()) up(false); });
-      this.psBowBtn.addEventListener('contextmenu', (e) => e.preventDefault());
-    }
+      button.addEventListener('mouseup', () => { if (!touchUsed) up(false); });
+      button.addEventListener('mouseleave', () => { if (!touchUsed && isHeld()) up(false); });
+      button.addEventListener('contextmenu', (e) => e.preventDefault());
+    };
+    bindHold(this.psBowBtn, {
+      start: () => !!getAppState()?.startBowDraw?.(),
+      release: (cancel) => getAppState()?.releaseBowDraw?.(cancel),
+      isHeld: () => !!getAppState()?.isBowDrawing?.()
+    });
 
     // Protective bubble (bought in the shop); label/count kept fresh by the game loop
     this.psBubbleBtn = createButton('ps-bubble-btn', 'mobile-primary-action ps-bubble-btn', `🫧 ${getAppState()?.getBubbleCount?.() ?? 0}`);
@@ -687,11 +694,12 @@ export class PlayerControls {
 
     // Bombs (bought in the shop): throws one forward; label/count kept fresh by the game loop
     this.psBombBtn = createButton('ps-bomb-btn', 'mobile-primary-action ps-bomb-btn', `💣 ${getAppState()?.getBombCount?.() ?? 0}`);
-    this.psBombBtn.setAttribute('aria-label', 'Throw a bomb');
-    bindPress(this.psBombBtn, (event) => {
-      if (!this.enabled) return;
-      getAppState()?.throwBomb?.();
-      if (event) this.safePreventDefault(event);
+    this.psBombBtn.setAttribute('aria-label', 'Hold to aim a bomb, let go to throw');
+    // Held: the arc shows where it'll land (aimed with the gyro / the camera), let go: thrown
+    bindHold(this.psBombBtn, {
+      start: () => !!getAppState()?.startBombAim?.(),
+      release: (cancel) => getAppState()?.releaseBombAim?.(cancel),
+      isHeld: () => !!getAppState()?.isBombAiming?.()
     });
 
     // Town's flying broom (bought from the wizard): on it ↔ off it (refreshActionButtons shows it)
@@ -896,7 +904,15 @@ export class PlayerControls {
     btn.classList.toggle('ps-bow-empty', arrows <= 0);
     const drawing = !!appState?.isBowDrawing?.();
     btn.classList.toggle('ps-bow-drawing', drawing);
-    if (!drawing && this._touchLayoutStale) this.layoutMobileActionButtons();
+    if (!drawing) btn.classList.remove('ps-held');
+    if (!appState?.isBombAiming?.()) this.psBombBtn?.classList.remove('ps-held');
+    if (!this._holdingButton() && this._touchLayoutStale) this.layoutMobileActionButtons();
+  }
+
+  // A held button (the bow drawn, a bomb aimed): the touch layout stays put under the finger
+  _holdingButton() {
+    const appState = appContext.uiState.appState ?? window.appState;
+    return !!(appState?.isBowDrawing?.() || appState?.isBombAiming?.());
   }
 
   isTouchLayout() {
@@ -919,9 +935,9 @@ export class PlayerControls {
     // bubble / bomb beside it; the weapon buttons stack on top of both (the middle of the
     // screen stays clear for the interact buttons)
     if (this.isTouchLayout()) {
-      // (mid-draw the buttons stay where they are — the finger's on the bow; laid out again after)
-      const appState = appContext.uiState.appState ?? window.appState;
-      if (appState?.isBowDrawing?.() && this._touchLayout) {
+      // (mid-draw / mid-aim the buttons stay where they are — the finger's on the bow / bomb;
+      // laid out again after)
+      if (this._holdingButton() && this._touchLayout) {
         for (const [b, slot] of this._touchLayout) this.applyMobileButtonPosition(b, slot);
         this._touchLayoutStale = true;
         return;
