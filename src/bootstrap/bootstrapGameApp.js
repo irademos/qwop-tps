@@ -9280,6 +9280,7 @@ async function initCore(runtimeContext) {
   // (the island town map), each footfall shaking the camera like a bomb by distance (hitFeel
   // 'giantStep') with a thud; climbable — PlayerControls' `surfaceClimb` hook
   const GIANT_STEP_BUZZ_DIST = 25; // m: a phone buzz for a footfall this near
+  const GIANT_KICK_DAMAGE = 1;     // health segments a kick takes
   const giant = createGiant({
     scene,
     getIsland: () => (_activeMapKey === DEFAULT_MAP
@@ -9292,6 +9293,16 @@ async function initCore(runtimeContext) {
       hitFeel.explosion('giantStep', dist);
       audioManager?.playSound('thud', { at, volume: 1.3, falloff: { ref: 10, rolloff: 0.25, max: 140 }, cooldownMs: 0 });
       if (dist < GIANT_STEP_BUZZ_DIST) _phoneBuzz('kill');
+    },
+    // The front of a swinging foot hit the player: hurt (not in Story — it has no health) and
+    // sent flying back like a bomb blast (the flying-back clip, then up again)
+    onKick: (dir, at) => {
+      if (playerDead || playerControls.holdStill || window.isPlayerBubbleActive?.()) return;
+      if (!story?.isActive()) window.localHealth = Math.max(0, statsState.health - GIANT_KICK_DAMAGE);
+      if (window.localHealth > 0 || !!story?.isActive()) _blastPlayer(dir, 1);
+      hitFeel.explosion('bomb', 0);
+      _phoneBuzz('bomb');
+      audioManager?.playSound('thud', { at, volume: 1.2, cooldownMs: 0 });
     },
   });
   playerControls.surfaceClimb = (ctrl, movement, dt) => giant.climbHook(ctrl, movement, dt);

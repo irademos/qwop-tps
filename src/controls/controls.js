@@ -1282,7 +1282,7 @@ export class PlayerControls {
   }
 
   get isClimbing() {
-    return !!this._climb || !!this._surface;
+    return !!this._climb || (!!this._surface && !this._surface.standing);
   }
 
   /**
@@ -1618,7 +1618,8 @@ export class PlayerControls {
       const newY = this.playerY;
       const newZ = this.playerZ;
       const isMovingNow = climbInput.length() > 0;
-      this.isMoving = isMovingNow && !this._climb && !surf && !roll;
+      // (standing on the giant's head walks; hanging on it climbs)
+      this.isMoving = surf ? !!surf.standing && !!surf.moving : isMovingNow && !this._climb && !roll;
 
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
@@ -1661,8 +1662,8 @@ export class PlayerControls {
     this.deltaSeconds = delta;
 
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, {
-      isMoving: !!this.isMoving && !this._climb && !this._surface,
-      climbing: !!this._climb || !!this._surface,
+      isMoving: !!this.isMoving && !this._climb && !(this._surface && !this._surface.standing),
+      climbing: !!this._climb || (!!this._surface && !this._surface.standing),
       climbMoving: (!!this._climb && !!this._climbMoving) || !!this._surface?.moving
     });
 

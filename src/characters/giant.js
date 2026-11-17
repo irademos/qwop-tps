@@ -19,9 +19,10 @@
 // on grabs it; down at the foot near the ground steps off; jumping lets go. It's PlayerControls'
 // `surfaceClimb` hook (`climbHook`) — it plays the wall-climb clip.
 import * as THREE from 'three';
-import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
+import { createCartDust } from '../items/cart.js';
 
-export const GIANT_MODEL_URL = '/models/glb_characters/giant.glb?v=1';
+export const GIANT_MODEL_URL = glbCharacterConfig.giantUrl;
 export const GIANT_HEIGHT = 16;    // m (the player is ≈ 0.8 m: 20×)
 const ANIM_RATE = 0.35;            // the clips play this much slower
 const WALK_SPEED = 1.7;            // m/s (about the slowed walk's stride at GIANT_HEIGHT)
@@ -41,6 +42,16 @@ const STEP_LO = 0.015;
 const STEP_HI = 0.04;
 const STEP_MIN_GAP_S = 0.5;
 
+// Footfall dust (the cart's puffs — src/items/cart.js — giant-sized)
+const DUST = { max: 64, life: [1.6, 2.6], size: [2.2, 4.2], rise: 0.9, spread: 1.2 };
+const DUST_PUFFS = 10;             // a footfall
+const DUST_OUT_SPEED = 2.6;        // m/s rolling out from the foot
+// Kicks: the front of a foot swinging forward into the player
+const KICK_MIN_SPEED = 0.8;        // m/s the foot moves the way the giant walks
+const KICK_PLAYER_R = 0.3;         // m: the player's body
+const KICK_COOLDOWN_S = 2;
+const KICK_FOOT_SHARE = 0.6;       // of a shin's radius: the front of the foot
+
 // Climbing
 const CLIMB_SPEED = 2.2;           // m/s over its surface at full stick
 const CLIMB_INPUT = 0.15;          // stick share that counts
@@ -51,6 +62,10 @@ const GRAB_HEAD_ON = 0.55;         // cos: walking toward it within this
 const SWITCH_BLEND_S = 0.3;
 const STEP_OFF_FEET = 0.3;         // m over the ground: going down here steps off
 const CAM_FOLLOW = 1.4;            // 1/s: the camera yaw eases round behind the climber
+// Standing on the head (up past the top of the head)
+const HEAD_STAND_SHARE = 0.75;     // of the head's radius: the patch the player walks on
+const HEAD_WALK_SPEED = 1.6;       // m/s
+const ARM_LEAVE_MARGIN = 0.3;      // m out of an arm before it can be stepped onto again
 const RADIUS_PERCENTILE = 0.6;
 // Pieces: from bone a to bone b, turning with `frame`; `ends`: [past a, past b] — the pieces it
 // goes on to ('ground' = steps off there); [tMin, tMax] of a → b
@@ -69,6 +84,9 @@ const SEGMENTS = [
 ];
 
 const LEGS = new Set(['shinL', 'shinR', 'thighL', 'thighR']);
+// Climbing up the body's sides runs into the arms hanging there: the hold steps onto the arm
+const BODY = new Set(['torso', 'chest']);
+const ARMS = ['armL', 'foreL', 'armR', 'foreR'];
 const UP = new THREE.Vector3(0, 1, 0);
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
@@ -114,6 +132,11 @@ export function createGiant(ctx) {
   let active = false;
   let climb = null;         // { seg, t, th, off: Vector3, offT }
   let steps = 0;            // footfalls so far (debug)
+  let kicks = 0;
+  let lastKick = 0;
+  let kickRadius = 1.5;     // m: the front of a foot (from the shins' radius — measure())
+  let dust = null;          // footfall dust (createCartDust)
+  let headTopLift = 0;      // m from the head bone's end up to the top of the head
   const ray = new THREE.Raycaster();
   ray.firstHitOnly = true;
 
@@ -176,10 +199,14 @@ export function createGiant(ctx) {
       ...s, A: fl.getBone(s.a), B: fl.getBone(s.b), F: fl.getBone(s.frame), r: 0.5, len: 1, refLocal: new THREE.Vector3(1, 0, 0), d: [],
     })).filter((s) => s.A && s.B && s.F);
     segByKey = new Map(segs.map((s) => [s.key, s]));
-    feet = ['LeftFoot', 'RightFoot'].map((n) => ({ bone: fl.getBone(n), min: Infinity, armed: false, last: 0 })).filter((f) => f.bone);
+    feet = ['Left', 'Right'].map((side) => ({
+      bone: fl.getBone(`${side}Foot`), toe: fl.getBone(`${side}ToeBase`), tip: fl.getBone(`${side}Toe_End`),
+      min: Infinity, armed: false, last: 0, prev: null,
+    })).filter((f) => f.bone);
     root.updateMatrixWorld(true);
     const ends = segs.map((s) => ({ a: s.A.getWorldPosition(new THREE.Vector3()), b: s.B.getWorldPosition(new THREE.Vector3()) }));
     let mesh = null;
+    let topY = -Infinity;
     root.traverse((o) => { if (o.isSkinnedMesh && !mesh) mesh = o; });
     if (mesh) {
       mesh.skeleton.update();
@@ -188,6 +215,7 @@ export function createGiant(ctx) {
       for (let i = 0; i < n; i++) {
         mesh.getVertexPosition(i, v);
         v.applyMatrix4(mesh.matrixWorld);
+        if (v.y > topY) topY = v.y;
         let best = -1, bestD = Infinity, bestT = 0;
         for (let k = 0; k < segs.length; k++) {
           const { a, b } = ends[k];
@@ -215,6 +243,11 @@ export function createGiant(ctx) {
       s.F.getWorldQuaternion(_quat);
       s.refLocal.copy(_ref).applyQuaternion(_quat.invert());
     });
+    // (the top of the head: the highest vertex over the head bone's end — where the player stands)
+    const head = segByKey.get('head');
+    if (head && Number.isFinite(topY)) headTopLift = Math.max(0, topY - head.B.getWorldPosition(_q).y);
+    const shin = segByKey.get('shinL');
+    if (shin) kickRadius = shin.r * KICK_FOOT_SHARE;
   }
 
   // A piece's frame this frame: _a, _b, _u (a → b, unit), its length, _ref / _bin square to it
@@ -314,9 +347,51 @@ export function createGiant(ctx) {
           f.last = now;
           steps += 1;
           ctx.onStep?.(_p.clone().setY(pos.y), playerPos);
+          // (dust puffing out round the foot — the cart's puffs, giant-sized)
+          footDust(f, _p);
         }
       }
+      kickCheck(f, dt, playerPos, now);
     }
+    dust?.update(dt);
+  }
+
+  // A cloud of dust round a foot that's just come down (`at`: the foot bone, world)
+  function footDust(f, at) {
+    if (!dust) dust = createCartDust(ctx.scene, DUST);
+    // (the middle of the sole: between the ankle and the toes)
+    if (f.toe) f.toe.getWorldPosition(_q).lerp(at, 0.4); else _q.copy(at);
+    const gy = terrainAt(_q.x, _q.z) ?? pos.y;
+    const ring = GIANT_HEIGHT * 0.07;
+    for (let i = 0; i < DUST_PUFFS; i++) {
+      const a = (i / DUST_PUFFS) * Math.PI * 2 + Math.random() * 0.5;
+      const cx = Math.sin(a), cz = Math.cos(a);
+      const v = DUST_OUT_SPEED * (0.6 + Math.random() * 0.6);
+      dust.emit(_q.x + cx * ring, gy, _q.z + cz * ring, cx * v, cz * v);
+    }
+  }
+
+  // The front of a foot swinging forward (walking) into the player: a kick
+  function kickCheck(f, dt, playerPos, now) {
+    if (!f.toe || !playerPos || mode !== 'walk' || climb) { f.prev = null; return; }
+    f.toe.getWorldPosition(_q);
+    if (f.tip) f.tip.getWorldPosition(_r).lerp(_q, 0.5); else _r.copy(_q);
+    const prev = f.prev ?? (f.prev = _r.clone());
+    // (its speed the way the giant walks: the swinging foot, not the planted one)
+    const fwd = ((_r.x - prev.x) * Math.sin(yaw) + (_r.z - prev.z) * Math.cos(yaw)) / Math.max(dt, 1e-4);
+    prev.copy(_r);
+    if (fwd < KICK_MIN_SPEED || now - lastKick < KICK_COOLDOWN_S) return;
+    const reach = kickRadius + KICK_PLAYER_R;
+    const dx = playerPos.x - _r.x;
+    const dz = playerPos.z - _r.z;
+    if (dx * dx + dz * dz > reach * reach) return;
+    if (playerPos.y > _r.y + kickRadius || playerPos.y < _r.y - kickRadius - 1.5) return;
+    lastKick = now;
+    // (sent the way the giant walks, and out to the side the player's on)
+    const side = Math.hypot(dx, dz) || 1;
+    const dir = new THREE.Vector3(Math.sin(yaw) + (dx / side) * 0.5, 0, Math.cos(yaw) + (dz / side) * 0.5).normalize();
+    kicks += 1;
+    ctx.onKick?.(dir, _r.clone());
   }
 
   // ── Climbing (PlayerControls.surfaceClimb) ────────────────────────────
@@ -356,6 +431,7 @@ export function createGiant(ctx) {
     }
     // Jumped (or blasted) off: let go — the jump code takes it from here
     if (window.phoneSwordAirborne) { climb = null; return null; }
+    if (climb.stand) return standOnHead(ctrl, movement, dt);
 
     const s = climb.seg;
     frameOf(s);
@@ -405,7 +481,13 @@ export function createGiant(ctx) {
             const score = o.dist - inward * n.len;
             if (!best || score < best.score) best = { n, o, score, inward };
           }
-          if (best.inward < -0.3) { frameOf(s); best = null; } // (nowhere further that way: stays)
+          // (a hanging arm against the push: not that way — stays at the shoulder)
+          if (best.inward < -0.3 && ARMS.includes(best.n.key)) { frameOf(s); best = null; }
+        }
+        // Up past the top of the head: standing on it
+        if (!next.length && s.key === 'head' && end === 1 && f > 0.3) {
+          holdOf(s, climb.t, climb.th, _p).addScaledVector(UP, -HANG);
+          return startStand(ctrl, _p, dt);
         }
         if (next.length && best) {
           const n = best.n;
@@ -418,8 +500,11 @@ export function createGiant(ctx) {
           holdOf(n, climb.t, climb.th, _q);
           climb.off.add(from.sub(_q));
           climb.offT = SWITCH_BLEND_S;
+          // (off an arm onto the body: not straight back onto that arm)
+          if (ARMS.includes(s.key)) climb.armBlock = s.key;
         } else frameOf(s);
       }
+      if (BODY.has(climb.seg.key)) armSnap();
     }
     const cur = climb.seg;
     holdOf(cur, climb.t, climb.th, _p);
@@ -441,6 +526,104 @@ export function createGiant(ctx) {
     return { x: _p.x, y: _p.y, z: _p.z, yaw: climb.yaw, moving };
   }
 
+  // On the body with the hold run into an arm hanging beside it: onto the arm's outer side
+  function armSnap() {
+    const body = climb.seg;
+    frameOf(body);
+    holdOf(body, climb.t, climb.th, _p);
+    // (straight out from the body there: the arm's side facing away from it)
+    _r.subVectors(_p, _q.copy(_a).addScaledVector(_u, climb.t * body.len));
+    _r.addScaledVector(_u, -_r.dot(_u)).normalize();
+    const hold = _p.clone();
+    const out = _r.clone();
+    let hit = null;
+    for (const k of ARMS) {
+      const arm = segByKey.get(k);
+      if (!arm) continue;
+      const o = placeOn(arm, hold);
+      if (climb.armBlock === k) {
+        if (o.dist > ARM_LEAVE_MARGIN) climb.armBlock = null;
+        continue;
+      }
+      if (o.dist < 0 && (!hit || o.dist < hit.o.dist)) hit = { arm, o };
+    }
+    if (!hit) { frameOf(body); return; }
+    const { arm } = hit;
+    const o = placeOn(arm, _p.copy(hold).addScaledVector(out, arm.r * 3));
+    climb.seg = arm;
+    climb.t = o.t;
+    climb.th = o.th;
+    frameOf(arm);
+    holdOf(arm, climb.t, climb.th, _q);
+    climb.off.add(hold.sub(_q));
+    climb.offT = SWITCH_BLEND_S;
+  }
+
+  // ── Standing on top of the head ───────────────────────────────────────
+  // The spot is kept in the head bone's frame (so it goes where the head goes); walking moves it
+  // in the world, kept within the top's patch — walking off its edge goes back to hanging on
+  // the head's side there.
+  const headTopCenter = (out) => {
+    const head = segByKey.get('head');
+    return head.B.getWorldPosition(out).addScaledVector(UP, headTopLift);
+  };
+  function startStand(ctrl, p, dt) {
+    const head = segByKey.get('head');
+    const c = headTopCenter(new THREE.Vector3());
+    // (a little in from the edge, on the side they came up)
+    _r.set(p.x - c.x, 0, p.z - c.z);
+    const R = head.r * HEAD_STAND_SHARE;
+    if (_r.lengthSq() > 1e-6) _r.normalize().multiplyScalar(R * 0.6);
+    const at = c.clone().add(_r);
+    climb.off.add(p.clone().sub(at));
+    climb.offT = SWITCH_BLEND_S;
+    climb.stand = { local: head.F.worldToLocal(at.clone()), yaw: climb.yaw ?? ctrl.yaw };
+    return standOnHead(ctrl, { x: 0, z: 0 }, dt);
+  }
+  function standOnHead(ctrl, movement, dt) {
+    const head = segByKey.get('head');
+    const st = climb.stand;
+    const c = headTopCenter(new THREE.Vector3());
+    const at = head.F.localToWorld(_p.copy(st.local));
+    const mag = Math.min(1, Math.hypot(movement.x, movement.z));
+    const moving = mag > CLIMB_INPUT;
+    if (moving) {
+      at.x += movement.x * HEAD_WALK_SPEED * dt;
+      at.z += movement.z * HEAD_WALK_SPEED * dt;
+      st.yaw = Math.atan2(movement.x, movement.z);
+    }
+    const R = head.r * HEAD_STAND_SHARE;
+    const dx = at.x - c.x, dz = at.z - c.z;
+    const d = Math.hypot(dx, dz);
+    if (d > R) {
+      if (moving && (movement.x * dx + movement.z * dz) > 0) {
+        // Off the edge: back to hanging on the head's side there, facing it
+        const o = placeOn(head, _q.set(c.x + dx / d * (head.r + 1), c.y - headTopLift, c.z + dz / d * (head.r + 1)));
+        const from = _q.set(at.x, c.y, at.z).clone();
+        climb.stand = null;
+        climb.seg = head;
+        climb.t = head.t[1] - 0.02;
+        climb.th = o.th;
+        frameOf(head);
+        holdOf(head, climb.t, climb.th, _r).addScaledVector(UP, -HANG);
+        climb.off.add(from.sub(_r));
+        climb.offT = SWITCH_BLEND_S;
+        climb.yaw = Math.atan2(-dx, -dz);
+        return { x: from.x + _r.x, y: from.y + _r.y, z: from.z + _r.z, yaw: climb.yaw, moving: true };
+      }
+      at.x = c.x + (dx / d) * R;
+      at.z = c.z + (dz / d) * R;
+    }
+    at.y = c.y;
+    st.local.copy(head.F.worldToLocal(at.clone()));
+    if (climb.offT > 0) {
+      climb.offT = Math.max(0, climb.offT - dt);
+      climb.off.multiplyScalar(climb.offT / (climb.offT + dt));
+    } else climb.off.set(0, 0, 0);
+    at.add(climb.off);
+    return { x: at.x, y: at.y, z: at.z, yaw: st.yaw, moving, standing: true };
+  }
+
   function letGo(ctrl, p, gy) {
     climb = null;
     // (a little way out from the foot, on the ground)
@@ -460,7 +643,7 @@ export function createGiant(ctx) {
   }
 
   const debug = () => ({
-    root, character, pos, segs, climb, mode, target, island, active, steps,
+    root, character, pos, segs, climb, mode, target, island, active, steps, kicks,
     feet: feet.map((f) => ({ min: f.min, armed: f.armed, h: f.bone.getWorldPosition(new THREE.Vector3()).y - pos.y })),
     teleportNear: (x, z) => { pos.set(x, pos.y, z); groundY = null; },
     stop: () => { mode = 'idle'; modeT = 1e9; },
@@ -472,6 +655,7 @@ export function createGiant(ctx) {
     climbHook,
     release,
     isClimbing: () => !!climb,
+    isStandingOnHead: () => !!climb?.stand,
     debug,
   };
 }

@@ -207,12 +207,18 @@ const getDustTextures = () => {
 const puffScale = (u) => 0.45 + 0.55 * (1 - (1 - Math.min(1, u / DUST_POP)) ** 2) + 0.25 * u;
 const puffOpacity = (u) => DUST_OPACITY * Math.min(1, u / 0.12) * (u < 1 - DUST_FADE ? 1 : (1 - u) / DUST_FADE);
 
-/** Dust puffs: { emit(x, y, z, vx, vz), update(dt), clear() } — sprites in `parent`. */
-function createCartDust(parent) {
+/**
+ * Dust puffs: { emit(x, y, z, vx, vz), update(dt), clear() } — sprites in `parent`. Options
+ * (the cart's by default — the giant's footfalls use bigger, slower ones): max, life, size, rise,
+ * spread (m/s of random sideways drift).
+ */
+export function createCartDust(parent, {
+  max = DUST_MAX, life = DUST_LIFE, size = DUST_SIZE, rise = DUST_RISE, spread = 0.6,
+} = {}) {
   const pool = [];
   let next = 0;
   const textures = getDustTextures();
-  for (let i = 0; i < DUST_MAX; i++) {
+  for (let i = 0; i < max; i++) {
     const mat = new THREE.SpriteMaterial({ map: textures[i % textures.length], transparent: true, depthWrite: false, opacity: 0 });
     const sp = new THREE.Sprite(mat);
     sp.visible = false;
@@ -225,12 +231,13 @@ function createCartDust(parent) {
       const p = pool[next];
       next = (next + 1) % pool.length;
       p.age = 0;
-      p.life = THREE.MathUtils.lerp(DUST_LIFE[0], DUST_LIFE[1], Math.random());
-      p.size = THREE.MathUtils.lerp(DUST_SIZE[0], DUST_SIZE[1], Math.random());
-      p.vx = vx + (Math.random() - 0.5) * 0.6;
-      p.vz = vz + (Math.random() - 0.5) * 0.6;
-      p.vy = DUST_RISE * (0.6 + Math.random() * 0.8);
-      p.sp.position.set(x + (Math.random() - 0.5) * 0.2, y + p.size * 0.3, z + (Math.random() - 0.5) * 0.2);
+      p.life = THREE.MathUtils.lerp(life[0], life[1], Math.random());
+      p.size = THREE.MathUtils.lerp(size[0], size[1], Math.random());
+      p.vx = vx + (Math.random() - 0.5) * spread;
+      p.vz = vz + (Math.random() - 0.5) * spread;
+      p.vy = rise * (0.6 + Math.random() * 0.8);
+      const jitter = p.size * 0.3;
+      p.sp.position.set(x + (Math.random() - 0.5) * jitter, y + p.size * 0.3, z + (Math.random() - 0.5) * jitter);
       // (a little tilt, never upside down — the shade stays underneath)
       p.sp.material.rotation = (Math.random() - 0.5) * 0.6;
       p.sp.scale.set(0.001, 0.001, 1);
