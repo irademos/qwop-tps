@@ -130,5 +130,5 @@ export function installTownCart(T, ctx) {
   };
   const inCart = () => !!ride?.isRiding();
 
-  Object.assign(T, { cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart });
+  Object.assign(T, { cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
 }

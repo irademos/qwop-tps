@@ -18,9 +18,9 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // tipped), back it backs up (BACK_SPEED), leaned left / right it turns that way (TURN_RATE,
 // gentler when slow — TURN_STILL at a stop). The joystick / WASD do the same (the only way
 // without a gyro). It follows the ground under its wheels (tipping with slopes — pitch / roll),
-// rolls a little downhill (SLOPE_PULL), and stops at what it can't roll over: a rise of more
-// than MAX_RISE under a corner of its bed over where it is (walls, houses, steps), water deeper
-// than MAX_WADE, a tree trunk. Down it goes any way: a drop steeper than it can follow
+// rolls a little downhill (SLOPE_PULL), and stops at what it can't roll over: ground ahead
+// rising steeper than MAX_UP_SLOPE, a step up of more than MAX_STEP_UP (walls, houses, steps),
+// water deeper than MAX_WADE, a tree trunk. Down it goes any way: a drop steeper than it can follow
 // (FALL_STEP) and it's off the edge, falling with gravity (FALL_GRAVITY) until it lands. Dust
 // puffs up behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
 // Holding something the gyro works (ctx.isHolding): the phone's busy with it, so the cart stops
@@ -56,21 +56,24 @@ const TURN_RATE = 1.5;                       // rad/s at full sideways lean, rol
 const TURN_STILL = 0.55;                     // rad/s at full lean, stopped (pushed round)
 const TURN_FULL_SPEED = 1.5;                 // m/s — at this speed or more it turns at TURN_RATE
 const SLOPE_PULL = 2.5;                      // m/s² downhill per unit of slope along it
-const MAX_RISE = 0.58;                       // m a bed corner can be over the cart's ground (any drop is fine)
+const MAX_UP_SLOPE = 0.9;                    // rise / run it rolls up (~42°) — ground ahead of it, the way it rolls (down: any)
+const MAX_STEP_UP = 0.3;                     // m its middle can step up in one go (a kerb; more is a wall)
+const TURN_SLOPE_SLACK = 0.6;                // turning on the spot: corners may rise this much steeper (it's already there)
+const AIR_CLEAR = 0.1;                       // m — in the air, ground over its bottom by this much is a wall
 const FALL_STEP = 0.12;                      // m a frame (+ FALL_STEP_PER_M × the distance rolled) it follows the ground down
 const FALL_STEP_PER_M = 1.3;                 // … past that it's off an edge and falls
 const FALL_GRAVITY = 18;                     // m/s² falling (the jump's gravity)
 const FALL_TIP_RATE = 2.5;                   // 1/s — falling, the pitch / roll easing toward the ground under it
 const HARD_LANDING = 4;                      // m/s down landing: a thud
 // Dust behind the back wheels
-const DUST_MAX = 48;                         // puffs alive at once
-const DUST_PER_M = 2.2;                      // puffs a metre rolled (both wheels)
-const DUST_MIN_SPEED = 0.6;                  // m/s — slower than this, none
-const DUST_LIFE = [0.7, 1.2];                // s
-const DUST_SIZE = [0.25, 0.75];              // m across, born → gone
-const DUST_RISE = 0.35;                      // m/s up
-const DUST_OPACITY = 0.45;
-const DUST_COLOR = 0xb8a585;
+const DUST_MAX = 64;                         // puffs alive at once
+const DUST_PER_M = 4;                      // puffs a metre rolled (both wheels)
+const DUST_MIN_SPEED = 0.4;                  // m/s — slower than this, none
+const DUST_LIFE = [0.9, 1.5];                // s
+const DUST_SIZE = [0.5, 1.8];              // m across, born → gone
+const DUST_RISE = 0.7;                      // m/s up
+const DUST_OPACITY = 1;
+const DUST_COLOR = 0xcbb488;
 const MAX_WADE = 0.3;                        // m of water it rolls through
 const TRUNK_PROBE_R = 0.12;                  // m: a corner this near a trunk is against it
 const TILT_DEAD = 0.1;                       // sin of the tilt — under this, no lean
@@ -248,18 +251,26 @@ export function createCartRide(ctx) {
     z: z - Math.sin(yaw) * lx + Math.cos(yaw) * lz,
   });
   const CORNERS = [[CART_HALF_WIDTH, CART_FRONT], [-CART_HALF_WIDTH, CART_FRONT], [CART_HALF_WIDTH, -CART_BACK], [-CART_HALF_WIDTH, -CART_BACK], [0, CART_FRONT], [0, -CART_BACK]];
-  // Whether the cart fits at a pose: no corner of its bed against ground more than MAX_RISE
-  // over `from` (where it is now — rolling; else the ground under the pose's middle). Lower
-  // ground's fine: off an edge it falls.
-  const fits = (x, z, yaw, from) => {
+  // Whether the cart fits at a pose. `roll` (rolling there): { dir — +1 forward / −1 back / 0
+  // turning on the spot, y — its height now, air — in the air }; without it (parking) every
+  // corner's slope counts. Rolling, only the ground ahead the way it goes counts: up it's
+  // limited (MAX_UP_SLOPE, MAX_STEP_UP), down never — off an edge it falls.
+  const fits = (x, z, yaw, roll = null) => {
     const mid = groundAt(x, z);
     if (!Number.isFinite(mid) || ctx.waterDepth(x, z) > MAX_WADE) return false;
-    const ref = Number.isFinite(from) ? from : mid;
-    if (mid - ref > MAX_RISE) return false;
+    if (roll && !roll.air && mid - roll.y > MAX_STEP_UP) return false;
     for (const [lx, lz] of CORNERS) {
       const p = worldXZ(x, z, yaw, lx, lz);
       const g = groundAt(p.x, p.z);
-      if (!Number.isFinite(g) || g - ref > MAX_RISE) return false;
+      if (!Number.isFinite(g)) return false;
+      const ahead = !roll || roll.dir === 0 || Math.sign(lz) === roll.dir;
+      if (roll?.air) {
+        // (the ground it's leaving is still under its back end)
+        if (ahead && g > roll.y + AIR_CLEAR) return false;
+      } else {
+        const limit = roll?.dir === 0 ? MAX_UP_SLOPE + TURN_SLOPE_SLACK : MAX_UP_SLOPE;
+        if (ahead && (g - mid) / Math.abs(lz) > limit) return false;
+      }
       if (ctx.waterDepth(p.x, p.z) > MAX_WADE) return false;
       if (pushOutOfObstacles(p.x, p.z, g + 0.4, TRUNK_PROBE_R)) return false;
     }
@@ -317,8 +328,8 @@ export function createCartRide(ctx) {
     if (st.air || Math.abs(st.v) < DUST_MIN_SPEED) { dustDue = 0; return; }
     dustDue += Math.abs(moved) * DUST_PER_M * Math.min(1.5, Math.abs(st.v) / MAX_SPEED + 0.4);
     const back = st.v >= 0 ? -1 : 1; // (kicked out behind the way it's going)
-    const vx = Math.sin(st.yaw) * back * Math.abs(st.v) * 0.25;
-    const vz = Math.cos(st.yaw) * back * Math.abs(st.v) * 0.25;
+    const vx = Math.sin(st.yaw) * back * Math.abs(st.v) * 0.1;
+    const vz = Math.cos(st.yaw) * back * Math.abs(st.v) * 0.1;
     while (dustDue >= 1) {
       dustDue -= 1;
       const side = Math.random() < 0.5 ? 1 : -1;
@@ -433,11 +444,15 @@ export function createCartRide(ctx) {
     const nx = st.x + Math.sin(yaw) * step;
     const nz = st.z + Math.cos(yaw) * step;
     let moved = 0;
-    if (fits(nx, nz, yaw, st.y)) {
+    const dir = Math.abs(step) < 1e-6 ? 0 : Math.sign(step);
+    // (on the ground: steps up measured from the ground under its middle — not its wheels'
+    // average, which sits under a crest; in the air: from its bottom)
+    const fromY = st.air ? st.y : groundAt(st.x, st.z);
+    if (fits(nx, nz, yaw, { dir, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air })) {
       Object.assign(st, { x: nx, z: nz, yaw });
       moved = step;
       if (!st.air) model.spin(step);
-    } else if (fits(st.x, st.z, yaw, st.y)) {
+    } else if (fits(st.x, st.z, yaw, { dir: 0, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air })) {
       // (up against something: turning still works)
       st.yaw = yaw;
       if (Math.abs(st.v) > 1 && st.t - st.bumpAt > 0.6) { st.bumpAt = st.t; ctx.onBump?.(); }
