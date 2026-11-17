@@ -73,8 +73,8 @@ export const SWIM_CONFIG = {
   enterDepth: 0.7,   // m of water over the ground to start swimming
   exitDepth: 0.6,    // m: back to wading below this (hysteresis)
   inWater: 0.3,      // m the surface must be over what's under the feet (not on a deck / bridge)
-  swimSink: 0.4,     // m the feet's y sits under the surface swimming (the clip lies flat)
-  treadSink: 0.6,    // m treading water (upright, head out)
+  swimSink: 0.5,     // m the feet's y sits under the surface swimming (the clip lies flat)
+  treadSink: 0.7,    // m treading water (upright, head out)
   easeRate: 5,       // 1/s the height eases to the swim height
   speedScale: 0.6,   // × walking speed
   turnRate: 7,       // 1/s the body turns toward the swim direction
