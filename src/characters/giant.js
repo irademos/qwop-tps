@@ -10,7 +10,7 @@
 // shake like a bomb's, by distance — hitFeel 'giantStep', and a thud).
 //
 // Climbing (cheap): the body is a handful of capsules, one per limb / torso piece, each between two
-// bones, radius measured once from the skinned mesh (the 70th percentile of the vertices nearest
+// bones, radius measured once from the skinned mesh (the 60th percentile of the vertices nearest
 // it). On it the player is a point (segment, t along it, θ round it) in that bone's frame, so they
 // move with the giant. The stick's up / down / left / right (and diagonals) is the move wanted on
 // screen — world up × the camera's right — projected onto the capsule's surface: along the limb and
@@ -51,7 +51,7 @@ const GRAB_HEAD_ON = 0.55;         // cos: walking toward it within this
 const SWITCH_BLEND_S = 0.3;
 const STEP_OFF_FEET = 0.3;         // m over the ground: going down here steps off
 const CAM_FOLLOW = 1.4;            // 1/s: the camera yaw eases round behind the climber
-const RADIUS_PERCENTILE = 0.7;
+const RADIUS_PERCENTILE = 0.6;
 // Pieces: from bone a to bone b, turning with `frame`; `ends`: [past a, past b] — the pieces it
 // goes on to ('ground' = steps off there); [tMin, tMax] of a → b
 const SEGMENTS = [
@@ -188,16 +188,18 @@ export function createGiant(ctx) {
       for (let i = 0; i < n; i++) {
         mesh.getVertexPosition(i, v);
         v.applyMatrix4(mesh.matrixWorld);
-        let best = -1, bestD = Infinity;
+        let best = -1, bestD = Infinity, bestT = 0;
         for (let k = 0; k < segs.length; k++) {
           const { a, b } = ends[k];
           _u.subVectors(b, a);
           const l2 = _u.lengthSq() || 1;
-          const t = THREE.MathUtils.clamp(_q.subVectors(v, a).dot(_u) / l2, 0, 1);
+          const tt = _q.subVectors(v, a).dot(_u) / l2;
+          const t = THREE.MathUtils.clamp(tt, 0, 1);
           const d = _q.copy(a).addScaledVector(_u, t).distanceTo(v);
-          if (d < bestD) { bestD = d; best = k; }
+          if (d < bestD) { bestD = d; best = k; bestT = tt; }
         }
-        if (best >= 0) segs[best].d.push(bestD);
+        // (only the piece's middle: the feet / hands / joints past its ends would fatten it)
+        if (best >= 0 && bestT > 0.1 && bestT < 0.9) segs[best].d.push(bestD);
       }
     }
     segs.forEach((s, k) => {
