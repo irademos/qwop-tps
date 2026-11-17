@@ -10877,13 +10877,14 @@ async function initCore(runtimeContext) {
   const SWIM_FADE_S = 0.7;
   let _swimDrown = null;           // { t, shoreDone } while out of breath
   // Splashes (the canoe oar's — waterSplash.js): a big one going in, the hands taking turns
-  // through each stroke and the feet kicking behind while swimming, a ripple now and then treading
+  // through each stroke and the feet kicking behind while swimming; the rings small and faint
+  // (SWIM_RING)
   const SWIM_STROKE_SPLASH_S = 0.42;  // s between hand splashes swimming (left / right in turn)
   const SWIM_KICK_SPLASH_S = 0.28;    // s between the feet's splashes swimming
-  const SWIM_TREAD_RING_S = 1.1;      // s between ripples treading water
+  const SWIM_RING = { grow: 0.45, opacity: 0.25 }; // waterSplash ring options (the canoe's: 1.6 m, 0.55)
   const _swimSplash = createWaterSplash();
   scene.add(_swimSplash.group);
-  const _swimSplashT = { stroke: 0, kick: 0, ring: 0, hand: 'left' };
+  const _swimSplashT = { stroke: 0, kick: 0, hand: 'left' };
   const _swimPalm = new THREE.Vector3();
   const _swimSplashes = (dt, entered) => {
     const p = playerModel.position;
@@ -10894,8 +10895,7 @@ async function initCore(runtimeContext) {
     const fz = Math.cos(yaw);
     if (entered) {
       _swimSplash.drops({ x: p.x, y: level, z: p.z, n: 18, speed: 0.8, up: 2.4, spread: 1 });
-      _swimSplash.ring(p.x, level, p.z, 0.35);
-      _swimSplash.ring(p.x, level, p.z, 0.2);
+      _swimSplash.ring(p.x, level, p.z, 0.12, SWIM_RING);
       audioManager?.playSound?.('splash', { at: p.clone(), volume: 0.9 });
       return;
     }
@@ -10911,7 +10911,7 @@ async function initCore(runtimeContext) {
         if (glb?.getPalmWorldPosition) glb.getPalmWorldPosition(T.hand, _swimPalm);
         else _swimPalm.set(p.x + fx * 0.4, level, p.z + fz * 0.4);
         _swimSplash.drops({ x: _swimPalm.x, y: level, z: _swimPalm.z, n: 6, dx: -fx, dz: -fz, speed: 0.5, up: 1.3, spread: 0.4 });
-        if (Math.random() < 0.5) _swimSplash.ring(_swimPalm.x, level, _swimPalm.z, 0.15);
+        if (Math.random() < 0.4) _swimSplash.ring(_swimPalm.x, level, _swimPalm.z, 0.05, SWIM_RING);
       }
       if (T.kick <= 0) {
         // (the feet kicking up a little white water behind)
@@ -10919,14 +10919,6 @@ async function initCore(runtimeContext) {
         const bx = p.x - fx * 0.55;
         const bz = p.z - fz * 0.55;
         _swimSplash.drops({ x: bx, y: level, z: bz, n: 4, dx: -fx, dz: -fz, speed: 0.4, up: 0.9, spread: 0.5 });
-      }
-      T.ring = 0;
-    } else {
-      T.ring -= dt;
-      if (T.ring <= 0) {
-        T.ring = SWIM_TREAD_RING_S * (0.8 + Math.random() * 0.4);
-        _swimSplash.ring(p.x, level, p.z, 0.25);
-        if (Math.random() < 0.4) _swimSplash.drops({ x: p.x, y: level, z: p.z, n: 2, speed: 0.3, up: 0.6, spread: 0.5 });
       }
     }
   };

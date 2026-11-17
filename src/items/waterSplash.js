@@ -34,7 +34,7 @@ export function createWaterSplash() {
     mesh.visible = false;
     mesh.renderOrder = 2;
     group.add(mesh);
-    rings.push({ mesh, age: RING_LIFE_S, size: 0.2 });
+    rings.push({ mesh, age: RING_LIFE_S, size: 0.2, grow: RING_GROW, opacity: 0.55 });
   }
   let nextRing = 0;
 
@@ -63,11 +63,14 @@ export function createWaterSplash() {
       });
     }
   };
-  const ring = (x, y, z, size = 0.2) => {
+  // (`grow`: m of radius gained over its life; `opacity`: at the start — smaller / fainter rings)
+  const ring = (x, y, z, size = 0.2, { grow = RING_GROW, opacity = 0.55 } = {}) => {
     const g = rings[nextRing];
     nextRing = (nextRing + 1) % MAX_RINGS;
     g.age = 0;
     g.size = size;
+    g.grow = grow;
+    g.opacity = opacity;
     g.mesh.position.set(x, y + 0.01, z);
     g.mesh.visible = true;
   };
@@ -96,8 +99,8 @@ export function createWaterSplash() {
       g.age += dt;
       const t = g.age / RING_LIFE_S;
       if (t >= 1) { g.mesh.visible = false; continue; }
-      g.mesh.scale.setScalar(g.size + RING_GROW * Math.sqrt(t) * (0.5 + g.size));
-      g.mesh.material.opacity = 0.55 * (1 - t);
+      g.mesh.scale.setScalar(g.size + g.grow * Math.sqrt(t) * (0.5 + g.size));
+      g.mesh.material.opacity = g.opacity * (1 - t);
     }
   };
 
