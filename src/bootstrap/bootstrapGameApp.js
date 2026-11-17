@@ -3699,8 +3699,6 @@ async function initCore(runtimeContext) {
     // The bubble's hand is held out while it lasts: no bow / shield
     if (_bubbleHandOut() && (itemId === SHIELD_ITEM_ID || itemId === 'pistol')) return;
     if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
-    // (off Town's broom first: hands on the weapon)
-    if (_broomRide?.isRiding()) _broomRide.dismount();
     // The wand (and Town's fishing rod) is the sword weapon in another form: switching between
     // them just swaps the model
     if (itemId === MAGIC_WAND_ITEM_ID || itemId === FOAM_SWORD_ITEM_ID || itemId === FISHING_ROD_ITEM_ID || itemId === OAR_ITEM_ID) {
@@ -10950,8 +10948,13 @@ async function initCore(runtimeContext) {
       setStat('mana', getMana() - n, { skipSave: true });
       return true;
     },
-    onBoostEnd: () => {
-      showPickupToast('mana_potion', 1, '', { text: 'Out of mana — boost off' });
+    // A held item the gyro works (the sword / wand / rod / bow / shield, with a live gyro): the
+    // phone's busy with it, so the broom holds still meanwhile (empty hands don't use the gyro)
+    isHolding: () => !!(window.phoneSwordGyro?.connected && _heldWeaponId()),
+    // (put away: the phone's pose now is the new rest — no lurch from where the item left it)
+    onHoldEnd: () => { _broomGyro.needRest = true; },
+    onBoostEnd: (reason) => {
+      if (reason !== 'hold') showPickupToast('mana_potion', 1, '', { text: 'Out of mana — boost off' });
       playerControls?.refreshActionButtons?.();
       _phoneSwordStatusNow?.();
     },
@@ -10959,6 +10962,7 @@ async function initCore(runtimeContext) {
   // Boost on the broom while held (climbing, faster, BOOST_MANA_PER_S mana a second — src/items/broom.js)
   const _setBroomBoost = (on) => {
     if (!_broomRide.isRiding() || on === _broomRide.isBoosting()) return;
+    if (on && _broomRide.isHolding()) return; // (held still while a gyro item's out)
     if (!on) _broomRide.setBoost(false);
     else if (!_broomRide.setBoost(true)) showPickupToast('mana_potion', 1, '', { text: 'No mana to boost — buy a mana potion from the wizard' });
     playerControls?.refreshActionButtons?.();
@@ -10968,7 +10972,7 @@ async function initCore(runtimeContext) {
   const _toggleBroom = () => {
     if (_broomRide.isRiding()) _broomRide.dismount();
     else if (_canRideBroom()) {
-      _putWeaponsAway();
+      // (whatever's in hand stays there — a gyro item holds the broom still while it's out)
       // (the phone's pose now is its rest — level flight)
       _broomGyro.needRest = true;
       if (_broomRide.mount()) _gyroItemCalibPrompt?.();
@@ -11589,7 +11593,8 @@ async function initCore(runtimeContext) {
           // (the oar: the phone's tilt steers the canoe, the strokes that fit it pose the oar)
           if (_oarActive) { _readOarTilt(foamSword._holdQuaternion, nowSec); _oarPose(foamSword._holdQuaternion); }
         }
-        // Unarmed (village): the gyro moves the player's right arm (updateProceduralPlayerRig)
+        // The phone's pose for the hand (Town's hose aims with it — updateProceduralPlayerRig
+        // moves the right arm only while something held asks for it, not with empty hands)
         const _pmUD = playerControls?.playerModel?.userData;
         if (_pmUD) {
           (_pmUD.gyroArmQuat ??= new THREE.Quaternion()).copy(activeGyroQ).multiply(_phoneSwordBaseQ);

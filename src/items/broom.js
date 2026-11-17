@@ -32,6 +32,10 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // height) — BOOST_MANA_PER_S mana a second (ctx.spendMana) — off when the mana runs out; purple
 // streams swirl off the bristles meanwhile (TRAIL_*). Let go: it holds its height, then sinks
 // back down as above.
+// Holding something the gyro works (ctx.isHolding — the sword / wand / rod / bow / shield with a
+// live gyro): the phone is busy with it, so the broom holds its place and height (no drift, no
+// sinking, no boost) and turns to face the way the camera looks (HOLD_TURN_RATE); put away, the
+// phone's pose then is the new rest (ctx.onHoldEnd). Empty hands don't use the gyro: it flies on.
 export const BROOM_MODEL_URL = '/assets/props/broom.glb';
 export const BROOM_LENGTH = 1.25;          // m (the characters are ~1 m tall)
 const SEAT_AHEAD = 0.12;                   // × length: the seat ahead of the model's middle (toward the handle)
@@ -83,6 +87,7 @@ const TRAIL_MAX = 200;
 const TRAIL_COLORS = [0xb34dff, 0xe08cff, 0x7a3dff];
 const SEAT_DROP = 0.07;                    // m under the hips bone
 const HIPS_FALLBACK = 0.42;                // m over the feet (a rig without a Hips bone)
+const HOLD_TURN_RATE = 6;                  // 1/s — held still, turning to face the camera's way
 const TELEPORT_DIST = 1.5;                 // m moved by someone else in a frame: follow it
 
 // ── The model ──
@@ -257,7 +262,9 @@ function createBoostTrail(scene) {
  *  getTilt() → the gyro's lean { x (left +), z (forward +) } (sin of the tilt each way) or null (no gyro)
  *  getSteer() → the joystick / WASD { fwd, turn } (turn > 0 = right)
  *  spendMana(n) → true if the player had n mana (taken), false if not
- *  onBoostEnd() — the boost ran out of mana
+ *  onBoostEnd(reason) — the boost ended by itself ('mana': ran out; 'hold': a gyro item came out)
+ *  isHolding() → true while a held item uses the gyro (the broom holds still)
+ *  onHoldEnd() — that item put away
  */
 export function createBroomRide(ctx) {
   let riding = false;
@@ -268,11 +275,18 @@ export function createBroomRide(ctx) {
   let boosting = false;
   let boostPaid = 0;           // s of boost paid for (BOOST_MANA_PER_S a second, ahead)
   let boostLift = null;        // m over the hover height it's climbing to (null: from where it is)
+  let holding = false;         // a gyro item in hand: held in place
   const ride = { y: 0, yaw: 0, camDist: 0 }; // (controls.ride)
   const hips = new THREE.Vector3(0, HIPS_FALLBACK, 0);
   let hipsMeasured = false;
 
   const glbOf = () => ctx.getPlayerModel()?.userData?.qwopRig?.glbCharacter ?? null;
+  // Sat down (the arms left on the IK, so whatever's in hand is held — the IK picks the arms);
+  // not over a one-shot action (a bomb throw) — sat back down after it
+  const sit = () => {
+    const g = glbOf();
+    if (g && !(g.actionActive && !g._action?.pose)) g.playPose(glbCharacterConfig.sitClip, { armIK: true });
+  };
   const floorAt = (x, z) => {
     const g = ctx.getGroundY(x, z);
     const w = ctx.getWaterY(x, z);
@@ -292,7 +306,8 @@ export function createBroomRide(ctx) {
     c.ride = ride;
     c.holdStill = true;
     hipsMeasured = false;
-    glbOf()?.playPose(glbCharacterConfig.sitClip);
+    holding = false;
+    sit();
     if (!broom && !loading) {
       loading = true;
       createBroomModel().then((m) => { broom = m; broom.visible = riding; ctx.scene.add(broom); });
@@ -323,6 +338,7 @@ export function createBroomRide(ctx) {
     if (!riding) return false;
     if (!on) { boosting = false; return true; }
     if (boosting) return true;
+    if (holding) return false;
     if (!ctx.spendMana?.(BOOST_MANA_PER_S)) return false;
     boosting = true;
     boostPaid = 1;
@@ -365,8 +381,36 @@ export function createBroomRide(ctx) {
       boostPaid -= dt;
       if (boostPaid <= 0) {
         if (ctx.spendMana?.(BOOST_MANA_PER_S)) boostPaid += 1;
-        else { boosting = false; ctx.onBoostEnd?.(); }
+        else { boosting = false; ctx.onBoostEnd?.('mana'); }
       }
+    }
+    // A gyro item in hand: held where it is, turning to face the camera's way
+    const hold = !!ctx.isHolding?.();
+    if (hold !== holding) {
+      holding = hold;
+      if (!hold) ctx.onHoldEnd?.();
+      else if (boosting) { boosting = false; ctx.onBoostEnd?.('hold'); }
+    }
+    if (holding) {
+      Object.assign(st, { vx: 0, vz: 0, backDir: null, sinkAt: st.t + SINK_HOLD_S, sinkV: 0 });
+      st.yaw = wrap(st.yaw + wrap(c.yaw - st.yaw) * ease(HOLD_TURN_RATE, dt));
+      st.y = Math.max(st.y, floorAt(st.x, st.z) + 0.1);
+      const k0 = ease(4, dt);
+      st.bank -= st.bank * k0;
+      st.pitch -= st.pitch * k0;
+      const lk0 = ease(LEAN_RATE, dt);
+      st.leanP -= st.leanP * lk0;
+      st.leanR -= st.leanR * lk0;
+      c.playerX = st.x;
+      c.playerZ = st.z;
+      ride.y = st.y + Math.sin(st.t * BOB_RATE) * BOB_HEIGHT;
+      ride.yaw = st.yaw;
+      st.camYaw = c.yaw;
+      st.camDist += (CAM_BACK - st.camDist) * ease(CAM_BACK_RATE, dt);
+      ride.camDist = st.camDist;
+      st.dt = dt;
+      sit();
+      return;
     }
     const top = MAX_SPEED * (boosting ? BOOST_SPEED : 1);
     const { ix, iz } = input();
@@ -467,7 +511,7 @@ export function createBroomRide(ctx) {
     ride.camDist = st.camDist;
     st.dt = dt;
     // (another character picked meanwhile: sit it down too)
-    glbOf()?.playPose(glbCharacterConfig.sitClip);
+    sit();
   };
 
   // After the controls placed the player: the lean, and the broom under the hips
@@ -521,5 +565,6 @@ export function createBroomRide(ctx) {
     isRiding: () => riding,
     setBoost,
     isBoosting: () => boosting,
+    isHolding: () => riding && holding,
   };
 }

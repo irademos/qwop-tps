@@ -296,6 +296,8 @@ export function installTownFarming(T, ctx) {
     const pm = ctx.getPlayerModel();
     if (!pm) return false;
     pm.getWorldQuaternion(_q);
+    // (the hand holding it follows the gyro — playerModel.js; empty hands don't)
+    pm.userData.gyroHandAt = performance.now();
     const gq = pm.userData.gyroArmQuat;
     if (gq && performance.now() - (pm.userData.gyroArmTime || 0) < GYRO_MAX_AGE_MS) dir.set(0, 0, 1).applyQuaternion(gq).applyQuaternion(_q);
     else dir.set(0, 0.45, 1).applyQuaternion(_q);
