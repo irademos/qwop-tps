@@ -24,7 +24,7 @@ import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 export const GIANT_MODEL_URL = '/models/glb_characters/giant.glb?v=1';
 export const GIANT_HEIGHT = 16;    // m (the player is ≈ 0.8 m: 20×)
 const ANIM_RATE = 0.35;            // the clips play this much slower
-const WALK_SPEED = 1.9;            // m/s (matches the slowed walk's stride at GIANT_HEIGHT)
+const WALK_SPEED = 1.7;            // m/s (about the slowed walk's stride at GIANT_HEIGHT)
 const TURN_RATE = 0.2;             // rad/s
 const TURN_WALK_MIN = 0.25;        // share of its speed kept while turning hard
 const IDLE_CHANCE = 0.4;           // a target reached: stands a while…
@@ -37,8 +37,8 @@ const PROBE_EVERY_S = 0.4;
 const GROUND_RATE = 2.5;           // 1/s: easing to the ground's height
 
 // Footfalls (× GIANT_HEIGHT over each foot's lowest lately)
-const STEP_LO = 0.025;
-const STEP_HI = 0.06;
+const STEP_LO = 0.015;
+const STEP_HI = 0.04;
 const STEP_MIN_GAP_S = 0.5;
 
 // Climbing
@@ -113,6 +113,7 @@ export function createGiant(ctx) {
   let probeT = 0;
   let active = false;
   let climb = null;         // { seg, t, th, off: Vector3, offT }
+  let steps = 0;            // footfalls so far (debug)
   const ray = new THREE.Raycaster();
   ray.firstHitOnly = true;
 
@@ -309,6 +310,7 @@ export function createGiant(ctx) {
         f.armed = false;
         if (mode === 'walk' && now - f.last > STEP_MIN_GAP_S) {
           f.last = now;
+          steps += 1;
           ctx.onStep?.(_p.clone().setY(pos.y), playerPos);
         }
       }
@@ -442,7 +444,7 @@ export function createGiant(ctx) {
   }
 
   const debug = () => ({
-    root, character, pos, segs, climb, mode, target, island, active,
+    root, character, pos, segs, climb, mode, target, island, active, steps,
     teleportNear: (x, z) => { pos.set(x, pos.y, z); groundY = null; },
     stop: () => { mode = 'idle'; modeT = 1e9; },
     go: () => { mode = 'idle'; modeT = 0; },
