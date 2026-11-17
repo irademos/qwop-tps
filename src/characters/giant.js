@@ -306,7 +306,7 @@ export function createGiant(ctx) {
     for (const f of feet) {
       f.bone.getWorldPosition(_p);
       const h = _p.y - pos.y;
-      f.min = Math.min(f.min + dt * 0.02 * GIANT_HEIGHT, h);
+      f.min = Math.min(f.min + dt * 0.003 * GIANT_HEIGHT, h); // (creeps up slowly: the ground under it changes)
       if (h > f.min + hi) f.armed = true;
       else if (f.armed && h < f.min + lo) {
         f.armed = false;
