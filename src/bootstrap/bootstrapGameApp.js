@@ -18,6 +18,7 @@ import { presetStyleReference, setStyleReference, stylizeObject } from '../envir
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
 import { createBirds } from '../environment/birds.js';
 import { createEyeFish } from '../environment/eyeFish.js';
+import { createGiant } from '../characters/giant.js';
 import { showFeatureLoading } from '../features/loadingState.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
@@ -9275,6 +9276,38 @@ async function initCore(runtimeContext) {
   window.eyeFish = eyeFish; // (dev console)
   const _eyeFishWanted = () => !!(town?.isActive() && !town.isIndoors() && town.nightLevel() >= 0.5);
 
+  // The giant troll of Tree Island (src/characters/giant.js): wanders the island while it's loaded
+  // (the island town map), each footfall shaking the camera like a bomb by distance (hitFeel
+  // 'giantStep') with a thud; climbable — PlayerControls' `surfaceClimb` hook
+  const GIANT_STEP_BUZZ_DIST = 25; // m: a phone buzz for a footfall this near
+  const GIANT_KICK_DAMAGE = 1;     // health segments a kick takes
+  const giant = createGiant({
+    scene,
+    getIsland: () => (_activeMapKey === DEFAULT_MAP
+      ? _activeMap?.islands?.find((i) => i.def.key === 'treeIsland') ?? null : null),
+    seaLevel: () => (_activeMap?.floor ?? 0) + SEA_WADE_DEPTH,
+    groundAt: (x, z) => getTerrainHeight(x, z),
+    onStep: (at, playerPos) => {
+      const dist = playerPos ? at.distanceTo(playerPos) : Infinity;
+      if (document.body.classList.contains('story-cut')) return; // (not over Story's cut scene)
+      hitFeel.explosion('giantStep', dist);
+      audioManager?.playSound('thud', { at, volume: 1.3, falloff: { ref: 10, rolloff: 0.25, max: 140 }, cooldownMs: 0 });
+      if (dist < GIANT_STEP_BUZZ_DIST) _phoneBuzz('kill');
+    },
+    // The front of a swinging foot hit the player: hurt (not in Story — it has no health) and
+    // sent flying back like a bomb blast (the flying-back clip, then up again)
+    onKick: (dir, at) => {
+      if (playerDead || playerControls.holdStill || window.isPlayerBubbleActive?.()) return;
+      if (!story?.isActive()) window.localHealth = Math.max(0, statsState.health - GIANT_KICK_DAMAGE);
+      if (window.localHealth > 0 || !!story?.isActive()) _blastPlayer(dir, 1);
+      hitFeel.explosion('bomb', 0);
+      _phoneBuzz('bomb');
+      audioManager?.playSound('thud', { at, volume: 1.2, cooldownMs: 0 });
+    },
+  });
+  playerControls.surfaceClimb = (ctrl, movement, dt) => giant.climbHook(ctrl, movement, dt);
+  window.giant = giant; // (dev console)
+
   // ── Endless Showdown (start screen → Endless; mode `endless`) ──
   // Waves of enemies come at the player in the Multiplayer arena (ARENA_LOCATION) until they
   // die; the score is the kills of the run, against the best (this device's — localStorage
@@ -9940,6 +9973,7 @@ async function initCore(runtimeContext) {
   };
 
   const _resetForMenu = () => {
+    giant.release();
     cancelBowDraw();
     releaseBombAim(true);
     hitFeel.cancel();
@@ -11572,6 +11606,8 @@ async function initCore(runtimeContext) {
     // Town's flying broom: it moves the player (before the controls place them), then sits
     // under them (after)
     _updateBroom(frameDelta);
+    // The giant of Tree Island walks (and carries whoever's climbing it — before the controls place them)
+    giant.update(frameDelta, playerModel?.position);
     // (Town's cart the same way — townCart.js)
     town?.cartBeforeControls(frameDelta);
     playerControls.update();

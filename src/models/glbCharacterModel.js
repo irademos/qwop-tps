@@ -71,6 +71,7 @@ export const glbCharacterConfig = {
   treeCreatureUrl: '/models/glb_characters/tree_creature.glb', // Multiplayer roster / Showdown unlock
   mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Classic only
   frogMomUrl: '/models/glb_characters/frog_mom.glb',       // Story: sitting on Tree Island (src/story/frogMom.js)
+  giantUrl: '/models/glb_characters/giant.glb?v=1',       // Tree Island's giant (src/characters/giant.js); bump ?v= here and in keepTextureUrls
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
@@ -122,6 +123,9 @@ export const glbCharacterConfig = {
     movementLag: 0.15, // share of walking / turning the wobble lags behind (1 = full world-space lag)
     shells: 0, furLength: 0.06, shellsHairOnly: false, // shells 0: bouncy motion, no shell fur
   },
+  // Models whose textures skip the art-style pass (artStyle.js caps character textures at
+  // 384 px and posterizes them) — the giant's, seen up close as it's climbed
+  keepTextureUrls: ['/models/glb_characters/giant.glb?v=1'], // (= giantUrl)
   // Per-model overrides of `fluffy`, keyed by url (e.g. { shells: 8 } for shell fur)
   fluffyByUrl: {},
   // Mii characters (miiN.glb) get these fluffy overrides
@@ -187,8 +191,10 @@ function getCharacterGLTF(url = glbCharacterConfig.url) {
   let promise = _gltfPromises.get(url);
   if (!promise) {
     // Textures are matched to the map's art style once, on the cached scene (clones share them)
-    promise = Promise.all([_gltfLoader.loadAsync(url), whenStyleReferenceReady()])
-      .then(([gltf]) => { stylizeObject(gltf.scene, { character: true }); return gltf; });
+    // (a model in `keepTextureUrls` keeps its own texture as it is: no downscale / posterize)
+    const keep = glbCharacterConfig.keepTextureUrls.includes(url);
+    promise = Promise.all([_gltfLoader.loadAsync(url), keep ? null : whenStyleReferenceReady()])
+      .then(([gltf]) => { if (!keep) stylizeObject(gltf.scene, { character: true }); return gltf; });
     promise.then(() => _gltfSettled.add(url), () => { _gltfPromises.delete(url); _gltfSettled.add(url); });
     _gltfPromises.set(url, promise);
   }
@@ -418,7 +424,8 @@ export class GLBCharacter {
   // Measures the ground speed from the world position (last frame's matrix) and flips
   // walk <-> run around runSpeed
   _updateSpeed(dt) {
-    if (!(dt > 0)) return;
+    // (`noRun`: always the walk — the giant, whose clips play slowed down)
+    if (!(dt > 0) || this.noRun) return;
     const e = this.scene.matrixWorld.elements;
     const x = e[12];
     const z = e[14];

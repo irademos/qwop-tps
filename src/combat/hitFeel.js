@@ -14,6 +14,8 @@ export const HIT_FEEL = {
   // the sword's combo attacks (swordCombo.js): Ground Pound / Spin Attack + Sky Slash
   combo: { freeze: 0.14, amp: 0.3, dur: 0.45, near: 4, far: 20, freezeDist: 12 },
   comboLight: { freeze: 0.05, amp: 0.1, dur: 0.25, near: 4, far: 20, freezeDist: 12 },
+  // the giant of Tree Island's footfalls (src/characters/giant.js): a rumble, no freeze
+  giantStep: { freeze: 0, amp: 0.3, dur: 0.55, near: 8, far: 70, freezeDist: 0 },
 };
 // (a long frame can't hold the freeze longer than this)
 const MAX_FREEZE_S = 0.3;
