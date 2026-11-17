@@ -3335,6 +3335,14 @@ async function initCore(runtimeContext) {
   const _broomGyro = { q: new THREE.Quaternion(), rest: new THREE.Quaternion(), needRest: true, at: 0 };
   const _broomTiltQ = new THREE.Quaternion();
   const _broomTiltV = new THREE.Vector3();
+  // The phone's lean since that rest pose, in the game's frame — the way its up leans
+  // { x (left +), z (forward +) }, or null (no gyro) — steers the broom and Town's cart
+  const _rideTilt = () => {
+    if (!window.phoneSwordGyro?.connected || _broomGyro.needRest || performance.now() - _broomGyro.at > 500) return null;
+    _broomTiltQ.copy(_broomGyro.rest).invert().premultiply(_broomGyro.q);
+    const up = _broomTiltV.set(0, 1, 0).applyQuaternion(_broomTiltQ);
+    return { x: up.x, z: up.z };
+  };
   const isOarAllowed = () => !!town?.inCanoe?.() || !!seaStart?.isActive() || !!story?.inCanoe();
   const isOarEquipped = () => _oarActive && foamSword?.holder === playerControls;
   // ── Paddling: the steer (the phone's tilt — _readOarTilt —, the joystick or WASD: _getSteer)
@@ -11051,6 +11059,20 @@ async function initCore(runtimeContext) {
     isPlayerArmed: () => !!_heldWeaponId() && !isRodEquipped() && !isOarEquipped(),
     // (on the flying broom: no going into houses — townTrade.js)
     isOnBroom: () => !!_broomRide?.isRiding(),
+    // Town's cart (townCart.js / src/items/cart.js): steered by the phone's lean like the broom
+    // (the same rest pose — _broomGyro), the joystick / WASD without a gyro; a gyro item in hand
+    // stops it meanwhile
+    getControls: () => playerControls,
+    getRideTilt: () => _rideTilt(),
+    isHoldingGyroItem: () => !!(window.phoneSwordGyro?.connected && _heldWeaponId()),
+    resetRideTilt: () => { _broomGyro.needRest = true; },
+    onRideStart: () => _gyroItemCalibPrompt?.(),
+    leaveBroom: () => {
+      if (!_broomRide?.isRiding()) return;
+      _broomRide.dismount();
+      playerControls?.refreshActionButtons?.();
+      _phoneSwordStatusNow?.();
+    },
     // A weapon of the town's own, in hand or not (the sheriff asks such a player to stand watch at night)
     hasWeapon: () => { const it = _townLoadout ? _townItems() : null; return !!(it && (it.sword || it.gun || it.wand)); },
     putWeaponsAway: () => _putWeaponsAway(),
@@ -11111,13 +11133,7 @@ async function initCore(runtimeContext) {
     getPlayerModel: () => playerModel,
     getGroundY: (x, z) => getTerrainHeight(x, z),
     getWaterY: (x, z) => _activeMap?.water?.(x, z) ?? null,
-    // (the rotation from the rest pose, in the game's frame: the way its up leans)
-    getTilt: () => {
-      if (!window.phoneSwordGyro?.connected || _broomGyro.needRest || performance.now() - _broomGyro.at > 500) return null;
-      _broomTiltQ.copy(_broomGyro.rest).invert().premultiply(_broomGyro.q);
-      const up = _broomTiltV.set(0, 1, 0).applyQuaternion(_broomTiltQ);
-      return { x: up.x, z: up.z };
-    },
+    getTilt: () => _rideTilt(),
     getSteer: _getSteer,
     spendMana: (n) => {
       if (getMana() < n) return false;
@@ -11556,8 +11572,11 @@ async function initCore(runtimeContext) {
     // Town's flying broom: it moves the player (before the controls place them), then sits
     // under them (after)
     _updateBroom(frameDelta);
+    // (Town's cart the same way — townCart.js)
+    town?.cartBeforeControls(frameDelta);
     playerControls.update();
     _broomRide?.afterControls();
+    town?.cartAfterControls();
     updateBloodEffects(frameDelta);
     updateBulletImpacts(frameDelta);
     updateExplosionEffects(frameDelta);
@@ -12570,7 +12589,7 @@ async function initCore(runtimeContext) {
       if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
-        if (!_classicMode && !_broomRide?.isRiding() && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic (or on the broom)
+        if (!_classicMode && !_broomRide?.isRiding() && !town?.inCart() && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic (or on the broom)
           _psJumpVelY = PS_JUMP_FORCE;
           window.phoneSwordAirborne = true;
         }

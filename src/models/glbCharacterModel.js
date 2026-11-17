@@ -79,6 +79,8 @@ export const glbCharacterConfig = {
   runClip: '/models/animations/Slow Run.fbx',  // replaces the walk above runSpeed
   rollClip: '/models/animations/Roll.fbx',     // player's dodge roll (playAction)
   sitClip: '/models/animations/Sitting.fbx',   // riding Town's broom (playPose)
+  crouchClip: '/models/animations/Crouch.fbx', // riding Town's cart (playPose)
+  climbClip: '/models/animations/Climb.fbx',   // wall climbing (playPose — PlayerControls._updateClimb)
   smallHitClip: '/models/animations/Small Hit Reaction.fbx', // a hit that doesn't knock them down (playReaction)
   blockedClip: '/models/animations/Blocked Reaction.fbx',    // own swing blocked — the stagger (playReaction)
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
@@ -105,8 +107,8 @@ export const glbCharacterConfig = {
   // Per-model weapon hold (characterHold): `grip` scales where the hands hold the sword /
   // shield / gun (and the unarmed gyro arm) around the feet, `sword` scales the held sword
   holdByUrl: {
-    '/models/glb_characters/village_boy.glb': { grip: 0.76, sword: 0.8, climb: 0.6 },
-    '/models/glb_characters/village_girl.glb': { grip: 0.76, sword: 0.8, climb: 0.6 },
+    '/models/glb_characters/village_boy.glb': { grip: 0.76, sword: 0.8 },
+    '/models/glb_characters/village_girl.glb': { grip: 0.76, sword: 0.8 },
   },
 
   // Arm IK
@@ -165,9 +167,8 @@ export function blockedStaggerHand(t, side, out, duration = BLOCKED_STAGGER_S) {
   return Math.min(1, t / STAGGER_IN_S, (duration - t) / STAGGER_OUT_S);
 }
 
-const DEFAULT_HOLD = Object.freeze({ grip: 1, sword: 1, climb: 1 });
-/** How a character holds weapons: { grip, sword } scales + `climb` = how far the hands reach
- *  up / out when wall climbing (glbCharacterConfig.holdByUrl). */
+const DEFAULT_HOLD = Object.freeze({ grip: 1, sword: 1 });
+/** How a character holds weapons: { grip, sword } scales (glbCharacterConfig.holdByUrl). */
 export function characterHold(url) {
   const hold = url && glbCharacterConfig.holdByUrl[url];
   return hold ? { ...DEFAULT_HOLD, ...hold } : DEFAULT_HOLD;
@@ -206,6 +207,7 @@ function preloadReactionClips() {
   _reactionClipsPreloaded = true;
   preloadAnimation(glbCharacterConfig.smallHitClip);
   preloadAnimation(glbCharacterConfig.blockedClip);
+  preloadAnimation(glbCharacterConfig.climbClip);
 }
 
 /** True once a character's GLB has finished loading (or failed) — a new instance then shows at once. */
