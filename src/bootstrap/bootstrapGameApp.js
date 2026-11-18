@@ -11305,6 +11305,11 @@ async function initCore(runtimeContext) {
     isHoldingGyroItem: () => !!(window.phoneSwordGyro?.connected && _heldWeaponId()),
     resetRideTilt: () => { _broomGyro.needRest = true; },
     onRideStart: () => _gyroItemCalibPrompt?.(),
+    // The cart tipped over: thrown out that way (knocked flat a moment — the bomb blast's)
+    throwPlayer: (dir) => {
+      _blastPlayer(new THREE.Vector3(dir.x, 0, dir.z), 0.6);
+      window._phoneBuzz?.('bomb');
+    },
     leaveBroom: () => {
       if (!_broomRide?.isRiding()) return;
       _broomRide.dismount();

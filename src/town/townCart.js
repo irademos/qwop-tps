@@ -7,19 +7,27 @@
 // stays there and can be used (a gyro item stops the cart while it's out — as on the broom).
 // Get out → the player steps down beside it, the cart stays there (back at its parking spot the
 // next time Town opens). Dying / an arrest / a room / the canoe / leaving Town get them out too.
-// No going into houses in it (townTrade.js — `ctx.isInCart`). Only the player's own: in a shared
+// Pushed into something it can't pass, it tips up onto two wheels (narrower — a tight alley may
+// let it through); too far and it flips over, throwing the player out (ctx.throwPlayer), then
+// rights itself (src/items/cart.js). No going into houses in it (townTrade.js — `ctx.isInCart`). Only the player's own: in a shared
 // town the others don't see it (they'd see the player crouching as they go).
 
 import { createCartRide } from '../items/cart.js';
 import { CART_ACT_DIST, dist2 } from './townConfig.js';
 
 const PARK_CLEARANCE = 1.1; // m from the cart's middle to a placed thing's bounds
+// Left somewhere (stuck, tipped over…): nobody in it this long and the player away from it and
+// from its parking spot → back at its parking spot
+const RETURN_S = 60;
+const RETURN_AWAY = 12;     // m the player is from both (so it doesn't vanish / pop up in view)
+const RETURN_MOVED = 3;     // m from its parking spot before it counts as left somewhere
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownCart(T, ctx) {
   let ride = null;
   let home = null;            // { x, z, yaw } its parking spot
   let setupTried = false;
+  let idle = 0;               // s nobody's been in it
 
   // Its parking spot: round the player's arrival spot, the first pose it fits at — on the town's
   // walkable ground, clear of the map's placed things (lamp posts, trees, fences…)
@@ -67,7 +75,7 @@ export function installTownCart(T, ctx) {
     ride.place(home.x, home.z, home.yaw);
   };
 
-  const canBoard = () => !!ride && !ride.isRiding() && !ctx.isPlayerDead() && !T.sequence && !T.jail && !T.inRoom
+  const canBoard = () => !!ride && !ride.isRiding() && !ride.isFlipped() && !ctx.isPlayerDead() && !T.sequence && !T.jail && !T.inRoom
     && !T.inCanoe() && !T.held && !T.fishing;
   const board = () => {
     if (!canBoard()) return;
@@ -106,9 +114,31 @@ export function installTownCart(T, ctx) {
       if (!setupTried && T.active && T.ready && T.layout) { setupTried = true; setup(); }
       return;
     }
-    if (!ride.isRiding()) { ride.update(dt); return; } // (its dust settling)
+    if (!ride.isRiding()) {
+      ride.update(dt); // (its dust settling, a flip playing out)
+      idle += dt;
+      if (idle > RETURN_S && home && !ride.isFlipped()) {
+        const c = ride.pose();
+        const p = T.playerPos();
+        if (dist2(c.x, c.z, home.x, home.z) > RETURN_MOVED
+          && dist2(p.x, p.z, c.x, c.z) > RETURN_AWAY && dist2(p.x, p.z, home.x, home.z) > RETURN_AWAY) {
+          ride.place(home.x, home.z, home.yaw);
+          idle = 0;
+        }
+      }
+      return;
+    }
+    idle = 0;
     if (!T.active || ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom || T.inCanoe()) { leave({ step: false }); return; }
-    if (ride.update(dt) === 'left') leave({ step: false });
+    const r = ride.update(dt);
+    if (r === 'left') leave({ step: false });
+    else if (r === 'flip') {
+      // Over it goes: the player thrown out toward the side it falls
+      const dir = ride.throwDir();
+      leave({ step: false });
+      ctx.throwPlayer?.(dir);
+      T.feedLine(ride.state().flip?.phase === 'tumble' ? 'The cart went tumbling down the slope!' : 'The cart tipped over!');
+    }
   };
   const cartAfterControls = () => ride?.afterControls();
 
