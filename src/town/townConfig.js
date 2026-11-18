@@ -136,6 +136,8 @@ export const CROP_REGROW_S = 70;            // s until a picked crop is back
 export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
 // The wizard's stall (townStalls.js 'wizard', the wizard townsperson behind it): out in the woods
 export const WIZARD_STALL_DIST = [30, 75];  // m from the middle of town
+export const CABIN_RE = /(^|\/)cabin\.glb$/i;    // the wizard's cabin up the mountain (townLayout.js)
+export const WIZARD_CABIN_STALL = 3.6;      // m out past the cabin's walls (its bounding radius): his stall
 export const WIZARD_HUT_DIST = 4;           // m from the stall: where the wizard sleeps (his tent)
 // Farming (townFarming.js): the farmers' fields can be bought (at the field, no talk needed);
 // seeds from the shop are planted anywhere — a dirt pile that grows one veg in a town day, or
@@ -276,21 +278,13 @@ export const GANG_MAX = 10;                 // …up to this many
 export const BANDIT_GEAR_FROM = { bombs: 5, shield: 6, gun: 7, wand: 8, bubble: 9 };
 export const BANDIT_GEAR_SHARE = 0.5;       // of the bandits who carry each piece unlocked
 // The sheriff's thanks: the morning after the player beats bandits at night, he comes over with a
-// reward (a job ready to be paid — townMissions.js 'nightThanks'); he also asks an armed player
-// to stand watch some nights (job 'nightWatch')
+// reward (a job ready to be paid — townMissions.js 'nightThanks')
 export const NIGHT_KILL_REWARD = 15;        // coins a bandit beaten at night (the chief: double)
 export const SHERIFF_SEEK_S = 120;          // s the sheriff looks for the player before leaving it to them (❓ / ❗ stays)
-export const NIGHT_WATCH_KILLS = [2, 4];    // bandits to beat for 'nightWatch'
-export const NIGHT_WATCH_PER_KILL = 18;     // its reward a bandit
-export const NIGHT_WATCH_CHANCE = 0.3;      // a round of new jobs (JOB_REFRESH_S): the sheriff asks
 
 // ── Missions ──
 export const JOB_REFRESH_S = 120;           // s between new jobs being handed out
 export const ACT_DIST = 2.4;                // m — a job's 📦 / 💰 near its townsperson
-export const KID_FOUND_DIST = 2.5;          // m
-export const KID_HOME_DIST = 3;             // m from their door to count as home
-export const KID_WITH_PLAYER_DIST = 10;     // m — and the player with them (walked home, not gone home alone)
-export const RAID_HOUR = 22;                // a guarded field is raided at this hour
 
 // ── Homes (townHomes.js) ── one resident to a house: the townsfolk and the players together
 // fill the houses; each player has a house kept for them (bought before it's theirs)

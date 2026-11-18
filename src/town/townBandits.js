@@ -3,8 +3,7 @@
 // raider who runs into the player fights an armed one and holds up an unarmed one — pay or run,
 // a fight —), the gang (the camp's bandits are the raiders: the ones beaten are gone, one more
 // turns up each morning, and a bigger gang carries more gear), and the sheriff's thanks the morning after the player beats some of them (he
-// comes over with a reward; some days he asks an armed player to stand watch — townMissions.js
-// 'nightThanks' / 'nightWatch').
+// comes over with a reward — townMissions.js 'nightThanks').
 
 import { BANDIT_ROLES, ROLES, SHOUT_BANDIT, SHOUT_CAMP_COUNT, SHOUT_CAMP_DRAW_ARMED, SHOUT_CAMP_DRAW_UNARMED, SHOUT_CAMP_LAST, SHOUT_CAMP_ROB, SHOUT_CAMP_SPARE, SHOUT_CAMP_WARN, SHOUT_MUG, characterForRole, fillLine, firstName, randomName } from './townPeople.js';
 import { GOODS, GOOD_IDS } from './townEconomy.js';
@@ -21,7 +20,6 @@ const SHOUT_RAID_FIGHT = ['Oi! Get out of our way!', 'Witness! Cut them down!', 
 const SHOUT_BURGLE_CAUGHT = ['Wrong house!', 'Leg it!', 'Nobody\'s supposed to be home!'];
 const SHERIFF_GREET = {
   nightThanks: ['There you are, {name}! A word.', '{name}! Hold up — I\'ve been looking for you.'],
-  nightWatch: ['{name}, a moment. I could use someone handy with a blade.', 'Got a minute, {name}? It\'s about the bandits.'],
 };
 // A bandit holding up an unarmed player: what they ask, what they say to each answer
 const HOLDUP_ASK = {
@@ -208,15 +206,8 @@ export function installTownBandits(T, ctx) {
     const owner = T.npcs.find((o) => o.alive && o.role === 'farmer' && o.work === t.field);
     if (took && owner) T.npcCrime(n, 'theft', owner);
   };
-  // A raider back at the camp with the loot (a guarded field's raid got away)
-  const onRaidHome = (n) => {
-    for (const j of T.jobs) {
-      if (j.status === 'active' && j.kind === 'guardField' && (j.data.raiders ?? []).includes(n.id) && !j.data.failed) {
-        j.data.failed = true;
-        T.feedLine('The raiders got away with the harvest.');
-      }
-    }
-  };
+  // A raider back at the camp with the loot
+  const onRaidHome = () => {};
   // ── The gang ──
   // The bandits at the camp are the ones who raid the town: `T.gangSize` of them. One the player
   // beats is gone (worldDeath in townWire.js takes them off it — beating some by day leaves
@@ -526,7 +517,7 @@ export function installTownBandits(T, ctx) {
     if (T.nightKills.n > 0) {
       const { n: k, coins } = T.nightKills;
       T.nightKills = { n: 0, coins: 0 };
-      const j = T.jobs.find((x) => x.giverId === sheriff.id && x.status === 'done' && (x.kind === 'nightThanks' || x.kind === 'nightWatch'));
+      const j = T.jobs.find((x) => x.giverId === sheriff.id && x.status === 'done' && x.kind === 'nightThanks');
       if (j) {
         j.data.beaten = (j.data.beaten ?? 0) + k;
         j.reward = { ...j.reward, coins: (j.reward.coins ?? 0) + coins };
@@ -542,12 +533,12 @@ export function installTownBandits(T, ctx) {
     }
     seekPlayer(sheriff);
   };
-  // The sheriff comes over: a reward waiting, or a night watch to ask about (once each)
+  // The sheriff comes over: a reward waiting (once each)
   const seekPlayer = (sheriff) => {
     if (T.law.stars > 0 || T.inRoom || T.jail || ctx.isPlayerDead() || sheriff.inside || sheriff.guiding || sheriff.following) return;
     if (['seek', 'talk', 'respond', 'search', 'arrest', 'brawl', 'guide'].includes(sheriff.task?.type)) return;
     const j = T.jobs.find((x) => x.giverId === sheriff.id && x.data.soughtFor !== x.status
-      && ((x.status === 'done' && (x.kind === 'nightThanks' || x.kind === 'nightWatch')) || (x.status === 'open' && x.kind === 'nightWatch')));
+      && x.status === 'done' && x.kind === 'nightThanks');
     if (!j || !T.take(sheriff)) return;
     j.data.soughtFor = j.status;
     T.clearTalk(sheriff);

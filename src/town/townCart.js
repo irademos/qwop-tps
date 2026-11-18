@@ -11,8 +11,13 @@
 // let it through); too far and it flips over, throwing the player out (ctx.throwPlayer), then
 // rights itself (src/items/cart.js). No going into houses in it (townTrade.js — `ctx.isInCart`). Only the player's own: in a shared
 // town the others don't see it (they'd see the player crouching as they go).
+// A job can load it (the veg for the wizard — townIntro.js `cartLaden`): a heap of veg in its bed,
+// the cart brought round beside the player (bringCart), and it isn't taken back to its parking
+// spot while it's laden.
 
+import * as THREE from 'three';
 import { createCartRide } from '../items/cart.js';
+import { buildItemMesh } from '../village/villageMode.js';
 import { CART_ACT_DIST, dist2 } from './townConfig.js';
 
 const PARK_CLEARANCE = 1.1; // m from the cart's middle to a placed thing's bounds
@@ -21,13 +26,38 @@ const PARK_CLEARANCE = 1.1; // m from the cart's middle to a placed thing's boun
 const RETURN_S = 60;
 const RETURN_AWAY = 12;     // m the player is from both (so it doesn't vanish / pop up in view)
 const RETURN_MOVED = 3;     // m from its parking spot before it counts as left somewhere
+const BRING_RINGS = [1.75, 2.3, 3, 4, 5.5]; // m from the player the cart's brought round to (bringCart — Get in within CART_ACT_DIST)
 
+// A load of veg in the bed (cart-local: +Z its pole end; the rider crouches about the middle):
+// a crate at each end heaped with veg
+const makeCargo = () => {
+  const g = new THREE.Group();
+  g.name = 'cart-cargo';
+  const crateMat = new THREE.MeshStandardMaterial({ color: 0x8a6239, roughness: 1, metalness: 0 });
+  for (const [z, turn] of [[0.42, 0.2], [-0.44, -0.3]]) {
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.2, 0.3), crateMat);
+    crate.position.set(0, 0.36, z);
+    crate.castShadow = true;
+    g.add(crate);
+    for (let k = 0; k < 4; k++) {
+      const veg = buildItemMesh('veg');
+      veg.scale.setScalar(1.7);
+      veg.position.set(-0.2 + k * 0.13, 0.46 + (k % 2) * 0.04, z + (k % 2 ? 0.04 : -0.04));
+      veg.rotation.y = turn + k * 1.1;
+      g.add(veg);
+    }
+  }
+  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  g.visible = false;
+  return g;
+};
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownCart(T, ctx) {
   let ride = null;
   let home = null;            // { x, z, yaw } its parking spot
   let setupTried = false;
   let idle = 0;               // s nobody's been in it
+  let cargo = null;           // the veg in its bed (shown while T.cartLaden())
 
   // Its parking spot: round the player's arrival spot, the first pose it fits at — on the town's
   // walkable ground, clear of the map's placed things (lamp posts, trees, fences…)
@@ -73,6 +103,38 @@ export function installTownCart(T, ctx) {
       return;
     }
     ride.place(home.x, home.z, home.yaw);
+    cargo = makeCargo();
+    ride.group.add(cargo);
+  };
+  const laden = () => !!T.cartLaden?.();
+
+  // Brought round beside the player (a job's loaded it): the first spot round them it fits,
+  // pointing the way they face; true if it's there (or they're in it already)
+  const bringCart = () => {
+    if (!ride && T.layout) { setupTried = true; setup(); }
+    if (!ride || ride.isFlipped()) return false;
+    if (ride.isRiding()) return true;
+    let p = T.playerPos();
+    let yaw = ctx.getPlayerModel?.()?.rotation.y ?? 0;
+    // (indoors: at the door outside)
+    if (T.inRoom) { const r = T.layout.places.rooms[T.inRoom]; p = r.door; yaw = r.exitYaw; }
+    for (const r of BRING_RINGS) {
+      for (let k = 0; k < 12; k++) {
+        const a = yaw + Math.PI / 2 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 6);
+        const x = p.x + Math.sin(a) * r;
+        const z = p.z + Math.cos(a) * r;
+        const g = ctx.getGroundY(x, z);
+        if (!Number.isFinite(g) || ctx.waterDepth(x, z) > 0.2 || Math.abs(g - ctx.getGroundY(p.x, p.z)) > 1.2) continue;
+        for (const y of [yaw, yaw + Math.PI / 2, yaw - Math.PI / 2]) {
+          if (ride.fits(x, z, y)) {
+            ride.place(x, z, y);
+            idle = 0;
+            return true;
+          }
+        }
+      }
+    }
+    return false;
   };
 
   const canBoard = () => !!ride && !ride.isRiding() && !ride.isFlipped() && !ctx.isPlayerDead() && !T.sequence && !T.jail && !T.inRoom
@@ -114,10 +176,11 @@ export function installTownCart(T, ctx) {
       if (!setupTried && T.active && T.ready && T.layout) { setupTried = true; setup(); }
       return;
     }
+    if (cargo) cargo.visible = laden();
     if (!ride.isRiding()) {
       ride.update(dt); // (its dust settling, a flip playing out)
       idle += dt;
-      if (idle > RETURN_S && home && !ride.isFlipped()) {
+      if (idle > RETURN_S && home && !ride.isFlipped() && !laden()) {
         const c = ride.pose();
         const p = T.playerPos();
         if (dist2(c.x, c.z, home.x, home.z) > RETURN_MOVED
@@ -160,5 +223,5 @@ export function installTownCart(T, ctx) {
   };
   const inCart = () => !!ride?.isRiding();
 
-  Object.assign(T, { cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
+  Object.assign(T, { bringCart, cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
 }

@@ -85,12 +85,18 @@ export function createTownNav({ bounds, cell, start, getGroundY, isOverWater, pa
     }
     return best;
   };
+  // (more than one start: other places walked about on their own — the wizard's cabin up the
+  // mountain, its own patch of the grid; no path joins them to the town — addStart)
+  const starts = [start];
   const computeReach = () => {
     reach.fill(0);
-    const s = nearestOpen(start.x, start.z);
-    if (s < 0) return;
-    const queue = [s];
-    reach[s] = 1;
+    const queue = [];
+    for (const st of starts) {
+      const s = nearestOpen(st.x, st.z);
+      if (s < 0 || reach[s]) continue;
+      reach[s] = 1;
+      queue.push(s);
+    }
     for (let q = 0; q < queue.length; q++) {
       forNeighbours(queue[q], (j) => {
         if (reach[j]) return;
@@ -290,5 +296,7 @@ export function createTownNav({ bounds, cell, start, getGroundY, isOverWater, pa
     },
     block,
     refresh,
+    // Another place walked about (reached from (x, z)); refresh() to take it in
+    addStart: (x, z) => { starts.push({ x, z }); },
   };
 }

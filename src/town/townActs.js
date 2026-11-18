@@ -73,7 +73,7 @@ export function installTownActs(T, ctx) {
     // (the first day: whoever's showing the player around — townIntro.js)
     if (T.introTalk(n)) return;
     const job = T.jobOf(n);
-    if (job && n.attitude >= GRUDGE_ATTITUDE && !(job.shady && n.attitude <= -0.2)) { T.openJobTalk(n, job); return; }
+    if (job && n.attitude >= GRUDGE_ATTITUDE) { T.openJobTalk(n, job); return; }
     chat(n, smallTalk(n));
   };
   const gift = (n) => {
@@ -186,12 +186,6 @@ export function installTownActs(T, ctx) {
       return out.slice(0, 3);
     }
     const calm = T.calmNow();
-    // (the strongbox can be snatched mid-fight: the gang guards it)
-    if (!T.strongboxHeld && T.layout.props.strongbox.visible && T.activeJobs().some((j) => j.kind === 'fetchStrongbox')) {
-      const p = T.playerPos();
-      const sb = T.layout.places.strongbox;
-      if (dist2(p.x, p.z, sb.x, sb.z) < 2) out.push({ key: 'strongbox', label: 'Take the strongbox', onClick: T.takeStrongbox });
-    }
     // The houses (walked into through the door — updateRooms): inside, 🚪 Leave by the doorway;
     // the shops' back counter buttons
     if (T.inRoom) {
@@ -220,7 +214,7 @@ export function installTownActs(T, ctx) {
     if (n) {
       // (❗ a job to give, ❓ a reward waiting — as the marker over them)
       const j = T.jobOf(n);
-      const icon = T.isIntroGuide(n) ? '❗' : j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : null;
+      const icon = T.isIntroGuide(n) ? '❗' : j && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : null;
       out.push({ key: `talk:${n.id}`, label: icon ? `${icon} ${firstName(n.name)}` : `Talk to ${firstName(n.name)}`, onClick: () => talkTo(n) });
     }
     // (the first day: walk the player to the goal again — townIntro.js)
