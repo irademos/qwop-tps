@@ -42,6 +42,7 @@ import { talkAutoHoldSeconds } from '../characters/stageBoss.js';
 import { createWandModel } from '../items/magicWand.js';
 import { createBowMesh, createArrowMesh } from '../items/bowModel.js';
 import { createBroomModel, BROOM_SEAT_TO_END } from '../items/broom.js';
+import { createVeg } from '../items/vegModels.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
@@ -651,24 +652,20 @@ export function buildItemMesh(kind) {
       g.add(fish);
     });
   } else if (kind === 'veg') {
-    // Carrots and a cabbage
-    const orange = std(0xe2782a, { roughness: 0.7 });
-    const leaf = std(0x4f9a35, { roughness: 0.9 });
-    [[-0.05, -0.02, 0.3], [0, 0.03, -0.2], [0.05, -0.03, 0.1]].forEach(([x, z, yaw]) => {
-      const carrot = new THREE.Group();
-      const root = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.16, 8), orange);
-      root.rotation.z = Math.PI / 2;
-      const top = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.07, 5), leaf);
-      top.rotation.z = -Math.PI / 2;
-      top.position.x = -0.11;
-      carrot.add(root, top);
-      carrot.position.set(x, 0.022, z);
-      carrot.rotation.y = yaw;
-      g.add(carrot);
+    // A little heap of vegetables (vegetables.glb — src/items/vegModels.js; filled in once loaded)
+    [
+      ['Carrot', 0.17, -0.04, -0.03, 0.3, 0],
+      ['Cucumber', 0.15, 0.05, 0.04, -0.4, 0],
+      ['Corn', 0.17, -0.02, 0.06, 1.3, 0],
+      ['Tomato', 0.07, 0.1, -0.05, 0, 0],
+      ['Pepper', 0.08, -0.11, 0.03, 0.8, 0],
+      ['Broccoli', 0.09, 0.02, -0.07, 2.1, 0.02],
+    ].forEach(([name, len, x, z, yaw, y]) => {
+      const veg = createVeg(name, len);
+      veg.position.set(x, y, z);
+      veg.rotation.y = yaw;
+      g.add(veg);
     });
-    const cabbage = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), std(0x8cc152, { roughness: 0.9 }));
-    cabbage.position.set(-0.1, 0.05, 0.06);
-    g.add(cabbage);
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;

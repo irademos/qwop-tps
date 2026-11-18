@@ -8,6 +8,9 @@ import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import { createDriveGrid } from './townDrive.js';
+import { createVeg } from '../items/vegModels.js';
+
+const VEG_CROP_LENGTH = 0.24; // m, the longest side of a field crop's vegetable
 import {
   BUILDING_RE, CABIN_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, WIZARD_CABIN_STALL, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
@@ -474,9 +477,9 @@ export function installTownLayout(T, ctx) {
     const soilMat = new THREE.MeshStandardMaterial({ color: 0x4a3420, roughness: 1, metalness: 0 });
     const cropMat = new THREE.MeshStandardMaterial({ color: 0x5f9e3a, roughness: 1, metalness: 0 });
     const soilGeo = new THREE.BoxGeometry(3.6, 0.08, 0.5);
-    const cropGeo = new THREE.ConeGeometry(0.13, 0.32, 5);
-    cropGeo.translate(0, 0.16, 0);
-    for (const f of places.fields) {
+    const cropGeo = new THREE.ConeGeometry(0.1, 0.26, 5);
+    cropGeo.translate(0, 0.13, 0);
+    for (const [fieldNo, f] of places.fields.entries()) {
       f.crops = []; // { mesh, x, z, ripe, growAt } — picked by the player (townMode pick)
       for (let r = -1; r <= 1; r++) {
         const rz = f.z + r * 1.1;
@@ -486,10 +489,17 @@ export function installTownLayout(T, ctx) {
         group.add(soil);
         for (let c = -2; c <= 2; c++) {
           const cx = f.x + c * 0.75;
-          const crop = new THREE.Mesh(cropGeo, cropMat);
+          // A leafy tuft with its vegetable lying on the soil by it (vegetables.glb — a kind per
+          // row of each field, picked by the field's spot)
+          const crop = new THREE.Group();
+          const leaves = new THREE.Mesh(cropGeo, cropMat);
+          leaves.castShadow = true;
+          const veg = createVeg(fieldNo * 3 + r + 1, VEG_CROP_LENGTH);
+          veg.position.set(0.16, 0, 0.04);
+          veg.rotation.y = 0.4 + c * 0.7;
+          crop.add(leaves, veg);
           crop.position.set(cx, groundAt(cx, rz) + 0.04, rz);
           crop.rotation.y = c * 1.3 + r;
-          crop.castShadow = true;
           group.add(crop);
           f.crops.push({ mesh: crop, x: cx, z: rz, ripe: true, growAt: 0 });
         }
