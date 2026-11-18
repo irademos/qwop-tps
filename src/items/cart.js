@@ -29,7 +29,8 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 //    the wall, pivoting on the trailing axle (st.rear, REAR_*), fast and harder the faster it hit
 //    (REAR_IMPACT). Past REAR_SPIN_FROM it spins round on its trailing wheels (REAR_SPIN_RATE)
 //    the way the phone leans (else the way it picked on hitting), so it can be turned round off
-//    a wall; as it comes down it rolls back off the wall if it must. Past REAR_FLIP it goes over
+//    a wall; as it comes down it rolls back off the wall if it must. Pushing alone holds it at an
+//    angle (REAR_PUSH < REAR_GRAVITY × sin(REAR_BALANCE)); a hard hit past REAR_FLIP goes over
 //    sideways (the way it's spinning).
 //  - one corner (a glancing hit): that side lifts — it rolls up onto the other side's wheels
 //    (st.tip, TIP_*), pivoting on the low side's edge, its footprint narrowing (× cos of the tip)
@@ -104,28 +105,28 @@ const CAM_BACK = 1.6;                        // m further back in the cart (it f
 const RIDER_TURN_RATE = 8;                   // 1/s — holding something: the rider turning to the camera's way
 const TELEPORT_DIST = 1.5;                   // m moved by someone else in a frame: get out
 // Tipping up against what it can't pass / flipping over
-const TIP_PUSH = 7;                          // rad/s² lifting at full push into something
-const TIP_GRAVITY = 6;                       // rad/s² × sin(tip − TIP_BALANCE): down below it, over above it
-const TIP_BALANCE = 0.75;                    // rad (~43°) — the balance point
-const TIP_FLIP = 1.1;                        // rad (~63°) — past this it goes over
+const TIP_PUSH = 2;                          // rad/s² lifting at full push into something
+const TIP_GRAVITY = 5;                       // rad/s² × sin(tip − TIP_BALANCE): down below it, over above it
+const TIP_BALANCE = 0.85;                    // rad (~49°) — the balance point
+const TIP_FLIP = 1.15;                       // rad (~66°) — past this it goes over
 const TIP_DAMP = 3;                          // 1/s
 const TIP_WOBBLE = 4;                        // rad/s² of random wobble rolling tipped at full speed
 const TIP_CLUNK_SPEED = 0.8;                 // rad/s coming back down onto its wheels: a thud
 const FLIP_LIE = Math.PI / 2;                // rad — on its side
 const FLIP_LIE_S = 1.6;                      // s lying there
 const FLIP_RIGHT_S = 1.1;                    // s righting itself
-const TIP_IMPACT = 2.2;                      // rad/s of tip from hitting at full speed
+const TIP_IMPACT = 3;                        // rad/s of tip from hitting at full speed
 const TIP_SPIN_RATE = 1.6;                   // rad/s turning away (or the lean's way) tipped up
 const TIP_SPIN_FROM = 0.12;                  // rad of tip before it turns
 // Rearing up against a wall (head on)
-const REAR_PUSH = 9;                         // rad/s² at full push
-const REAR_IMPACT = 3;                       // rad/s from hitting at full speed
-const REAR_GRAVITY = 7;                      // rad/s² × sin(rear − REAR_BALANCE)
-const REAR_BALANCE = 1.0;                    // rad (~57°)
-const REAR_FLIP = 1.25;                      // rad (~72°) — over it goes (sideways)
+const REAR_PUSH = 4;                         // rad/s² at full push
+const REAR_IMPACT = 3.5;                     // rad/s from hitting at full speed
+const REAR_GRAVITY = 8;                      // rad/s² × sin(rear − REAR_BALANCE)
+const REAR_BALANCE = 1.1;                    // rad (~63°)
+const REAR_FLIP = 1.3;                       // rad (~74°) — over it goes (sideways)
 const REAR_DAMP = 3;                         // 1/s
 const REAR_SPIN_FROM = 0.3;                  // rad reared before it spins
-const REAR_SPIN_RATE = 2.6;                  // rad/s spinning on its trailing wheels
+const REAR_SPIN_RATE = 3;                    // rad/s spinning on its trailing wheels
 const REAR_SLIDE_STEP = 0.04;                // m a try rolling back off the wall coming down
 
 let templatePromise = null;
