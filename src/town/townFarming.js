@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { makeTextSprite } from '../village/villageMode.js';
 import { firstName } from './townPeople.js';
+import { createVeg, VEG_KINDS } from '../items/vegModels.js';
 import {
   FIELD_ACT_DIST, FIELD_PRICE, HOSE_GRAB_DIST, HOSE_LENGTH, HOSE_SPEED, HOSE_SPLASH_R, SEEDS_MAX, SOIL_DRY_S,
   VEG_DRY_S, VEG_GAP, VEG_MAX, VEG_PICK_DIST, VEG_WET_S, WATER_SOAK_S, dist2,
@@ -69,8 +70,7 @@ export function installTownFarming(T, ctx) {
       group, fieldSigns: places.fields.map(() => ({ sign: null, text: '' })), live: [], piles: new Map(),
       pileGeo: new THREE.SphereGeometry(0.25, 10, 6).scale(1, 0.4, 1),
       stemGeo: new THREE.ConeGeometry(0.09, 0.4, 5).translate(0, 0.2, 0),
-      vegGeo: new THREE.SphereGeometry(0.1, 8, 6),
-      stemMat: mat(0x5f9e3a), vegMat: mat(0xe0782a),
+      stemMat: mat(0x5f9e3a),
     };
     const tap = places.tap;
     if (tap) {
@@ -390,10 +390,11 @@ export function installTownFarming(T, ctx) {
     pile.receiveShadow = true;
     const sprout = new THREE.Group();
     const stem = new THREE.Mesh(farm.stemGeo, farm.stemMat);
-    const veg = new THREE.Mesh(farm.vegGeo, farm.vegMat);
-    veg.position.y = 0.05;
+    // the vegetable it grows (vegetables.glb), lying on the pile by the stem
+    const veg = createVeg(Math.floor(Math.random() * VEG_KINDS.length), 0.22);
+    veg.position.set(0.1, 0, 0.02);
+    veg.rotation.y = Math.random() * Math.PI * 2;
     stem.castShadow = true;
-    veg.castShadow = true;
     sprout.add(stem, veg);
     sprout.position.y = 0.06;
     g.add(pile, sprout);
