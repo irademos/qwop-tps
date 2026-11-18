@@ -2,9 +2,11 @@
 // ahead of the player. The town's nav grid (townNav.js) keeps walkers to gentle steps, so it
 // doesn't reach the mountain a cart rolls up fine (the wizard's cabin up there is a walked-about
 // patch of its own — townLayout.js); this grid takes any slope the cart takes, costs steeper
-// ground more (so the route winds up the gentle side) and keeps off water and tree trunks.
+// ground more (so the route winds up the gentle side) and keeps off water and tree trunks. The
+// map's painted roads / trails (pathAt) are the way to go: ground off them costs OFF_PATH_COST×,
+// so the route keeps to the dirt path up the mountain wherever there is one.
 //
-// createDriveGrid({ bounds, getGroundY, waterDepth, trees, props }) (built once with the layout —
+// createDriveGrid({ bounds, getGroundY, waterDepth, trees, props, pathAt }) (built once with the layout —
 // T.layout.drive): route(from, goal: { x, z, r }) → [{ x, z }, …] from `from` to within r of
 // the goal, or null.
 // installTownDrive(T, ctx): T.driveTo(target | null) — arrows along the route to target
@@ -25,6 +27,8 @@ const GRADE_COST = 20;      // …and × the square of the ground's slope there 
 const WATER_DEPTH = 0.25;   // m — deeper than this is out
 const TREE_R = 1.3;         // m round a trunk kept clear
 const PROP_PAD = 0.7;       // m past a placed thing's bounds kept clear (houses: their walls; lamp posts…)
+const OFF_PATH_COST = 4;    // × a metre's cost off the painted roads / trails
+const PATH_SPREAD = 1;      // cells either side of a painted path that count as on it (it's drawn thin, with gaps)
 
 const ARROWS = 16;          // arrows shown ahead
 const ARROW_GAP = 3;        // m between them
@@ -33,7 +37,7 @@ const REPLAN_S = 1.5;       // s between route updates
 const OFF_ROUTE = 5;        // m off the route: re-planned at once
 const VIA_R = 6;            // m — a waypoint this close is reached
 
-export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], props = [], maxSlope = MAX_SLOPE, maxGrade = MAX_GRADE, gradeCost = GRADE_COST }) {
+export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], props = [], pathAt = null, maxSlope = MAX_SLOPE, maxGrade = MAX_GRADE, gradeCost = GRADE_COST }) {
   const half = CELL / 2;
   const fc = Math.ceil((bounds.maxX - bounds.minX) / half) + 1;   // fine samples
   const fr = Math.ceil((bounds.maxZ - bounds.minZ) / half) + 1;
@@ -81,6 +85,30 @@ export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], pr
       }
     }
   };
+  // (on a painted road / trail: any of the cell's fine samples on one, spread PATH_SPREAD cells)
+  const onPath = new Uint8Array(n);
+  if (pathAt) {
+    const painted = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const x0 = bounds.minX + (i % cols) * CELL;
+      const z0 = bounds.minZ + Math.floor(i / cols) * CELL;
+      for (let k = 0; k < 9 && !painted[i]; k++) {
+        if (pathAt(x0 + ((k % 3) - 1) * half, z0 + (Math.floor(k / 3) - 1) * half)) painted[i] = 1;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      if (!painted[i]) continue;
+      const c = i % cols;
+      const r = Math.floor(i / cols);
+      for (let dr = -PATH_SPREAD; dr <= PATH_SPREAD; dr++) {
+        for (let dc = -PATH_SPREAD; dc <= PATH_SPREAD; dc++) {
+          const nc = c + dc;
+          const nr = r + dr;
+          if (nc >= 0 && nr >= 0 && nc < cols && nr < rows) onPath[nr * cols + nc] = 1;
+        }
+      }
+    }
+  }
   for (const t of trees) clear(t.x, t.z, TREE_R);
   for (const o of props) clear(o.x, o.z, o.r + PROP_PAD);
   const cx = (i) => bounds.minX + (i % cols) * CELL;
@@ -103,7 +131,8 @@ export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], pr
     const s = Math.max(Math.abs(hm - h0), Math.abs(h1 - hm)) / run;
     if (s > maxSlope) return Infinity;
     const j = a + dr * cols + dc;
-    return run * 2 * (1 + SLOPE_COST * s + gradeCost * Math.max(grade[a], grade[j]) ** 2);
+    const off = pathAt && !(onPath[a] && onPath[j]) ? OFF_PATH_COST : 1;
+    return run * 2 * off * (1 + SLOPE_COST * s + gradeCost * Math.max(grade[a], grade[j]) ** 2);
   };
   // (the nearest open cell to a spot — the start may be in a tree's ring, on a steep bit)
   const nearestOpen = (x, z, maxR = 8) => {
@@ -207,7 +236,7 @@ export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], pr
     out[0] = { x: from.x, z: from.z };
     return out;
   };
-  return { route };
+  return { route, onPath: (x, z) => { const i = indexAt(x, z); return i >= 0 && !!onPath[i]; } };
 }
 
 // The arrows: a flat chevron, pointing +Z

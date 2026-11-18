@@ -10,6 +10,9 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // route runs through town) that the walkable area is grown from
 export const TOWN_BOUNDS = { minX: -90, maxX: -4, minZ: -94, maxZ: -8 };
 export const NAV_BOUNDS = { minX: -98, maxX: 42, minZ: -100, maxZ: 32 };
+// the cart's drive grid (townDrive.js): the town's and on north — the dirt path up the mountain
+// to the wizard's cabin loops out past z 50 first
+export const DRIVE_BOUNDS = { minX: -98, maxX: 42, minZ: -100, maxZ: 68 };
 export const NAV_CELL = 1.25;
 export const NAV_START = { x: -24.9, z: -31.5 };
 export const BUILDING_RE = /house|building|cabin/i;

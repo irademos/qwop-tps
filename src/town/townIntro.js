@@ -150,8 +150,6 @@ const STEPS = [
 const FIRST_JOB = STEPS.findIndex((x) => x.job);
 // The cart's arrived when it's this close to the wizard's stall
 const DELIVER_DIST = 9;
-// (the drive up to the wizard goes by here — along the path, not straight up the steep side)
-const WIZARD_DRIVE_VIA = [{ x: 6.62, z: 49.75 }];
 // (old saves kept the step's index: the steps as they were then)
 const OLD_STEP_IDS = ['welcome', 'fish', 'cook', 'harvest', 'sell', 'camp', 'chop'];
 const stepIndex = (id) => STEPS.findIndex((x) => x.id === id);
@@ -867,7 +865,7 @@ export function installTownIntro(T, ctx) {
     const s = step();
     const on = s?.at === 'wizard' && T.intro.phase === 'do';
     const w = T.layout.places.wizard;
-    T.driveTo(on ? { x: w.customer.x, z: w.customer.z, r: 3, via: WIZARD_DRIVE_VIA } : null);
+    T.driveTo(on ? { x: w.customer.x, z: w.customer.z, r: 3} : null);
     if (!on) return;
     const c = T.cartRide?.()?.pose();
     // (driven there: in it, or just out of it beside it)
