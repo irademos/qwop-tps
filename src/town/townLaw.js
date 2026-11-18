@@ -306,7 +306,7 @@ export function installTownLaw(T, ctx) {
     removeAllFighters();
     standDown();
     T.clearAllTalk();
-    T.closeMarket();
+    T.closeStand();
     T.fishing = null;
     T.stopFishingRig();
     T.dropHeld({ quiet: true });
@@ -346,7 +346,7 @@ export function installTownLaw(T, ctx) {
     T.sequence = token;
     removeAllFighters();
     T.clearAllTalk();
-    T.closeMarket();
+    T.closeStand();
     T.fishing = null;
     T.stopFishingRig();
     T.dropHeld({ quiet: true });

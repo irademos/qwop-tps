@@ -2,12 +2,14 @@
 // player inside its room — townRooms.js: shop.glb, under the map) and the wizard's stall out in
 // the woods (the Showdown village's market stall), shopped the Showdown village's way — the
 // things for sale sit on the counters, tap one (or swipe / ‹ › / arrow keys) for its buy card.
-//   • the shop sells everything: the goods (wood / fish / veg + seeds) on the back counter, where
-//     the merchant townsperson stands behind it, the gear on the side counters, the mystery chest
+//   • the shop (the weaponsmith's): seeds on the back counter, where the merchant townsperson
+//     stands behind it, the gear on the side counters, the mystery chest
 //   • the wizard's stall: the magic wand, the potions and the flying broom (the wizard townsperson behind it)
+//   • the market stalls outside the shop (townMarket.js — buildMarket): whatever whoever's behind
+//     one is selling (setGoods), the rest of the goods hidden
 // A button by the shop's back counter (by the stall) frames the camera on it (focus); tapping a
 // thing on a counter does too. At a counter, tapping anywhere else, Esc, ⬅ Back or walking off
-// goes back. Selling stays in the market panel (townMarketPanel.js).
+// goes back. Selling is talking to a seller, or standing behind a free market stall (townMarket.js).
 //
 // The counters' things, picking, the buy card and the camera only: the rooms themselves are
 // townRooms.js; townTrade.js decides what each thing costs, whether it can be had, and does the
@@ -15,8 +17,9 @@
 
 import * as THREE from 'three';
 import {
-  makeTextSprite, buildItemMesh, loadTreasureChest, loadWizardStall, CHEST_PRIZE_DELAY_MS,
+  makeTextSprite, buildItemMesh, loadTreasureChest, loadWizardStall, loadMarketStall, CHEST_PRIZE_DELAY_MS,
 } from '../village/villageMode.js';
+import { GOOD_IDS } from './townEconomy.js';
 import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { createFishingRodModel } from '../items/fishingRod.js';
 import { COUNTERS } from './townRooms.js';
@@ -38,10 +41,7 @@ export const STALL_SPOTS = {
 // On the counters, in swipe order. counter / along (m along it: left / right = room z, back =
 // room x) / lift (m above its top); hang: floats over it, turning
 const SHOP_ITEMS = [
-  { id: 'wood', counter: 'back', along: -1.6, lift: 0, build: 'wood' },
-  { id: 'fish', counter: 'back', along: -0.75, lift: 0, build: 'fish' },
-  { id: 'crops', counter: 'back', along: 0.1, lift: 0, build: 'veg' },
-  { id: 'seeds', counter: 'back', along: 1.0, lift: 0, build: 'seeds' },
+  { id: 'seeds', counter: 'back', along: 0, lift: 0, build: 'seeds' },
   { id: 'sword', counter: 'right', along: 2.5, lift: 0.4, build: 'sword', hang: true },
   { id: 'gun', counter: 'right', along: 1.5, lift: 0.02, build: 'gun' },
   { id: 'shield', counter: 'right', along: 0.5, lift: -0.06, build: 'shield' },
@@ -54,6 +54,9 @@ const SHOP_ITEMS = [
 // The wizard's stall: what loadWizardStall puts on its counter
 const WIZARD_ITEMS = [{ id: 'life' }, { id: 'mana' }, { id: 'wand' }, { id: 'broom' }];
 export const STALL_ITEMS = { shop: SHOP_ITEMS, wizard: WIZARD_ITEMS };
+// A market stall's counter: a place for each good (m along it, left → right from the front)
+const MARKET_ALONG = { wood: -0.5, fish: -0.25, crops: 0, grilledFish: 0.25, stew: 0.5 };
+const MARKET_BUILD = { wood: 'wood', fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'stew' };
 const CHEST_AT = { x: -2.45, z: 3.85, yaw: Math.PI / 2 - 0.25 };
 
 const SHOP_FOV = 55;
@@ -105,6 +108,18 @@ const makeSeedsMesh = () => {
     s.position.set(0.1 + Math.cos(k * 1.7) * 0.03, 0.01, Math.sin(k * 1.7) * 0.04);
     g.add(s);
   }
+  return g;
+};
+
+// A bowl of stew (a market stall's — the player's cooking, townCooking.js)
+const makeStewMesh = () => {
+  const g = new THREE.Group();
+  const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.045, 0.05, 14), new THREE.MeshStandardMaterial({ color: 0x8a5a32, roughness: 0.9, metalness: 0 }));
+  bowl.position.y = 0.025;
+  const stew = new THREE.Mesh(new THREE.CircleGeometry(0.062, 14), new THREE.MeshStandardMaterial({ color: 0xb5622a, roughness: 0.7, metalness: 0 }));
+  stew.rotation.x = -Math.PI / 2;
+  stew.position.y = 0.046;
+  g.add(bowl, stew);
   return g;
 };
 
@@ -193,7 +208,7 @@ export function createTownStalls(ctx) {
   const makeItemMesh = (build, bombGltf) => {
     const mesh = build === 'bomb' && bombGltf ? createBombMesh(bombGltf)
       : build === 'rod' ? createFishingRodModel() : build === 'lockpick' ? makeLockpickMesh()
-      : build === 'seeds' ? makeSeedsMesh() : buildItemMesh(build);
+      : build === 'seeds' ? makeSeedsMesh() : build === 'stew' ? makeStewMesh() : buildItemMesh(build);
     if (build === 'bomb') { mesh.scale.multiplyScalar(0.8); mesh.position.y = 0.1; }
     // (the rod lies along the counter, tip toward the back of the shop)
     if (build === 'rod') { mesh.scale.setScalar(0.55); mesh.rotation.set(-0.08, Math.PI / 2, 0); mesh.position.y = 0.02; }
@@ -295,21 +310,88 @@ export function createTownStalls(ctx) {
     return stall;
   };
 
+  // def: { key, label } — a market stall outside the shop (townMarket.js), where setOutdoor put
+  // it: every good has its place on the counter, shown while someone behind it sells it (setGoods)
+  const buildMarket = (group, def) => {
+    const at = outdoor[def.key];
+    const root = new THREE.Group();
+    root.position.set(at.x, at.y ?? 0, at.z);
+    root.rotation.y = at.yaw;
+    group.add(root);
+    const stall = { key: def.key, root, items: [], labels: [], outdoor: true, market: true, label: def.label, sign: null, selling: [] };
+    stalls[def.key] = stall;
+    setLabel(def.key, def.label);
+    loadMarketStall().then(({ root: model, counterY, counterZ }) => {
+      root.add(model);
+      makeClickable(model, { stall: def.key, item: -1 });
+      stall.items = GOOD_IDS.map((id) => {
+        const object = new THREE.Group();
+        object.add(makeItemMesh(MARKET_BUILD[id] ?? 'veg'));
+        object.position.set(MARKET_ALONG[id] ?? 0, counterY, counterZ);
+        object.rotation.y = 0;
+        root.add(object);
+        object.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+        return { def: { id }, object, baseY: object.position.y, baseRotY: object.rotation.y, hopUntil: 0, hidden: true };
+      });
+      finishItems(stall);
+      applyGoods(stall);
+    }).catch((e) => console.warn(`[Town] ${def.key} stall failed to load:`, e));
+    return stall;
+  };
+  // The sign over a market stall (who's selling there)
+  function setLabel(key, text) {
+    const stall = stalls[key];
+    if (!stall || (stall.sign && stall.labelText === text)) return;
+    if (stall.sign) {
+      stall.root.remove(stall.sign);
+      stall.labels = stall.labels.filter((l) => l !== stall.sign);
+      stall.sign.material.map?.dispose();
+      stall.sign.material.dispose();
+    }
+    stall.labelText = text;
+    const sign = makeTextSprite(text, { height: 0.3 });
+    sign.position.set(0, 2.35, 0);
+    stall.root.add(sign);
+    stall.labels.push(sign);
+    makeClickable(sign, { stall: key, item: -1 });
+    stall.sign = sign;
+  }
+  // What's on a market stall's counter (good ids — the rest hidden)
+  const applyGoods = (stall) => {
+    for (const e of stall.items) {
+      e.hidden = !stall.selling.includes(e.def.id);
+      e.object.visible = !e.hidden;
+    }
+    if (focus === stall.key && current()?.hidden) select(-1);
+  };
+  const setGoods = (key, ids) => {
+    const stall = stalls[key];
+    if (!stall?.market) return;
+    const list = ids ?? [];
+    if (list.length === stall.selling.length && list.every((g, i) => g === stall.selling[i])) return;
+    stall.selling = [...list];
+    applyGoods(stall);
+    if (focus === key && !list.length) unfocus();
+  };
+
   // ── Selecting / buying ──
   const itemCenter = (entry, out) => entry.object.getWorldPosition(out).add(entry.centerOffset || _v2.set(0, 0, 0));
   const current = () => (focus ? stalls[focus]?.items[selected] ?? null : null);
 
   function select(i) {
     const items = focus ? stalls[focus].items : [];
-    selected = i >= 0 && i < items.length ? i : -1;
+    selected = i >= 0 && i < items.length && !items[i].hidden ? i : -1;
     failedUntil = 0;
     refreshCard();
   }
   function step(dir) {
     if (!focus) return;
-    const n = stalls[focus].items.length;
-    if (!n) return;
-    select(selected < 0 ? (dir > 0 ? 0 : n - 1) : (selected + dir + n) % n);
+    const items = stalls[focus].items;
+    const n = items.length;
+    if (!n || items.every((e) => e.hidden)) return;
+    let i = selected < 0 ? (dir > 0 ? -1 : n) : selected;
+    do { i = (i + dir + n) % n; } while (items[i].hidden);
+    select(i);
   }
   function refreshCard() {
     const entry = current();
@@ -537,7 +619,7 @@ export function createTownStalls(ctx) {
       if (!tg || (h.object.isSprite && !h.object.visible)) continue;
       any ??= tg;
       const entry = stalls[tg.stall]?.items[tg.item];
-      if (!entry) continue;
+      if (!entry || entry.hidden) continue;
       // (overlapping tap targets: the item whose centre is nearest the tap wins)
       const d = _ray.ray.distanceSqToPoint(itemCenter(entry, _v));
       if (d < bestD) { bestD = d; best = tg; }
@@ -597,6 +679,9 @@ export function createTownStalls(ctx) {
   return {
     build,
     buildOutdoor,
+    buildMarket,
+    setGoods,
+    setLabel,
     setOutdoor,
     setActive,
     update,

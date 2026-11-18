@@ -1,13 +1,14 @@
 // Town: the layout, built once from the map — the walkability grid (townNav.js), the shop and the
 // jail (two of the houses) and the homes (the rest; each house with a known door opens into a
 // room — townRooms.js), the campfire, fields (the player can buy them — townFarming.js), the hose's tap, work
-// spots, the patrol loop, the wizard's stall in the woods, the bandit camp — and its props.
+// spots, the patrol loop, the market stalls outside the shop, the wizard's stall in the woods, the
+// bandit camp — and its props.
 
 import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import {
-  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, MARKET_STALLS, MARKET_STALL_DIST, MARKET_STALL_GAP, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
@@ -179,6 +180,46 @@ export function installTownLayout(T, ctx) {
       homes.push(home);
     }
     if (!homes.length) homes.push({ ...fire, room: null });
+    // The market stalls (townMarket.js): round the shop's door, a market square — each facing
+    // the door, clear of the fire, the houses (and their doors) and each other, keeper (behind) and customer
+    // (in front) spots on walkable ground
+    const shopDoor = shops.shop.door;
+    const stallCells = nav.cellsWhere((i) => {
+      const x = nav.cellX(i);
+      const z = nav.cellZ(i);
+      const d = dist2(x, z, shopDoor.x, shopDoor.z);
+      return d >= MARKET_STALL_DIST[0] && d <= MARKET_STALL_DIST[1] && nav.clearanceAt(i) >= 1.6
+        && dist2(x, z, fire.x, fire.z) > 4.5 && dist2(x, z, jailDoor.x, jailDoor.z) > 4
+        && buildings.every((b) => dist2(x, z, b.x, b.z) > b.radius + 1.6)
+        && Object.values(rooms).every((r) => !r.door || dist2(x, z, r.door.x, r.door.z) > 3.5)
+        && homes.every((h) => dist2(x, z, h.x, h.z) > 2.5);
+    });
+    const marketStalls = [];
+    const stallSpot = (st, lz) => ({ x: st.x + Math.sin(st.yaw) * lz, z: st.z + Math.cos(st.yaw) * lz });
+    for (let k = 0; k < MARKET_STALLS; k++) {
+      const pick = best(stallCells.filter((i) => marketStalls.every((m) => dist2(nav.cellX(i), nav.cellZ(i), m.x, m.z) > MARKET_STALL_GAP)),
+        (i) => Math.min(nav.clearanceAt(i), 3) * 0.5 + (offRoad(i) ? 1 : 0) + (nearRoad(i, 2.5) ? 0.8 : 0)
+          - dist2(nav.cellX(i), nav.cellZ(i), shopDoor.x, shopDoor.z) * 0.12);
+      if (pick < 0) break;
+      const x = nav.cellX(pick);
+      const z = nav.cellZ(pick);
+      const st = { key: `mkt${k}`, x, z, yaw: Math.atan2(shopDoor.x - x, shopDoor.z - z) };
+      const keeper = stallSpot(st, -0.8);
+      const customer = stallSpot(st, 1.3);
+      if (!nav.isWalkable(keeper.x, keeper.z) || !nav.isWalkable(customer.x, customer.z)) {
+        stallCells.splice(stallCells.indexOf(pick), 1);
+        k -= 1;
+        continue;
+      }
+      marketStalls.push(st);
+    }
+    for (const st of marketStalls) {
+      T.stalls.setOutdoor(st.key, { x: st.x, z: st.z, yaw: st.yaw, y: groundAt(st.x, st.z) });
+      st.keeper = T.stalls.spot(st.key, 'merchant');
+      st.customer = T.stalls.spot(st.key, 'customer');
+      nav.block(st.x, st.z, 0.55);
+    }
+    nav.refresh();
 
     // Work spots
     const treeSpots = [];
@@ -291,7 +332,7 @@ export function installTownLayout(T, ctx) {
     // The fishing spot (one for now): the shore spot nearest the middle — the first fisher's too
     const fishSpot = shore[0] ?? null;
     const places = {
-      center: C, market, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
+      center: C, market, marketStalls, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
       homes, treeSpots, fields, tap, shore, fishSpot, patrol, entrance, camp, campFire, strongbox, wizard,
       // the player arrives between the shop and the fire
       spawn: (() => {
@@ -355,6 +396,8 @@ export function installTownLayout(T, ctx) {
     const door = T.rooms.cellDoor();
     const iron = new THREE.MeshStandardMaterial({ color: 0x2f2f35, roughness: 0.6, metalness: 0.3 });
     const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1, metalness: 0 });
+    // The market stalls outside the shop (townMarket.js — who's selling sets their sign / goods)
+    for (const st of places.marketStalls) T.stalls.buildMarket(group, { key: st.key, label: 'Free stall' });
     // The wizard's stall (townStalls.js) and his tent behind it
     T.stalls.buildOutdoor(group, { key: 'wizard', label: 'Wizard' });
     const robe = new THREE.MeshStandardMaterial({ color: 0x4b2f7a, roughness: 1, metalness: 0, side: THREE.DoubleSide });

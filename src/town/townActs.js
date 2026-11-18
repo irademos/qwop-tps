@@ -2,7 +2,7 @@
 // Block bar).
 
 import { FOLLOW_LINES, fillLine, firstName, giftLine, talkLine } from './townPeople.js';
-import { GOODS } from './townEconomy.js';
+import { GOODS, SELLER_GOOD } from './townEconomy.js';
 import {
   ACT_DIST, BAIL, BRIBE, FRIEND_ATTITUDE, GIFT_COINS, GIVE_UP_DIST, GRUDGE_ATTITUDE, TALK_RANGE,
   dist2, el, pickOf,
@@ -16,7 +16,7 @@ export function installTownActs(T, ctx) {
   // A line of small talk (something they remember the player did, now and then — townMemory.js)
   const smallTalk = (n) => {
     const taskType = n.task?.type === 'talk' ? n.task.prevType : n.task?.type;
-    const line = T.memoryLine(n) ?? talkLine(n, { playerName: ctx.getPlayerName(), taskType, market: marketTalk() });
+    const line = T.memoryLine(n) ?? talkLine(n, { playerName: ctx.getPlayerName(), taskType, market: marketTalk(n) });
     if (T.simT - n.talkBonusAt > 60) {
       n.talkBonusAt = T.simT;
       n.attitude = Math.min(1, n.attitude + 0.04);
@@ -42,6 +42,8 @@ export function installTownActs(T, ctx) {
           if (said) farewell(n, said, 'Let\'s go');
         } });
       }
+      // (a seller: Buy / Sell their good — townMarket.js)
+      choices.push(...T.tradeChoices(n, (line) => { if (n.alive) chat(n, line); }));
       choices.push({ label: `Give ${GIFT_COINS}`, act: true, onClick: () => gift(n) });
       choices.push({ label: 'Goodbye' });
     }
@@ -104,12 +106,15 @@ export function installTownActs(T, ctx) {
   };
 
   // What the market's like, for the townsfolk's talk
-  const marketTalk = () => {
-    const scarce = T.market.scarcest();
+  // (n: who's talking — a seller mentions their stall)
+  const marketTalk = (n = null) => {
+    const scarce = T.scarcest();
+    const sells = n && SELLER_GOOD[n.role];
     return {
-      scarce: scarce ? { ...GOODS[scarce], price: T.market.price(scarce) } : null,
-      foodOut: !T.market.cheapestFood(),
+      scarce: scarce ? { ...GOODS[scarce], seller: Object.keys(SELLER_GOOD).find((r) => SELLER_GOOD[r] === scarce) } : null,
+      foodOut: !T.foodOnSale() && T.hour() >= 7 && T.hour() < 20,
       merchantGone: !T.npcs.some((m) => m.alive && m.role === 'merchant'),
+      sells: sells ? GOODS[sells].label : null,
     };
   };
 
@@ -131,10 +136,6 @@ export function installTownActs(T, ctx) {
   const computeActs = () => {
     const out = [];
     if (T.sequence) return out;
-    if (T.marketPanel.isOpen()) {
-      out.push({ key: 'close', label: 'Close market', onClick: T.closeMarket });
-      return out;
-    }
     if (T.storage.isOpen()) {
       out.push({ key: 'closechest', label: 'Close chest', onClick: () => T.storage.close() });
       return out;
@@ -203,11 +204,10 @@ export function installTownActs(T, ctx) {
     // A locked door (townHomes.js): buy the player's house, knock, pick the lock
     if (calm) out.push(...T.doorActs());
     const stall = calm ? T.nearestStall() : null;
-    if (stall === 'shop' && T.marketOpen()) {
-      out.push({ key: 'shop', label: 'Shop', onClick: () => T.focusStall('shop') });
-      out.push({ key: 'sell', label: 'Sell', onClick: T.openMarket });
-    }
+    if (stall === 'shop' && T.shopOpen()) out.push({ key: 'shop', label: 'Shop', onClick: () => T.focusStall('shop') });
     if (stall === 'wizard' && T.stallOpen('wizard')) out.push({ key: 'wizard', label: 'Wizard\'s wares', onClick: () => T.focusStall('wizard') });
+    // The market stalls outside the shop (townMarket.js): Buy from <name>, Sell here / Pack up
+    if (calm) out.push(...T.marketActs());
     // Farming (townFarming.js): pick a grown veg, buy a field, plant a seed
     if (calm) out.push(...T.farmActs());
     // A job's townsperson within reach (not only the nearest): its 📦 / 💰 first
@@ -270,7 +270,6 @@ export function installTownActs(T, ctx) {
     if (!T.active || e.repeat) return;
     if (e.target?.closest?.('input, textarea, select')) return;
     if (document.body.classList.contains('settings-open')) return;
-    if (e.key === 'Escape' && T.marketPanel.isOpen()) { T.closeMarket(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.storage.isOpen()) { T.storage.close(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.stalls.focused()) { T.stalls.unfocus(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.jobTalk.isOpen()) { T.jobTalk.close(); e.preventDefault(); return; }

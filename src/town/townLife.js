@@ -135,7 +135,7 @@ export function installTownLife(T, ctx) {
     if (T.simT > n.nextAmbientAt) {
       n.nextAmbientAt = T.simT + rand(14, 30);
       if (n.body && !n.bubble && T.distToPlayer(n) < 12 && !['talk', 'chat', 'flee', 'respond'].includes(t.type) && Math.random() < 0.3) {
-        T.say(n, talkLine(n, { playerName: ctx.getPlayerName(), taskType: t.type, market: T.marketTalk() }));
+        T.say(n, talkLine(n, { playerName: ctx.getPlayerName(), taskType: t.type, market: T.marketTalk(n) }));
       }
     }
   };
@@ -155,8 +155,8 @@ export function installTownLife(T, ctx) {
       }
       return;
     }
-    if (t.type === 'eat') T.buyFood(n);
-    if (t.type === 'deliver') T.deliverGoods(n);
+    if (t.type === 'eat') T.buyFood(n, t);
+    if (t.type === 'buyWood') T.buyWood(n, t);
     if (t.type === 'raid') T.raidField(n, t);
     if (t.type === 'raidHome') { n.loot = 0; T.onRaidHome(n); T.decide(n); return; }
     if (t.type === 'wander' && Math.random() < 0.35) tryStartChat(n);
@@ -164,6 +164,8 @@ export function installTownLife(T, ctx) {
     if (t.type === 'prowl') T.startMugging(n);
   };
   const doActivity = (n, t, dt) => {
+    // (a seller at a market stall: packs up once sold out, or if the stall's been taken — townMarket.js)
+    if (t.type === 'sell' && T.sellerDone(n, t)) { t.t = t.dur; return; }
     if (t.type === 'social') n.needs.social = Math.max(0, n.needs.social - dt / 25);
     if ((t.anim === 'chop' || t.anim === 'farm') && n.body && T.simT > n.actionAt) {
       n.actionAt = T.simT + (t.anim === 'chop' ? 2.2 : 3.4) + Math.random();
@@ -186,7 +188,7 @@ export function installTownLife(T, ctx) {
   const finishTask = (n, t) => {
     if (t.type === 'work') {
       const made = PRODUCE[n.role];
-      if (made) n.carry[made[0]] += Math.round(rand(made[1], made[2]));
+      if (made) T.addMade(n, made[0], Math.round(rand(made[1], made[2])));
       else if (n.def.law) n.money += WORK_PAY; // (the town pays its guards)
     }
     if (t.type === 'burgle') T.burgle(n, t);

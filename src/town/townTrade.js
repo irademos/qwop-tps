@@ -1,18 +1,18 @@
 // Town: the player's goods and gathering (chop, pick, eat — fishing is townFishing.js, farming
 // townFarming.js), going in and out of the houses (townRooms.js: the shop, the jail and the
-// homes), the market — the shop's counters and the wizard's stall (townStalls.js), the sell
-// panel — townsfolk buying food and delivering goods, and the stand-ins bullets / bombs / spells
-// hit townsfolk through.
+// homes), the shop's counters and the wizard's stall (townStalls.js; the market stalls outside —
+// buying food and selling — are townMarket.js), and the stand-ins bullets / bombs / spells hit
+// townsfolk through.
 
-import { GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR, WIZARD_WARES } from './townEconomy.js';
-import { SHOUT_EAT_BUY, firstName, shout } from './townPeople.js';
+import { GOODS, RAW_IDS, SHOP_GEAR, WIZARD_WARES } from './townEconomy.js';
+import { firstName } from './townPeople.js';
 import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
 import { createTownRooms } from './townRooms.js';
 import {
-  CHEST_PRICE, LOCKPICK_MAX, SEEDS_MAX, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
-  DOOR_DIST, DOOR_ENTER_HALF_WIDTH, DOOR_ENTER_PAST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, dist2,
-  heightScale, inHours, pickOf, rand,
+  CHEST_PRICE, LOCKPICK_MAX, SEEDS_MAX, CROP_REGROW_S, GRUDGE_ATTITUDE,
+  DOOR_DIST, DOOR_ENTER_HALF_WIDTH, DOOR_ENTER_PAST, PICK_DIST, TRADE_DIST, dist2,
+  heightScale, pickOf,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -139,13 +139,12 @@ export function installTownTrade(T, ctx) {
     T.actsAt = 0;
     if (T.layout.places.rooms[key].kind === 'home') T.feedLine(homeLine(key));
     else if (key === 'jail') T.feedLine('The sheriff\'s office — and the cell.');
-    else if (!stallOpen(key)) T.feedLine('The merchant\'s not in.');
+    else if (!stallOpen(key)) T.feedLine('The weaponsmith\'s not in.');
   };
   const leaveRoom = () => {
     const key = T.inRoom ?? playerRoom();
     if (!key) return;
     stalls.unfocus();
-    closeMarket();
     const r = T.layout.places.rooms[key];
     ctx.setPositionConstraint(null);
     T.inRoom = null;
@@ -218,10 +217,11 @@ export function installTownTrade(T, ctx) {
     }
   };
   // The shop: the merchant at the counter; the wizard's stall: the wizard behind it
-  const stallOpen = (key) => (key === 'wizard' ? !!workingWizard() : marketOpen());
+  // (a market stall: someone selling behind it — townMarket.js)
+  const stallOpen = (key) => (key === 'wizard' ? !!workingWizard() : T.isMarketKey(key) ? T.marketCanShop(key) : shopOpen());
   const calmNow = () => !T.npcs.some((n) => n.fighter && T.distToPlayer(n) < 8);
   const canShop = (key) => T.active && T.ready && !!key && !T.sequence && !T.jail && !T.fishing && !ctx.isPlayerDead()
-    && !T.marketPanel.isOpen() && calmNow() && stallOpen(key);
+    && calmNow() && stallOpen(key);
   const gearOwned = (id, items) => {
     if (!items) return false;
     if (id === 'sword') return items.sword;
@@ -252,25 +252,13 @@ export function installTownTrade(T, ctx) {
   const keeperOf = (key) => (key === 'wizard' ? workingWizard() : workingMerchant());
   const keeperBlock = (key) => {
     const k = keeperOf(key);
-    if (!k) return key === 'wizard' ? 'The wizard isn’t here' : 'The merchant isn’t here';
+    if (!k) return key === 'wizard' ? 'The wizard isn’t here' : 'The weaponsmith isn’t here';
     if (k.attitude < GRUDGE_ATTITUDE) return `${firstName(k.name)} won’t sell to you`;
     return null;
   };
   // The buy card's contents for a thing on a counter
   const stallItemState = (key, id) => {
-    if (key === 'shop' && GOODS[id]) {
-      const g = GOODS[id];
-      const merchant = workingMerchant();
-      const friend = merchant && merchant.attitude >= FRIEND_ATTITUDE;
-      return {
-        name: g.label,
-        desc: `${T.market.stock[id]} in stock${g.food ? ` · eat it for +${g.heal} health` : ''}${friend ? ' · friend\'s price' : ''}`,
-        owned: `You have ${T.goods[id]}`,
-        price: buyPrice(id),
-        blocked: keeperBlock(key)
-          ?? (T.market.stock[id] <= 0 ? 'Sold out' : T.bagRoom() <= 0 ? 'Your bag is full' : null),
-      };
-    }
+    if (T.isMarketKey(key)) return T.marketItemState(key, id);
     if (id === 'chest') {
       return {
         name: 'Mystery Chest', desc: 'A random prize — coins, bombs, a shield, goods… maybe even a gun!',
@@ -302,7 +290,7 @@ export function installTownTrade(T, ctx) {
     getState: stallItemState,
     buy: (key, id) => {
       if (!canShop(key) || stallItemState(key, id).blocked) return null;
-      const res = key === 'shop' && GOODS[id] ? { ok: buyGood(id) }
+      const res = T.isMarketKey(key) ? T.marketBuy(key, id)
         : id === 'chest' ? openChest() : { ok: buyGear(key, id) };
       if (res?.ok) ctx.playSfx?.(id === 'chest' ? 'chestPrize' : 'buy');
       return res;
@@ -310,75 +298,12 @@ export function installTownTrade(T, ctx) {
     getPlayerPosition: () => ctx.getPlayerPosition(),
     setPlayerHidden: (hidden) => ctx.setPlayerHidden?.(hidden),
     canShop: (key) => canShop(key),
-    canTap: (key) => canShop(key) && (key === 'wizard' ? nearStallKey('wizard') : playerRoom() === key),
+    canTap: (key) => canShop(key) && (key === 'wizard' ? nearStallKey('wizard') : T.isMarketKey(key) ? T.marketCanTap(key) : playerRoom() === key),
   });
   const focusStall = (key) => {
     T.fishing = null;
     stalls.focus(key);
     T.actsAt = 0;
-  };
-  // Selling goods: the market panel
-  const marketModel = () => {
-    const merchant = workingMerchant();
-    const cash = Math.floor(merchant?.money ?? 0);
-    return {
-      title: `Sell · ${merchant ? firstName(merchant.name) : 'closed'}`,
-      coins: ctx.getCoins(),
-      cash,
-      note: !merchant ? 'The merchant isn\'t here.'
-        : merchantShunsPlayer() ? `${firstName(merchant.name)} won't trade with you.`
-        : merchant.attitude >= FRIEND_ATTITUDE ? `${firstName(merchant.name)} gives you a friend's price.` : null,
-      // (cooked food: only once the player has some to sell)
-      goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || T.goods[g] > 0).map((g) => ({
-        id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, stock: T.market.stock[g], have: T.goods[g],
-        sell: playerSellPrice(g),
-        canSell: !!merchant && !merchantShunsPlayer() && T.goods[g] > 0 && cash >= playerSellPrice(g),
-      })),
-    };
-  };
-  const openMarket = () => {
-    if (!marketOpen()) { T.feedLine('The market\'s closed.'); return; }
-    T.fishing = null;
-    stalls.unfocus();
-    T.marketPanel.open(marketModel());
-  };
-  const closeMarket = () => T.marketPanel.close();
-  // What the merchant asks / pays the player: a friend gets a better deal (a grudge, no deal)
-  const buyPrice = (g) => {
-    const m = workingMerchant();
-    const off = m && m.attitude >= FRIEND_ATTITUDE ? 1 - FRIEND_DISCOUNT : 1;
-    return Math.max(1, Math.round(T.market.price(g) * off));
-  };
-  const playerSellPrice = (g) => {
-    const m = workingMerchant();
-    const up = m && m.attitude >= FRIEND_ATTITUDE ? 1 + FRIEND_DISCOUNT : 1;
-    return Math.max(1, Math.round(T.market.sellPrice(g) * up));
-  };
-  const merchantShunsPlayer = () => (workingMerchant()?.attitude ?? 0) < GRUDGE_ATTITUDE;
-  const buyGood = (g) => {
-    const merchant = workingMerchant();
-    const price = buyPrice(g);
-    if (!merchant || merchantShunsPlayer() || ctx.getCoins() < price || T.bagRoom() <= 0 || !T.market.take(g)) return false;
-    ctx.addCoins(-price);
-    merchant.money += price;
-    if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'trade', g, d: -1, cash: price });
-    gain(g);
-    noteStock();
-    return true;
-  };
-  const sellGood = (g) => {
-    const merchant = workingMerchant();
-    const price = playerSellPrice(g);
-    if (!merchant || merchantShunsPlayer() || T.goods[g] <= 0 || merchant.money < price) return;
-    T.goods[g] -= 1;
-    T.renderGoods();
-    T.market.put(g);
-    merchant.money -= price;
-    if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'trade', g, d: 1, cash: -price });
-    ctx.addCoins(price);
-    noteStock();
-    T.remember(merchant, 'customer');
-    T.introNote('sell');
   };
   // Gear from the shop / the wizard (the money goes to whoever's behind the counter)
   const buyGear = (key, id) => {
@@ -467,80 +392,19 @@ export function installTownTrade(T, ctx) {
       if (n.alive && !n.fighter) T.hurt(n, fromPlayer(n), b.element === 'fire' ? ctx.magicDamage.fire : ctx.magicDamage.ice);
     },
   })) : []);
-  // ── The market (townEconomy.js): the merchant behind the shop's counter buys and sells ──
-  const marketOpen = () => inHours(T.hour(), MARKET_HOURS) && !!workingMerchant();
-  // The merchant, if they're at the counter now
+  // ── The shop (the weaponsmith behind its counter) and the wizard's stall ──
+  const shopOpen = () => !!workingMerchant();
+  // The weaponsmith, if they're at the counter now
   const workingMerchant = () => T.npcs.find((m) => m.alive && !m.fighter && m.role === 'merchant'
     && T.isWorking(m)) ?? null;
   // The wizard, if he's behind his stall now
   const workingWizard = () => T.npcs.find((m) => m.alive && !m.fighter && m.role === 'wizard'
     && T.isWorking(m)) ?? null;
-  // (feed: a good running out / coming back)
-  const noteStock = () => {
-    for (const g of RAW_IDS) {
-      if (T.market.stock[g] <= 0 && !T.soldOut.has(g)) {
-        T.soldOut.add(g);
-        T.feedLine(`The market's out of ${GOODS[g].label.toLowerCase()}! ${T.market.price(g)} coins now`);
-      } else if (T.market.stock[g] > 0 && T.soldOut.has(g)) {
-        T.soldOut.delete(g);
-        T.feedLine(`${GOODS[g].label} is back at the market.`);
-      }
-    }
-    if (T.marketPanel.isOpen()) T.marketPanel.render(marketModel());
-  };
-  // A townsperson buys a meal (and maybe firewood) from the merchant
-  const buyFood = (n) => {
-    const merchant = workingMerchant();
-    const food = T.market.cheapestFood();
-    if (!merchant || !food) {
-      T.say(n, 'Sold out?! I\'m starving…');
-      return;
-    }
-    const pay = (g) => {
-      const price = T.market.price(g);
-      if (n.money < price || !T.market.take(g)) return false;
-      n.money -= price;
-      merchant.money += price;
-      return true;
-    };
-    if (!pay(food)) return;
-    T.say(n, shout(SHOUT_EAT_BUY, n));
-    setTimeout(() => { if (T.active && merchant.alive) T.say(merchant, `That's ${T.market.price(food)} coins!`); }, 900);
-    n.needs.hunger = 0;
-    if (Math.random() < FIREWOOD_CHANCE) pay('wood');
-    noteStock();
-  };
-  // A woodcutter / farmer / fisher sells what they made to the merchant (as far as the
-  // merchant's money goes)
-  const deliverGoods = (n) => {
-    const merchant = workingMerchant();
-    if (!merchant) return;
-    let sold = 0;
-    for (const g of GOOD_IDS) {
-      while (n.carry[g] > 0) {
-        const price = T.market.sellPrice(g);
-        if (merchant.money < price) break;
-        n.carry[g] -= 1;
-        T.market.put(g);
-        merchant.money -= price;
-        n.money += price;
-        sold += 1;
-      }
-    }
-    if (sold) {
-      const g = GOOD_IDS.find((x) => PRODUCE[n.role]?.[0] === x) ?? 'wood';
-      T.say(n, `Fresh ${GOODS[g].label.toLowerCase()}! ${GOODS[g].emoji}`);
-      setTimeout(() => { if (T.active && merchant.alive) T.say(merchant, 'I\'ll take the lot.'); }, 900);
-    } else {
-      T.say(merchant, 'Can\'t afford it today, sorry.');
-    }
-    noteStock();
-  };
 
   Object.assign(T, {
-    buyFood, calmNow, closeMarket, deliverGoods, eat, enterRoom, focusStall, gain, getMagicTargets,
-    getWeaponTargets, leaveRoom, marketOpen, nearDoor, nearStall, nearestStall, noteStock,
-    mayPick, openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen,
+    calmNow, eat, enterRoom, focusStall, gain, getMagicTargets,
+    getWeaponTargets, leaveRoom, shopOpen, nearDoor, nearStall, nearestStall,
+    mayPick, pickCrop, playerRoom, ripeCropNear, rooms, stallItemState, stalls, stallOpen,
     updateRegrowth, updateRooms, workingMerchant, workingWizard,
   });
 }

@@ -2,18 +2,18 @@
 // paths and tasks, what to do next (decide), speech bubbles and their bodies (level of detail).
 
 import { FOLLOW_LINES, ROLES, firstName, livesOut } from './townPeople.js';
-import { FOOD_IDS, GOOD_IDS } from './townEconomy.js';
+import { FOOD_IDS, SELLER_GOOD } from './townEconomy.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
-  BODY_DIST, BODY_RELEASE_DIST, MERCHANT_START_CASH, SPEECH_DIST, SPEECH_SHOUT_DIST,
+  BODY_DIST, BODY_RELEASE_DIST, MERCHANT_START_CASH, SELLER_START_CASH, SPEECH_DIST, SPEECH_SHOUT_DIST, WOOD_BUY_CHANCE,
   HOME_VISIT_CHANCE, MUG_CHANCE, SHOP_BROWSE_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, inHours, pickOf, rand,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownFolk(T, ctx) {
   // ── Townsfolk ──
-  const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : rand(4, 14), attitude = 0, carry = null, vendetta = false, following = false, mem = null }) => {
+  const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : SELLER_GOOD[role] ? SELLER_START_CASH : rand(4, 14), attitude = 0, carry = null, vendetta = false, following = false, mem = null }) => {
     const def = ROLES[role] ?? ROLES.townsfolk;
     const { homes } = T.layout.places;
     // (bandits live at the camp, the wizard in his tent by his stall: home index -1)
@@ -29,7 +29,7 @@ export function installTownFolk(T, ctx) {
       alive: true, dying: null, hp: def.hp, maxHp: def.hp,
       needs: { energy: rand(0.6, 1), hunger: rand(0, 0.6), social: rand(0, 0.7) },
       money, attitude,
-      carry: { wood: 0, fish: 0, crops: 0, ...(carry ?? {}) }, // goods made, on the way to the market
+      carry: { wood: 0, fish: 0, crops: 0, ...(carry ?? {}) }, // goods made, to sell at a market stall (townMarket.js)
       speedScale: (def.speed ?? 1) * rand(0.9, 1.12),
       task: null, path: null, pathI: 0, moving: false,
       inside: false, fear: 0, hostile: false, fighter: null, lastHurtAt: -1e9, lastHitAt: -1e9,
@@ -240,18 +240,19 @@ export function installTownFolk(T, ctx) {
         n.needs.hunger = 0;
         say(n, '*munch*');
       }
-      const open = T.marketOpen();
-      // Goods made: off to sell them
-      if (open && GOOD_IDS.some((g) => n.carry[g] > 0)) options.push(['deliver', 1.1]);
-      const food = T.market.cheapestFood();
-      if (open && food && n.money >= T.market.price(food) && n.role !== 'merchant') options.push(['eat', n.needs.hunger ** 2 * 1.3]);
+      // Their selling hours, with goods made: off to a market stall (townMarket.js)
+      if (T.wantsToSell(n) && T.freeStallFor(n)) options.push(['sell', 1.05]);
+      // Hungry: a meal from whoever's selling food at the stalls
+      if (T.foodSourceFor(n)) options.push(['eat', n.needs.hunger ** 2 * 1.3]);
+      // Some firewood now and then (once a day)
+      if (!night && n.woodDay !== T.clock.day && !T.sellerGood(n) && Math.random() < WOOD_BUY_CHANCE && T.woodSourceFor(n)) options.push(['buyWood', 0.45]);
       const evening = h >= 17 && h < 23.5;
       options.push(['social', n.needs.social * 0.7 + (evening ? 0.35 : 0) + (def.nightOwl && night ? 0.6 : 0)]);
       const sleepy = def.nightOwl ? (h >= 3 && h < 11) : night;
       options.push(['sleep', sleepy ? 1.25 : n.needs.energy < 0.18 ? 0.9 : 0]);
       options.push(['wander', 0.22]);
       // (a look round the shop's gear)
-      if (T.marketOpen() && !night && Math.random() < SHOP_BROWSE_CHANCE) options.push(['browse', 0.3]);
+      if (T.shopOpen() && !night && Math.random() < SHOP_BROWSE_CHANCE) options.push(['browse', 0.3]);
     }
     let bestType = 'wander';
     let bestScore = -Infinity;
@@ -276,10 +277,16 @@ export function installTownFolk(T, ctx) {
         setTask(n, { type, to: randomNear(f.x, f.z, 1.6), dur: rand(18, 35), anim: 'farm', face: null });
       } else if (n.work) setTask(n, { type, to: n.work, dur: rand(45, 90), face: n.work.face, anim: w === 'tree' ? 'chop' : null });
       else setTask(n, { type: 'wander', to: randomNear(n.x, n.z, 14), dur: rand(2, 6) });
-    } else if (type === 'deliver') {
-      setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.2), dur: 3, face: P.merchantSpot });
-    } else if (type === 'eat') {
-      setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.2), dur: 4, face: P.merchantSpot });
+    } else if (type === 'sell') {
+      // (behind a free market stall, facing its front — townMarket.js)
+      const st = T.freeStallFor(n);
+      if (st) setTask(n, { type, to: st.keeper, dur: rand(30, 50), face: st.customer, stall: st.key });
+      else setTask(n, { type: 'wander', to: randomNear(n.x, n.z, 10), dur: rand(2, 6) });
+    } else if (type === 'eat' || type === 'buyWood') {
+      // (in front of the stall that sells it)
+      const src = type === 'eat' ? T.foodSourceFor(n) : T.woodSourceFor(n);
+      if (src) setTask(n, { type, to: randomNear(src.stall.customer.x, src.stall.customer.z, 0.35), dur: 3.5, face: src.stall.keeper, stall: src.stall.key, g: src.g });
+      else setTask(n, { type: 'wander', to: randomNear(n.x, n.z, 10), dur: rand(2, 6) });
     } else if (type === 'browse') {
       // (somewhere in the shop, looking at the side counters)
       const c = T.stalls.spot('shop', 'counter');

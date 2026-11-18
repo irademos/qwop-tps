@@ -30,11 +30,14 @@ export function installTownWire(T, ctx) {
     if (anim === 'chop') f |= 64;
     if (anim === 'farm') f |= 128;
     if (T.isWorking(n)) f |= 256;
-    return [n.id, r2(n.x), r2(n.z), r2(n.yaw), f, n.hp, n.ctrl || 0, Math.round(n.money)];
+    // (selling at a market stall — townMarket.js — and how many of their good they've left)
+    if (own && t?.type === 'sell' && t.phase === 'do') f |= 512;
+    const g = T.sellerGood(n);
+    return [n.id, r2(n.x), r2(n.z), r2(n.yaw), f, n.hp, n.ctrl || 0, Math.round(n.money), g ? n.carry[g] : 0];
   };
   // (withMoney: the host's word — the host keeps everyone's purse)
   const applyDyn = (n, a, withMoney = true) => {
-    const [, x, z, yaw, f, hp, , money] = a;
+    const [, x, z, yaw, f, hp, , money, stock] = a;
     if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(f)) return;
     n.net = { x, z, yaw: Number.isFinite(yaw) ? yaw : n.yaw };
     n.moving = !!(f & 1);
@@ -48,6 +51,9 @@ export function installTownWire(T, ctx) {
     n.lost = !!(f & 16);
     n.anim = f & 64 ? 'chop' : f & 128 ? 'farm' : null;
     n.netWorking = !!(f & 256);
+    n.netSelling = !!(f & 512);
+    const g = T.sellerGood(n);
+    if (withMoney && g && Number.isFinite(stock)) n.carry[g] = Math.max(0, stock);
     if (Number.isFinite(hp)) n.hp = hp;
     if (withMoney && Number.isFinite(money)) n.money = money;
   };
@@ -169,7 +175,13 @@ export function installTownWire(T, ctx) {
     n.dying = null;
     T.releaseBody(n);
   };
-  const fullSnapshot = () => ({ ...T.worldSnapshot(), dyn: T.npcs.filter((n) => n.alive).map(dynOf) });
+  // (the market stalls players stand at — townMarket.js — for a late joiner)
+  const standsNow = () => {
+    const out = Object.entries(T.remoteStands).map(([k, r]) => ({ k, peer: r.peer, n: r.name, g: r.goods }));
+    if (T.stand) out.push({ k: T.stand.key, peer: T.myId(), n: ctx.getPlayerName(), g: Object.fromEntries(GOOD_IDS.filter((g) => T.goods[g] > 0).map((g) => [g, T.goods[g]])) });
+    return out;
+  };
+  const fullSnapshot = () => ({ ...T.worldSnapshot(), dyn: T.npcs.filter((n) => n.alive).map(dynOf), stands: standsNow() });
   const placeFromDyn = (dyn) => {
     for (const a of Array.isArray(dyn) ? dyn : []) {
       const n = Array.isArray(a) ? T.npcs.find((m) => m.id === a[0]) : null;
@@ -200,7 +212,10 @@ export function installTownWire(T, ctx) {
     if (Number.isFinite(s.gangDay)) T.gangDay = s.gangDay;
     if (s.houses) T.applyHouses(s.houses);
     if (s.fieldOwners) { T.applyFieldOwners(s.fieldOwners); T.assignWork(); }
-    if (s.market) { for (const g of GOOD_IDS) if (Number.isFinite(s.market[g])) T.market.stock[g] = s.market[g]; T.noteStock(); }
+    if (Array.isArray(s.stands)) {
+      T.dropRemoteStands();
+      for (const r of s.stands) if (r && r.peer !== T.myId()) T.handleMarketNet(r.peer, { op: 'stand', k: r.k, n: r.n, g: r.g, from: r.peer });
+    }
     const ids = new Set();
     let added = false;
     for (const p of s.people) {
@@ -264,6 +279,8 @@ export function installTownWire(T, ctx) {
     if (T.handleTreeNet(from, d)) return;
     // (the night raid's call, a player's house broken into — townBandits.js)
     if (T.handleBanditNet(from, d)) return;
+    // (players' market stalls — townMarket.js)
+    if (T.handleMarketNet(from, d)) return;
     switch (d.op) {
       case 'hello':
         if (T.netMode === 'host' && T.ready) T.net.send(from, { w: 1, op: 'full', s: fullSnapshot() });
@@ -280,7 +297,6 @@ export function installTownWire(T, ctx) {
         if (!fromHost || T.netMode !== 'client' || !T.ready) return;
         if (Number.isFinite(d.d)) T.clock.day = d.d;
         if (Number.isFinite(d.m)) T.clock.minutes = d.m;
-        if (d.mk) { for (const g of GOOD_IDS) if (Number.isFinite(d.mk[g])) T.market.stock[g] = d.mk[g]; T.noteStock(); }
         return;
       case 'dead':
         if (T.ready && n?.alive) remoteDeath(n, typeof d.by === 'string' ? d.by : null);
@@ -352,12 +368,11 @@ export function installTownWire(T, ctx) {
         worldDeath(n, typeof d.by === 'string' ? d.by : null, from);
         return;
       case 'trade': {
-        if (!GOODS[d.g]) return;
-        if (d.d < 0) T.market.take(d.g);
-        else T.market.put(d.g);
-        const m = T.workingMerchant() ?? T.npcs.find((x) => x.alive && x.role === 'merchant');
-        if (m && Number.isFinite(d.cash)) m.money = Math.max(0, m.money + Math.max(-200, Math.min(200, d.cash)));
-        T.noteStock();
+        // (a player bought / sold one of a seller's goods — townMarket.js; the host keeps the stock)
+        if (!GOODS[d.g] || !n?.alive || T.netMode !== 'host') return;
+        if (d.d < 0) n.carry[d.g] = Math.max(0, n.carry[d.g] - 1);
+        else if (d.d > 0) n.carry[d.g] += 1;
+        if (Number.isFinite(d.cash)) n.money = Math.max(0, n.money + Math.max(-200, Math.min(200, d.cash)));
         return;
       }
       case 'money':
@@ -470,9 +485,14 @@ export function installTownWire(T, ctx) {
       }
       if (T.simT > T.netT.world) {
         T.netT.world = T.simT + NET_WORLD_S;
-        T.net.broadcast({ w: 1, op: 'w', d: T.clock.day, m: r2(T.clock.minutes), mk: T.market.snapshot() });
-        // Claims of players who left (or went quiet) go back to the town
+        T.net.broadcast({ w: 1, op: 'w', d: T.clock.day, m: r2(T.clock.minutes) });
+        // Claims of players who left (or went quiet) go back to the town; their stalls are free again
         const peers = new Set(T.net.peerIds());
+        for (const r of Object.values(T.remoteStands)) {
+          if (peers.has(r.peer)) continue;
+          T.dropRemoteStands(r.peer);
+          T.net.broadcast({ w: 1, op: 'stand', k: null, from: r.peer });
+        }
         for (const n of T.npcs) {
           if (!n.ctrl || (peers.has(n.ctrl) && T.simT - (n.ctrlSeenAt ?? 0) < NET_CLAIM_TIMEOUT_S)) continue;
           n.ctrl = null;

@@ -296,7 +296,7 @@ export function installTownFishing(T, ctx) {
     const turns = reeled / TURN;
 
     const gesture = ctx.hasGyro() && ctx.isRodEquipped() ? takeGesture() : null;
-    if (!T.fishing && gesture?.kind === 'cast' && T.calmNow() && !T.stalls.focused() && !T.marketPanel.isOpen()
+    if (!T.fishing && gesture?.kind === 'cast' && T.calmNow() && !T.stalls.focused()
       && !T.jobTalk.isOpen()) {
       used();
       cast(gesture.power);

@@ -118,8 +118,8 @@ export function installTownMissions(T, ctx) {
   };
   const townJob = () => {
     if (Math.random() < 0.7) {
-      // A delivery: what the market is short of, for someone who needs it
-      const g = T.market.scarcest() ?? pickOf(RAW_IDS);
+      // A delivery: what the town is short of (townMarket.js), for someone who needs it
+      const g = T.scarcest() ?? pickOf(RAW_IDS);
       const giver = pickOf(townsfolkFor((n) => !T.jobs.some((j) => j.giverId === n.id)));
       if (!giver) return null;
       const n = g === 'wood' ? 3 + Math.floor(Math.random() * 4) : 2 + Math.floor(Math.random() * 3);
@@ -127,8 +127,8 @@ export function installTownMissions(T, ctx) {
       return makeJob({
         kind: 'deliver', giverId: giver.id,
         title: `Bring ${n} ${GOODS[g].label.toLowerCase()} to ${firstName(giver.name)}`,
-        desc: `${why}${T.market.stock[g] <= 0 ? ', and the market\'s sold out' : ''}. Could you bring me ${n} ${GOODS[g].emoji}?`,
-        reward: { coins: Math.round(GOODS[g].base * n * 1.8) + 4, attitude: 0.2 }, data: { good: g, n, toId: giver.id },
+        desc: `${why}${T.supplyOf(g) <= 0 ? ', and nobody\'s selling any' : ''}. Could you bring me ${n} ${GOODS[g].emoji}?`,
+        reward: { coins: Math.round(GOODS[g].price * n * 1.8) + 4, attitude: 0.2 }, data: { good: g, n, toId: giver.id },
       });
     }
     // A debt to collect (or forgive)

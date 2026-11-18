@@ -402,6 +402,18 @@ export async function loadStallManaPotion() {
   potion.position.copy(MANA_POTION_OFFSET);
   return potion;
 }
+// Town mode's market stalls (src/town/townMarket.js): the village's market stall, bare — the
+// seller's goods are put on its counter by townStalls.js. → { root (metres, the front toward +Z,
+// standing at y 0), counterY (m: the counter's top), counterZ (m: its middle, front to back) }
+export async function loadMarketStall() {
+  const stallGltf = await loadProp(MARKET_STALL_MODEL);
+  const root = new THREE.Group();
+  const stall = alignStallModel(markShared(stallGltf.scene.clone(true)));
+  stall.scale.setScalar(MARKET_STALL_SIZE * VILLAGE_PROP_SCALE);
+  stall.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  root.add(stall);
+  return { root, counterY: COUNTER_SURFACE_Y * STALL_UNIT, counterZ: 34 * STALL_UNIT };
+}
 // Town mode's wizard stall (src/town/townStalls.js 'wizard'): the village's market stall with the
 // life potion, the mana potion and the magic wand on its counter where the village has them.
 // → { root (metres, the front toward +Z, standing at y 0), items: { life, mana, wand } (each in

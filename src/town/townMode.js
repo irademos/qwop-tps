@@ -7,17 +7,18 @@
 // giving up lands the player in the jail cell (in the jail house — townRooms.js). The dead stay dead; newcomers move in to take
 // their place. Townsfolk names / roles / lines are in townPeople.js.
 //
-// Economy (townEconomy.js): woodcutters, farmers and fishers bring wood, veg and fish to the
-// market and are paid by the merchant; everyone buys their food (and firewood) there; prices
-// follow the stock. The player gathers too — chops trees with the sword, fishes at the fishing
-// spot with a rod bought at the shop (townFishing.js), picks veg (stealing, if anyone sees),
-// buys the farmers' fields and plants seeds from the shop anywhere (townFarming.js — watered
-// with the hose they grow fast) — and trades at the market (townStalls.js): one of the houses is
-// the shop — walking in through the door puts the player in its room, shopped like the Showdown
-// village's — everything in one place, run by the merchant (the goods behind the counter, the
-// gear on the side counters, a mystery chest); the wizard sells the wand and potions at his
-// stall out in the woods; townsfolk walk in and out of the shop too; selling goods is the market
-// panel (townMarketPanel.js). In Town the player owns only what they bought here,
+// Economy (townEconomy.js, townMarket.js): woodcutters, farmers and fishers sell their own wood,
+// veg and fish at the market stalls outside the shop, in their selling hours (fish in the
+// morning, veg in the afternoon), at set prices; everyone buys their food (and firewood) there.
+// The player gathers too — chops trees with the sword, fishes with a rod bought at the shop
+// (townFishing.js), picks veg (stealing, if anyone sees), buys the farmers' fields and plants
+// seeds from the shop anywhere (townFarming.js — watered with the hose they grow fast) — buys
+// from the sellers (at their stall, or talking to them), sells them their own good back, or
+// stands behind a free stall and sells to whoever comes up. One of the houses is the shop (the
+// weaponsmith's — townStalls.js): walking in through the door puts the player in its room,
+// shopped like the Showdown village's (seeds behind the counter, the gear on the side counters,
+// a mystery chest); the wizard sells the wand and potions at his stall out in the woods;
+// townsfolk walk in and out of the shop too. In Town the player owns only what they bought here,
 // starting with nothing at all (ctx.startLoadout — the real inventory waits outside), and the
 // guards take it all on an arrest.
 //
@@ -55,7 +56,7 @@
 // the guards after themselves — that player's game claims them (take) and runs them itself
 // (the same code, against its own player) until they go back to normal life (decide → release).
 // A hit on someone another game runs goes to that game ('hit'); deaths go to the host, who
-// keeps the roster (newcomers), the clock and the market's one stock (trades are 'trade' ops).
+// keeps the roster (newcomers), the clock and the sellers' stock (a player's trades are 'trade' ops).
 // Wanted stars, attitude, jobs, goods and gear are each player's own (saved per room); other
 // players' stars show over them, a hit on a player who isn't wanted is assault, and bringing
 // a wanted one down pays a bounty. With no room (offline) it's a town of your own.
@@ -84,11 +85,10 @@
 //   roomId(), canSave(), playerCount(), sendBounty(to, coins)
 
 import { FOUNDING_ROLES, ROLES, TOWN_NAME, characterForRole, firstName, livesOut, randomName, speciesOf } from './townPeople.js';
-import { GOODS, GOOD_IDS, createMarket } from './townEconomy.js';
+import { GOODS, GOOD_IDS } from './townEconomy.js';
 import * as THREE from 'three';
 import { createJobTalk, createQuestTracker } from './townJobs.js';
 import { createLockpick } from './townLockpick.js';
-import { createMarketPanel } from './townMarketPanel.js';
 import { glbCharacterConfig, isMiiCharacterUrl } from '../models/glbCharacterModel.js';
 import { createSpeech } from '../audio/speech.js';
 import { updateCampfire } from '../village/villageMode.js';
@@ -103,6 +103,7 @@ import { installTownLaw } from './townLaw.js';
 import { installTownReactions } from './townReactions.js';
 import { installTownBandits } from './townBandits.js';
 import { installTownTrade } from './townTrade.js';
+import { installTownMarket } from './townMarket.js';
 import { installTownFishing } from './townFishing.js';
 import { installTownLife } from './townLife.js';
 import { installTownMissions } from './townMissions.js';
@@ -166,9 +167,7 @@ export function createTownMode(ctx) {
   T.actsKey = '';
   T.acts = [];
   const pool = new Map();     // url → [{ container, character }]
-  T.market = createMarket();   // the shop's stock of goods (replaced by the saved one on enter)
   const goods = Object.fromEntries(GOOD_IDS.map((g) => [g, 0])); // what the player carries
-  const soldOut = new Set();  // goods the market has run out of (for the feed)
   T.fishing = null;           // while the player's line is out (townFishing.js)
   T.cooking = null;           // { recipe, left, x, z } while something's on the fire (townCooking.js)
   T.intro = null;             // the first day's goals (townIntro.js), null once done
@@ -282,10 +281,6 @@ export function createTownMode(ctx) {
       goodEls[g].classList.toggle('hidden', !!GOODS[g].cooked && goods[g] <= 0);
     }
   };
-  const marketPanel = createMarketPanel(hud, {
-    onSellGood: (g) => T.sellGood(g),
-    onClose: () => T.closeMarket(),
-  });
   // The talk box with a townsperson (townJobs.js; townActs.js), the quest tracker, the jailbreak lock
   const jobTalk = createJobTalk(hud, {
     onEnd: () => T.endTalk(),
@@ -493,7 +488,6 @@ export function createTownMode(ctx) {
     pending: T.arrivals.map((a) => a.role),
     departed: T.departed,
     nextId: T.nextId,
-    market: T.market.snapshot(),
     houses: T.houses,
     fieldOwners: T.fieldOwners,
     goods: { ...goods },
@@ -515,7 +509,6 @@ export function createTownMode(ctx) {
     pending: T.arrivals.map((a) => a.role),
     departed: T.departed,
     nextId: T.nextId,
-    market: T.market.snapshot(),
     houses: T.houses,
     fieldOwners: T.fieldOwners,
     raidNight: T.raidNight,
@@ -669,8 +662,7 @@ export function createTownMode(ctx) {
     T.gossip = [];
     T.arrivals = [];
     T.departed = Array.isArray(state?.departed) ? state.departed : [];
-    T.market = createMarket(state?.market);
-    soldOut.clear();
+    T.dropRemoteStands();
     GOOD_IDS.forEach((g) => { goods[g] = Math.max(0, Math.floor(own?.goods?.[g] || 0)); });
     renderGoods();
     T.lastItems = own?.items ?? null;
@@ -812,7 +804,7 @@ export function createTownMode(ctx) {
     ctx.setIntroHighlight?.(null); // (the first day's ringed buttons)
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;
-    T.closeMarket();
+    T.closeStand();
     T.resetHomes();
     T.resetFarm();
     T.resetTrees();
@@ -921,8 +913,7 @@ export function createTownMode(ctx) {
     T.updateFarm(dt);
     T.updateTrees(dt);
     if (T.simT > T.growAt) { T.growAt = T.simT + 1; T.updateRegrowth(); }
-    // (the market panel shuts when the merchant leaves the counter or the player walks off)
-    if (marketPanel.isOpen() && (!T.marketOpen() || !T.nearStall())) T.closeMarket();
+    T.updateMarket();
     for (const g of T.gossip) if (T.simT - g.at > 240) g.fresh = false;
     if (T.isHost()) updateArrivals();
     if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateNightRaid(); T.updateIntro(); T.updateJobs(); T.updateReputation(); }
@@ -973,8 +964,8 @@ export function createTownMode(ctx) {
   Object.assign(T, {
     speakNear, speech, voiceKind,
     actsEl, advanceClock, campChip, campWatch, clock, fade, feedLine, goods, hour, hud, jailChip,
-    jobTalk, law, loadPersonal, lockpick, markers, marketPanel, net, netT, pool, renderGoods,
-    renderStars, root, save, soldOut, spawnTown, toggleLog, top, topPlace, tracker, usedNames, worldSnapshot,
+    jobTalk, law, loadPersonal, lockpick, markers, net, netT, pool, renderGoods,
+    renderStars, root, save, spawnTown, toggleLog, top, topPlace, tracker, usedNames, worldSnapshot,
   });
   installTownLayout(T, ctx);
   installTownFolk(T, ctx);
@@ -982,6 +973,7 @@ export function createTownMode(ctx) {
   installTownReactions(T, ctx);
   installTownBandits(T, ctx);
   installTownTrade(T, ctx);
+  installTownMarket(T, ctx);
   installTownFishing(T, ctx);
   installTownLife(T, ctx);
   installTownMissions(T, ctx);
@@ -1001,7 +993,7 @@ export function createTownMode(ctx) {
 
   // ── The town book's Town page (townBook.js): everyone in town, their coins and a few stats ──
   const TASK_STATUS = {
-    work: 'Working', eat: 'Eating', deliver: 'Selling goods', browse: 'Shopping', social: 'By the fire',
+    work: 'Working', eat: 'Eating', sell: 'Selling at the market', buyWood: 'Buying firewood', browse: 'Shopping', social: 'By the fire',
     sleep: 'Sleeping', wander: 'Out and about', chat: 'Chatting', talk: 'Talking', follow: 'Following you',
     jailed: 'In jail', lost: 'Lost', flee: 'Running away', hide: 'Hiding', fight: 'Fighting', brawl: 'Brawling',
     mug: 'Up to no good', raid: 'Raiding', raidHome: 'Raiding', camp: 'At camp', respond: 'On duty',
@@ -1139,6 +1131,6 @@ export function createTownMode(ctx) {
     // Standing in the canoe (townCanoe.js): the oar is the only thing in hand
     inCanoe: () => !!(T.active && T.ready && T.inCanoe()),
     // (dev console)
-    debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, market: T.market, goods, stalls: T.stalls, ctx, jobs: T.jobs, chainsDone: T.chainsDone, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
+    debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, goods, stalls: T.stalls, ctx, jobs: T.jobs, chainsDone: T.chainsDone, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
   };
 }
