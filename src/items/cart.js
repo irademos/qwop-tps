@@ -105,7 +105,8 @@ const CAM_BACK = 1.6;                        // m further back in the cart (it f
 const RIDER_TURN_RATE = 8;                   // 1/s — holding something: the rider turning to the camera's way
 const TELEPORT_DIST = 1.5;                   // m moved by someone else in a frame: get out
 // Tipping up against what it can't pass / flipping over
-const TIP_PUSH = 2;                          // rad/s² lifting at full push into something
+const TIP_PUSH = 8;                          // rad/s² lifting at full push into something, flat …
+const TIP_PUSH_TOP = 0.6;                    // … fading to none at this tip (so pushing holds it at ~0.45)
 const TIP_GRAVITY = 5;                       // rad/s² × sin(tip − TIP_BALANCE): down below it, over above it
 const TIP_BALANCE = 0.85;                    // rad (~49°) — the balance point
 const TIP_FLIP = 1.15;                       // rad (~66°) — past this it goes over
@@ -119,7 +120,8 @@ const TIP_IMPACT = 3;                        // rad/s of tip from hitting at ful
 const TIP_SPIN_RATE = 1.6;                   // rad/s turning away (or the lean's way) tipped up
 const TIP_SPIN_FROM = 0.12;                  // rad of tip before it turns
 // Rearing up against a wall (head on)
-const REAR_PUSH = 4;                         // rad/s² at full push
+const REAR_PUSH = 14;                        // rad/s² at full push, flat …
+const REAR_PUSH_TOP = 0.75;                  // … fading to none at this (pushing holds it at ~0.5)
 const REAR_IMPACT = 3.5;                     // rad/s from hitting at full speed
 const REAR_GRAVITY = 8;                      // rad/s² × sin(rear − REAR_BALANCE)
 const REAR_BALANCE = 1.1;                    // rad (~63°)
@@ -496,36 +498,42 @@ export function createCartRide(ctx) {
   const tilt = (tip = st.tip, rear = st.rear) => (tip > 1e-3 || rear > 1e-3
     ? { tip, side: st.tipSide, rear, rearDir: st.rearDir } : null);
   // Turning by `da` rad about a point of the cart (cart-local lz) if it fits there
-  const turnAbout = (da, lz, roll) => {
+  // (`foot`: the footprint it needs — the raised wheels are up in the air / on the wall, so
+  // they don't count turning)
+  const turnAbout = (da, lz, roll, foot = tilt()) => {
     const P = worldXZ(st.x, st.z, st.yaw, 0, lz);
     const yaw = wrap(st.yaw + da);
     const o = worldXZ(P.x, P.z, yaw, 0, -lz);
-    if (!fits(o.x, o.z, yaw, roll, tilt())) return false;
+    if (!fits(o.x, o.z, yaw, roll, foot)) return false;
     Object.assign(st, { x: o.x, z: o.z, yaw });
     return true;
   };
   // … about its trailing axle (the way it was rolling `dir`), else its middle, else a half step
-  const turnAway = (da, dir, roll) => turnAbout(da, -(dir || 1) * HB, roll)
-    || turnAbout(da, 0, roll) || turnAbout(da / 2, -(dir || 1) * HB, roll);
+  const turnAway = (da, dir, roll, foot) => turnAbout(da, -(dir || 1) * HB, roll, foot)
+    || turnAbout(da, 0, roll, foot) || turnAbout(da / 2, -(dir || 1) * HB, roll, foot);
+  // Coming down where it doesn't fit: moved off what it's on, a little at a time (cart-local
+  // direction lx, lz) — false if it can't
+  const slideOff = (lx, lz, foot, roll) => {
+    for (let i = 1; i <= 6; i++) {
+      const p = worldXZ(st.x, st.z, st.yaw, lx * REAR_SLIDE_STEP * i, lz * REAR_SLIDE_STEP * i);
+      if (fits(p.x, p.z, st.yaw, roll, foot)) { st.x = p.x; st.z = p.z; return true; }
+    }
+    return false;
+  };
   // Reared up (head on): pushed up, pulled down / over, spinning on its trailing wheels the way
   // it leans; coming down it rolls back off the wall if it must. → 'flip' when it goes over.
   const updateRear = (dt, lift, ix, roll) => {
-    const acc = REAR_GRAVITY * Math.sin(st.rear - REAR_BALANCE) + REAR_PUSH * lift;
+    const acc = REAR_GRAVITY * Math.sin(st.rear - REAR_BALANCE) + REAR_PUSH * lift * Math.max(0, 1 - st.rear / REAR_PUSH_TOP);
     st.rearV = (st.rearV + acc * dt) * Math.exp(-REAR_DAMP * dt);
     let next = Math.max(0, st.rear + st.rearV * dt);
     if (st.rear > REAR_SPIN_FROM) {
       if (Math.abs(ix) > 0.15) st.spinDir = Math.sign(ix);
       const k = Math.min(1, (st.rear - REAR_SPIN_FROM) / 0.3) * Math.max(0.5, Math.abs(ix));
-      turnAway(st.spinDir * REAR_SPIN_RATE * k * dt, st.rearDir, roll);
+      turnAway(st.spinDir * REAR_SPIN_RATE * k * dt, st.rearDir, roll, tilt(st.tip, Math.PI / 2));
     }
     if (next < st.rear && !fits(st.x, st.z, st.yaw, roll, tilt(st.tip, next))) {
-      // (coming down onto the wall: rolled back off it, a little at a time)
-      let ok = false;
-      for (let i = 1; i <= 6 && !ok; i++) {
-        const p = worldXZ(st.x, st.z, st.yaw, 0, -st.rearDir * REAR_SLIDE_STEP * i);
-        if (fits(p.x, p.z, st.yaw, roll, tilt(st.tip, next))) { st.x = p.x; st.z = p.z; ok = true; }
-      }
-      if (!ok) { next = st.rear; st.rearV = Math.max(0, st.rearV); }
+      // (coming down onto the wall: rolled back off it)
+      if (!slideOff(0, -st.rearDir, tilt(st.tip, next), roll)) { next = st.rear; st.rearV = Math.max(0, st.rearV); }
     }
     if (next <= 0) {
       if (st.rearV < -TIP_CLUNK_SPEED && st.t - st.bumpAt > 0.3) { st.bumpAt = st.t; ctx.onBump?.(); }
@@ -549,16 +557,19 @@ export function createCartRide(ctx) {
     if (st.tip > TIP_SPIN_FROM && roll) {
       const way = Math.abs(ix) > 0.15 ? Math.sign(ix) : -st.tipSide;
       const k = Math.min(1, (st.tip - TIP_SPIN_FROM) / 0.3) * (Math.abs(ix) > 0.15 ? Math.abs(ix) : 0.6);
-      turnAway(way * TIP_SPIN_RATE * k * dt, st.pushDir, roll);
+      turnAway(way * TIP_SPIN_RATE * k * dt, st.pushDir, roll, tilt(Math.max(st.tip, TIP_BALANCE), st.rear));
     }
-    let acc = TIP_GRAVITY * Math.sin(st.tip - TIP_BALANCE) + TIP_PUSH * lift;
+    let acc = TIP_GRAVITY * Math.sin(st.tip - TIP_BALANCE) + TIP_PUSH * lift * Math.max(0, 1 - st.tip / TIP_PUSH_TOP);
     if (st.tip > 0.02) acc += (Math.random() - 0.5) * 2 * TIP_WOBBLE * Math.min(1, Math.abs(st.v) / MAX_SPEED);
     st.tipV = (st.tipV + acc * dt) * Math.exp(-TIP_DAMP * dt);
     let next = st.tip + st.tipV * dt;
     if (next < st.tip) {
-      // (coming down only as far as it still fits — walls either side hold it up)
+      // (coming down where it doesn't fit: off the wall on the raised side, sideways — walls on
+      // both sides hold it up)
       const y = groundAt(st.x, st.z);
-      if (!fits(st.x, st.z, st.yaw, { dir: 0, y: Number.isFinite(y) ? y : st.y, air: false }, tilt(Math.max(0, next)))) {
+      const r = { dir: 0, y: Number.isFinite(y) ? y : st.y, air: false };
+      const foot = tilt(Math.max(0, next));
+      if (!fits(st.x, st.z, st.yaw, r, foot) && !slideOff(-st.tipSide, 0, foot, r)) {
         next = st.tip;
         st.tipV = Math.max(0, st.tipV);
       }
