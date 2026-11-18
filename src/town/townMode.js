@@ -1047,7 +1047,13 @@ export function createTownMode(ctx) {
       max: BAG_MAX,
       goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || goods[g] > 0).map((g) => ({
         id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, n: goods[g] || 0, food: !!GOODS[g].food, heal: GOODS[g].heal ?? 0,
+        good: true, cooked: !!GOODS[g].cooked, price: GOODS[g].price,
       })),
+      // (not goods — they don't count toward BAG_MAX — but carried all the same; shown once there are some)
+      extras: [
+        { id: 'seeds', emoji: '🌱', label: 'Veg Seeds', n: T.seeds || 0, plant: true },
+        { id: 'lockpick', emoji: '🔧', label: 'Lock-pick', n: T.lockpicks || 0 },
+      ].filter((e) => e.n > 0),
     };
     return {
       town: TOWN_NAME, day: clock.day, time: clockText(), shared: T.netMode === 'host' || T.netMode === 'client', people,
