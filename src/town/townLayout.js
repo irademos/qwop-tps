@@ -12,7 +12,7 @@ import { createVeg } from '../items/vegModels.js';
 
 const VEG_CROP_LENGTH = 0.24; // m, the longest side of a field crop's vegetable
 import {
-  BUILDING_RE, CABIN_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CABIN_RE, CAMP_DIST, DRIVE_BOUNDS, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, WIZARD_CABIN_STALL, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
@@ -364,11 +364,11 @@ export function installTownLayout(T, ctx) {
     }
     // The drive grid (townDrive.js): cart routes over any ground the cart takes — up the mountain
     const driveArgs = {
-      bounds: NAV_BOUNDS, getGroundY: ctx.getGroundY, waterDepth: ctx.waterDepth,
-      trees: woods.filter((t) => !STUMP_RE.test(t.file)),
+      bounds: DRIVE_BOUNDS, getGroundY: ctx.getGroundY, waterDepth: ctx.waterDepth, pathAt: ctx.pathAt,
+      trees: ctx.getMapObjects(DRIVE_BOUNDS).filter((t) => TREE_RE.test(t.file)).filter((t) => !STUMP_RE.test(t.file)),
       // (the houses — their walls and porch posts: most of the bounds' circle — and the smaller
       // things placed round the map: lamp posts…; not the bridges / docks — driven over)
-      props: ctx.getMapObjects(NAV_BOUNDS).filter((o) => !TREE_RE.test(o.file) && !/bridge|dock/i.test(o.file))
+      props: ctx.getMapObjects(DRIVE_BOUNDS).filter((o) => !TREE_RE.test(o.file) && !/bridge|dock/i.test(o.file))
         .map((o) => ({ x: o.x, z: o.z, r: BUILDING_RE.test(o.file) ? o.radius * 0.9 : Math.min(o.radius, 1.2) })),
     };
     const drive = createDriveGrid(driveArgs);

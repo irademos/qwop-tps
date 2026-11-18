@@ -865,7 +865,7 @@ export function installTownIntro(T, ctx) {
     const s = step();
     const on = s?.at === 'wizard' && T.intro.phase === 'do';
     const w = T.layout.places.wizard;
-    T.driveTo(on ? { x: w.customer.x, z: w.customer.z, r: 3 } : null);
+    T.driveTo(on ? { x: w.customer.x, z: w.customer.z, r: 3} : null);
     if (!on) return;
     const c = T.cartRide?.()?.pose();
     // (driven there: in it, or just out of it beside it)

@@ -2,13 +2,17 @@
 // ahead of the player. The town's nav grid (townNav.js) keeps walkers to gentle steps, so it
 // doesn't reach the mountain a cart rolls up fine (the wizard's cabin up there is a walked-about
 // patch of its own — townLayout.js); this grid takes any slope the cart takes, costs steeper
-// ground more (so the route winds up the gentle side) and keeps off water and tree trunks.
+// ground more (so the route winds up the gentle side) and keeps off water and tree trunks. The
+// map's painted roads / trails (pathAt) are the way to go: ground off them costs OFF_PATH_COST×,
+// so the route keeps to the dirt path up the mountain wherever there is one.
 //
-// createDriveGrid({ bounds, getGroundY, waterDepth, trees, props }) (built once with the layout —
+// createDriveGrid({ bounds, getGroundY, waterDepth, trees, props, pathAt }) (built once with the layout —
 // T.layout.drive): route(from, goal: { x, z, r }) → [{ x, z }, …] from `from` to within r of
 // the goal, or null.
 // installTownDrive(T, ctx): T.driveTo(target | null) — arrows along the route to target
-// ({ x, z, r }) from wherever the player (or the cart they're in) is, re-planned as they go;
+// ({ x, z, r, via? }) from wherever the player (or the cart they're in) is, re-planned as they go;
+// `via` = waypoints ([{ x, z, r? }]) the route goes through first, in order — each dropped once
+// the player is within its r (VIA_R) of it, or well past it (under half its distance from the goal);
 // T.updateDrive(dt) each frame; T.driveRoute() the route now (the town book could draw it).
 
 import * as THREE from 'three';
@@ -23,14 +27,17 @@ const GRADE_COST = 20;      // …and × the square of the ground's slope there 
 const WATER_DEPTH = 0.25;   // m — deeper than this is out
 const TREE_R = 1.3;         // m round a trunk kept clear
 const PROP_PAD = 0.7;       // m past a placed thing's bounds kept clear (houses: their walls; lamp posts…)
+const OFF_PATH_COST = 4;    // × a metre's cost off the painted roads / trails
+const PATH_SPREAD = 1;      // cells either side of a painted path that count as on it (it's drawn thin, with gaps)
 
 const ARROWS = 16;          // arrows shown ahead
 const ARROW_GAP = 3;        // m between them
 const ARROW_LIFT = 0.18;    // m over the ground
 const REPLAN_S = 1.5;       // s between route updates
 const OFF_ROUTE = 5;        // m off the route: re-planned at once
+const VIA_R = 6;            // m — a waypoint this close is reached
 
-export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], props = [], maxSlope = MAX_SLOPE, maxGrade = MAX_GRADE, gradeCost = GRADE_COST }) {
+export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], props = [], pathAt = null, maxSlope = MAX_SLOPE, maxGrade = MAX_GRADE, gradeCost = GRADE_COST }) {
   const half = CELL / 2;
   const fc = Math.ceil((bounds.maxX - bounds.minX) / half) + 1;   // fine samples
   const fr = Math.ceil((bounds.maxZ - bounds.minZ) / half) + 1;
@@ -78,6 +85,30 @@ export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], pr
       }
     }
   };
+  // (on a painted road / trail: any of the cell's fine samples on one, spread PATH_SPREAD cells)
+  const onPath = new Uint8Array(n);
+  if (pathAt) {
+    const painted = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const x0 = bounds.minX + (i % cols) * CELL;
+      const z0 = bounds.minZ + Math.floor(i / cols) * CELL;
+      for (let k = 0; k < 9 && !painted[i]; k++) {
+        if (pathAt(x0 + ((k % 3) - 1) * half, z0 + (Math.floor(k / 3) - 1) * half)) painted[i] = 1;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      if (!painted[i]) continue;
+      const c = i % cols;
+      const r = Math.floor(i / cols);
+      for (let dr = -PATH_SPREAD; dr <= PATH_SPREAD; dr++) {
+        for (let dc = -PATH_SPREAD; dc <= PATH_SPREAD; dc++) {
+          const nc = c + dc;
+          const nr = r + dr;
+          if (nc >= 0 && nr >= 0 && nc < cols && nr < rows) onPath[nr * cols + nc] = 1;
+        }
+      }
+    }
+  }
   for (const t of trees) clear(t.x, t.z, TREE_R);
   for (const o of props) clear(o.x, o.z, o.r + PROP_PAD);
   const cx = (i) => bounds.minX + (i % cols) * CELL;
@@ -100,7 +131,8 @@ export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], pr
     const s = Math.max(Math.abs(hm - h0), Math.abs(h1 - hm)) / run;
     if (s > maxSlope) return Infinity;
     const j = a + dr * cols + dc;
-    return run * 2 * (1 + SLOPE_COST * s + gradeCost * Math.max(grade[a], grade[j]) ** 2);
+    const off = pathAt && !(onPath[a] && onPath[j]) ? OFF_PATH_COST : 1;
+    return run * 2 * off * (1 + SLOPE_COST * s + gradeCost * Math.max(grade[a], grade[j]) ** 2);
   };
   // (the nearest open cell to a spot — the start may be in a tree's ring, on a steep bit)
   const nearestOpen = (x, z, maxR = 8) => {
@@ -204,7 +236,7 @@ export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], pr
     out[0] = { x: from.x, z: from.z };
     return out;
   };
-  return { route };
+  return { route, onPath: (x, z) => { const i = indexAt(x, z); return i >= 0 && !!onPath[i]; } };
 }
 
 // The arrows: a flat chevron, pointing +Z
@@ -230,6 +262,7 @@ export function installTownDrive(T, ctx) {
   let path = null;          // the route now
   let lens = null;          // distance along it at each point
   let planAt = 0;
+  let viaAt = 0;            // the next waypoint of target.via
   let group = null;
   const arrows = [];
   const ensureArrows = () => {
@@ -257,9 +290,20 @@ export function installTownDrive(T, ctx) {
   const plan = () => {
     planAt = T.simT + REPLAN_S;
     const drive = T.layout?.drive;
-    path = drive && target ? drive.route(from(), target) : null;
-    // (no route — the player somewhere it can't start from: straight there)
-    if (!path && target) { const p = from(); path = [{ x: p.x, z: p.z }, { x: target.x, z: target.z }]; }
+    path = null;
+    if (target) {
+      // (through the waypoints still ahead, then to the goal; a leg with no route goes straight)
+      const legs = [...target.via.slice(viaAt), target];
+      const p = from();
+      let start = { x: p.x, z: p.z };
+      path = [start];
+      for (const g of legs) {
+        const leg = drive?.route(start, { x: g.x, z: g.z, r: g.r ?? VIA_R }) ?? [start, { x: g.x, z: g.z }];
+        path.push(...leg.slice(1));
+        start = path[path.length - 1];
+      }
+      if (path.length < 2) path.push({ x: target.x, z: target.z });
+    }
     lens = path ? [0] : null;
     if (path) for (let i = 1; i < path.length; i++) lens.push(lens[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z));
   };
@@ -290,7 +334,8 @@ export function installTownDrive(T, ctx) {
   const driveTo = (t) => {
     if (!t) { target = null; path = null; hide(); return; }
     if (target && t.x === target.x && t.z === target.z) return;
-    target = { x: t.x, z: t.z, r: t.r ?? 4 };
+    target = { x: t.x, z: t.z, r: t.r ?? 4, via: t.via ?? [] };
+    viaAt = 0;
     planAt = 0;
   };
   const updateDrive = () => {
@@ -298,6 +343,16 @@ export function installTownDrive(T, ctx) {
     ensureArrows();
     if (group.parent !== T.root) T.root.add(group);
     const p = from();
+    // (a waypoint reached, or well past — the player less than half as far from the goal as it
+    // is: on to the next)
+    const v = target.via[viaAt];
+    if (v) {
+      if (Math.hypot(p.x - v.x, p.z - v.z) < (v.r ?? VIA_R)
+        || Math.hypot(p.x - target.x, p.z - target.z) < 0.5 * Math.hypot(v.x - target.x, v.z - target.z)) {
+        viaAt++;
+        planAt = 0;
+      }
+    }
     if (T.simT > planAt || !path) plan();
     let pr = project(p);
     if (pr.off > OFF_ROUTE) { plan(); pr = project(p); }
