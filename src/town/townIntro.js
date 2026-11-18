@@ -14,9 +14,18 @@
 // (n.guiding + the 'guide' task — updateGuide; not by night, not while they're busy with
 // something that matters: a fight, fleeing, the law's work.)
 //
+// After the first day the townsfolk's work goes on the same way, one job after another, in
+// order (the steps marked `job` — the next comes only once the one before is done, its giver
+// coming to find the player — 'Later' and they come back in a while, the ❗ over them meanwhile):
+// day two, the farmer loads the cart with veg for the wizard up the mountain — drive it up to
+// his cabin (glowing arrows show the way — townDrive.js) and he pays for it. Skipping the first
+// day hands over a fishing rod and a sword, and the jobs start from there.
+//
 // State (saved with the town; in a shared town with the player's own things):
-//   T.intro = { step, id, phase: 'talk' | 'do', count, guideId, treeId? } while it runs, null once it's done
-//   (id: the step's — saves from before it had one kept the old steps' index: OLD_STEP_IDS)
+//   T.intro = { step, id, phase: 'talk' | 'do', count, guideId, treeId? } while a step runs;
+//   saved as { after: <the last step's id> } once they're all done (T.introAfter) — a step added
+//   later comes next. A save's null is from before the jobs: its first day was done, so the
+//   jobs start. (id: the step's — saves from before it had one kept the old steps' index: OLD_STEP_IDS)
 // A save from before the intro starts it too — the welcome offers to skip it.
 
 import { firstName } from './townPeople.js';
@@ -33,6 +42,11 @@ const SWORD_PRICE = SHOP_GEAR.find((g) => g.id === 'sword')?.price ?? 30;
 // gives: an item the guide hands over on accepting (ctx.grantItem — unless the player has one);
 // lead: false — the guide stays put for the goal; tips: what they say on the way / when asked;
 // next: what the guide says is next when the same guide carries on (a talk box — debrief)
+// The jobs after the first day: job: true; waitS: s before its giver comes (after the step
+// before); cart: accepting brings the cart beside the player, laden with veg (townCart.js) —
+// a goal 'deliver' at 'wizard' is done driving it up to the wizard's stall; unload: the cart's
+// load is handed over with this step; anyTime: the giver comes by night too (woken up); noLater:
+// no 'Later' (the accept is the only answer)
 const STEPS = [
   {
     id: 'welcome', guide: 'merchant', title: 'Say hello at the shop', talkOnly: true, coins: 3, skippable: true,
@@ -111,7 +125,31 @@ const STEPS = [
       'Once it\'s down, swing at a log to split it. Each one\'s a piece of wood.',
     ],
   },
+  // ── The jobs, in order ──
+  {
+    id: 'veg', job: true, guide: 'farmer', title: 'Veg for the wizard', goal: 'deliver', n: 1, coins: 0, at: 'wizard',
+    lead: false, cart: true, waitS: 40,
+    talk: 'Ah, {name} — just the one I wanted. The wizard who lives up the mountain has sent down for veg, and my knees won\'t take me up that slope any more. I\'ve loaded the cart for him — it\'s right here beside you. Get in, and follow the arrows up the mountain to his cabin. He pays well, the old sorcerer.',
+    accept: 'I\'ll take it up',
+    progress: 'Drive the cart up the mountain to the wizard\'s cabin',
+    tips: [
+      'Get in the cart and tip the phone forward to roll — lean it left or right to steer.',
+      'Follow the glowing arrows. The road up the mountain winds round the gentle side.',
+      'Steep bits tip the cart over — go round them, or take them slowly.',
+    ],
+  },
+  {
+    id: 'wizardPay', job: true, guide: 'wizard', title: 'Veg for the wizard', talkOnly: true, coins: 30, unload: true,
+    anyTime: true, noLater: true, talkFrom: 6,
+    talk: 'Well, well — a cartful of veg, all the way up my mountain! You\'ll be {name}; the farmer said someone would come. Here — thirty coins for your trouble, and my thanks. A wizard can\'t live on moonlight.',
+    accept: 'Thank you',
+    done: 'Mind the slope going down — the cart goes faster than you\'d think.',
+  },
 ];
+// (the first job: the step after the first day)
+const FIRST_JOB = STEPS.findIndex((x) => x.job);
+// The cart's arrived when it's this close to the wizard's stall
+const DELIVER_DIST = 9;
 // (old saves kept the step's index: the steps as they were then)
 const OLD_STEP_IDS = ['welcome', 'fish', 'cook', 'harvest', 'sell', 'camp', 'chop'];
 const stepIndex = (id) => STEPS.findIndex((x) => x.id === id);
@@ -134,6 +172,8 @@ const TIP_EVERY_S = [22, 34];
 // What a guide's busy with that they'd drop to show the player round (anything else — a
 // fight, fleeing, the law's work, sleep — comes first)
 const GUIDE_OVER = new Set(['work', 'sell', 'buyWood', 'eat', 'browse', 'social', 'wander', 'chat', 'guide']);
+// (a step's name in the tracker / talk box)
+const tagOf = (s) => `${s.job ? 'Job' : 'First day'}: ${s.title}`;
 const CALLS = ['This way, {name}!', 'Over here!', 'Keep up, {name}!', 'Come on — it\'s just along here.'];
 const COMING = ['{name}! Hold on a moment!', 'Ah, {name} — there you are!', 'Hey, {name}! A word?'];
 
@@ -187,8 +227,17 @@ export function installTownIntro(T, ctx) {
     if (i >= STEPS.length) { finish(); return; }
     const s = STEPS[i];
     T.intro = { step: i, id: s.id, phase: s.noTalk || !s.guide ? 'do' : 'talk', count: 0, guideId: T.intro?.guideId ?? null };
+    T.introAfter = null;
+    // (a job's giver comes along a while after the one before)
+    if (s.waitS) snoozeUntil = T.simT + s.waitS;
     guideOf();
     noGuide();
+  };
+  // On to doing a step's goal (the cart brought round, laden, for the veg)
+  const startDo = (s) => {
+    T.intro.phase = 'do';
+    T.intro.count = 0;
+    if (s.cart && !T.bringCart?.()) T.feedLine('The cart\'s by the market, loaded up — get in it there.');
   };
   // Nobody of the guide's role left in town (dead, not replaced yet): the goal goes on without
   // them, a talk is skipped
@@ -198,12 +247,23 @@ export function installTownIntro(T, ctx) {
     // (a sword bought already: no need to sell them one)
     if (s?.buySword && T.intro.phase === 'talk' && ctx.getItems()?.sword) { begin(T.intro.step + 1); return; }
     if (!s?.guide || T.intro.phase !== 'talk' || !roleGone(s.guide)) return;
-    if (s.talkOnly) begin(T.intro.step + 1);
-    else T.intro.phase = 'do';
+    // (a job's pay with nobody to hand it over — the wizard gone: paid all the same)
+    if (s.talkOnly && s.job && s.coins) complete();
+    else if (s.talkOnly) begin(T.intro.step + 1);
+    else startDo(s);
   };
   const start = (state) => {
     T.intro = null;
-    if (state === null) return; // (done)
+    T.introAfter = null;
+    // (a save from before the jobs: its first day done — the jobs start)
+    if (state === null) { begin(FIRST_JOB); return; }
+    // (all done: anything added after the last one done comes next)
+    if (state?.after) {
+      const k = stepIndex(state.after);
+      if (k >= 0 && k + 1 < STEPS.length) begin(k + 1);
+      else T.introAfter = state.after;
+      return;
+    }
     const i = state ? stepIndex(state.id ?? OLD_STEP_IDS[state.step]) : -1;
     if (i >= 0) {
       // (an old save's step that's a different one now starts afresh)
@@ -217,13 +277,13 @@ export function installTownIntro(T, ctx) {
     }
     begin(0);
   };
-  const snapshot = () => (T.intro ? { ...T.intro } : null);
+  const snapshot = () => (T.intro ? { ...T.intro } : { after: T.introAfter ?? STEPS[STEPS.length - 1].id });
 
   const pay = (s, guide) => {
     if (s.coins > 0) ctx.addCoins(s.coins);
     if (guide) {
       guide.attitude = Math.min(1, guide.attitude + 0.15);
-      T.remember(guide, 'intro', { what: s.id === 'fish' || s.id === 'cook' ? 'Our fishing' : s.id === 'harvest' ? 'The harvest' : 'Your first day' });
+      T.remember(guide, 'intro', { what: s.id === 'fish' || s.id === 'cook' ? 'Our fishing' : s.id === 'harvest' ? 'The harvest' : s.job ? 'The veg you brought up' : 'Your first day' });
     }
   };
   // A step's goal (or talk) is done: paid, the guide says so, on to the next
@@ -242,21 +302,30 @@ export function installTownIntro(T, ctx) {
     T.feedLine(`${s.title} — done${s.coins ? ` · +${s.coins} coins` : ''}`);
     // (the next step's guide picked fresh, unless it's the same one carrying on)
     if (STEPS[next]?.guide !== s.guide) T.intro.guideId = null;
+    // (the first day's last goal: settled in — the jobs come after)
+    if (!s.job && STEPS[next]?.job) {
+      ctx.showBanner('SETTLED IN!', 'You know your way around Brindlewick now', 2800);
+      T.feedLine('That\'s your first day done. The town\'s yours to make a living in — or trouble. Someone will have work for you soon.');
+    }
+    if (s.unload) T.feedLine('The veg is unloaded.');
     begin(next);
     if (carriesOn && T.intro) T.intro.debrief = `${line ? `${line} ` : ''}${fill(s.next, s, g)}`;
     T.save();
   };
+  // All the jobs done (for now: a step added later picks up from here — snapshot's `after`)
   const finish = () => {
     unguideAll();
+    T.introAfter = T.intro?.id ?? STEPS[STEPS.length - 1].id;
     T.intro = null;
-    ctx.showBanner('SETTLED IN!', 'You know your way around Brindlewick now', 2800);
-    T.feedLine('That\'s your first day done. The town\'s yours to make a living in — or trouble. Folk with a ❗ have work for you.');
     T.save();
   };
+  // Skipping the first day: a fishing rod and a sword to get going with, then the jobs
   const skip = () => {
     unguideAll();
+    const given = ['rod', 'sword'].filter((id) => !ctx.getItems()?.[id] && ctx.grantItem(id));
+    T.feedLine(`Skipped the first day.${given.length ? ` Here — ${given.map((id) => (id === 'rod' ? 'a fishing rod' : 'a sword')).join(' and ')} to get you going.` : ''}`);
     T.intro = null;
-    T.feedLine('Skipped the first day. Folk with a ❗ have work for you.');
+    begin(FIRST_JOB);
     T.save();
   };
 
@@ -298,7 +367,7 @@ export function installTownIntro(T, ctx) {
       const text = T.intro.debrief;
       T.intro.debrief = null;
       T.jobTalk.open({
-        who: firstName(n.name), sub: `First day: ${s.title}`, text,
+        who: firstName(n.name), sub: tagOf(s), text,
         reward: s.coins ? `Next: ${fill(s.progress ?? s.title, s, n)} · 🪙 ${s.coins}` : null,
         choices: [
           { label: 'Lead the way', primary: true, onClick: () => { if (T.intro) T.intro.autoWalk = true; } },
@@ -315,7 +384,7 @@ export function installTownIntro(T, ctx) {
         const choices = [{ label: n.guiding ? 'Lead on' : 'Thanks', primary: true }];
         if (tips.length > 1) choices.push({ label: 'Another tip', act: true, onClick: () => { if (n.alive) show(k + 1); } });
         T.jobTalk.open({
-          who: firstName(n.name), sub: `First day: ${s.title}`,
+          who: firstName(n.name), sub: tagOf(s),
           text: tips.length ? tipLine(k) : fill(s.progress ?? s.title, s, n),
           reward: fill(s.progress ?? s.title, s, n), choices,
         });
@@ -334,13 +403,13 @@ export function installTownIntro(T, ctx) {
         if (s.buySword) { buySword(n); complete(); return; }
         if (s.gives && !ctx.getItems()?.[s.gives] && ctx.grantItem(s.gives)) T.feedLine(`${firstName(n.name)} gave you a ${s.gives === 'rod' ? 'fishing rod' : s.gives}.`);
         if (s.talkOnly) complete();
-        else { T.intro.phase = 'do'; T.intro.count = 0; T.intro.autoWalk = true; T.save(); }
+        else { startDo(s); T.intro.autoWalk = s.lead !== false; T.save(); }
       },
     }];
     if (s.skippable) choices.push({ label: 'I know my way around', primary: false, onClick: skip });
-    else choices.push({ label: 'Later', primary: false, onClick: () => { snoozeUntil = T.simT + GUIDE_SNOOZE_S; } });
+    else if (!s.noLater) choices.push({ label: 'Later', primary: false, onClick: () => { snoozeUntil = T.simT + GUIDE_SNOOZE_S; } });
     T.jobTalk.open({
-      who: firstName(n.name), sub: `First day: ${s.title}`, text: fill(s.talk, s, n),
+      who: firstName(n.name), sub: tagOf(s), text: fill(s.talk, s, n),
       reward: s.coins ? `Reward: 🪙 ${s.coins}` : null, choices,
     });
     return true;
@@ -416,6 +485,12 @@ export function installTownIntro(T, ctx) {
       return { icon: '❗', x: g.x, z: g.z, h: 1.7 * heightScale(g.url) + 0.5 };
     }
     if (s.at === 'guideWork' && g?.work) return { icon: '📍', x: g.work.x, z: g.work.z, h: 1.5 };
+    if (s.at === 'wizard') {
+      // (out of the cart and away from it: back to it first)
+      const c = !T.inCart() ? T.cartRide?.()?.pose() : null;
+      if (c && T.distToPlayer(c) > 6) return { icon: '📍', x: c.x, z: c.z, h: 1.6 };
+      return { icon: '📍', ...P.wizard.customer, h: 2.6 };
+    }
     if (s.at === 'fire') return { icon: '📍', ...P.fire, h: 1.9 };
     if (s.at === 'dock' && dock()) return { icon: '📍', ...dock().end, h: 1.5 };
     if ((s.at === 'fishSpot' || s.at === 'dock') && P.fishSpot) return { icon: '📍', x: P.fishSpot.x, z: P.fishSpot.z, h: 1.5 };
@@ -447,7 +522,11 @@ export function installTownIntro(T, ctx) {
       if ((s.n ?? 1) > 1) progress += ` (${T.intro.count} / ${s.n})`;
       if (g?.guiding && T.distToPlayer(g) > LEAD_WAIT) progress += ` — follow ${firstName(g.name)}`;
     }
-    return { title: `First day: ${s.title}`, progress, icon: T.intro.phase === 'talk' ? '❗' : '📍' };
+    if (s.at === 'wizard' && T.intro.phase === 'do' && !T.inCart()) {
+      const c = T.cartRide?.()?.pose();
+      progress = c && T.distToPlayer(c) > 6 ? 'Back to the cart, and on up the mountain' : 'Get in the cart';
+    }
+    return { title: tagOf(s), progress, icon: T.intro.phase === 'talk' ? '❗' : '📍' };
   };
   // ── The guide coming to the player and walking them to the goal ──
   let snoozeUntil = -1e9;
@@ -464,12 +543,13 @@ export function installTownIntro(T, ctx) {
   // Should this guide be out showing the player round right now?
   const wantsGuide = (g) => {
     const s = step();
-    if (!s || !g || T.intro.guideId !== g.id || ctx.isPlayerDead() || T.jail || T.law.stars > 0 || isNight()) return false;
+    if (!s || !g || T.intro.guideId !== g.id || ctx.isPlayerDead() || T.jail || T.law.stars > 0 || (isNight() && !s.anyTime)) return false;
     if (T.intro.phase === 'talk') return T.simT > snoozeUntil;
     return !!T.intro.debrief || (s.lead !== false && !!s.at && !!leadSpot(s, g));
   };
-  const canGuide = (g) => available(g) && !g.inside && !g.following && !g.lost && !g.netFight && !(g.fear > 0)
-    && (!g.task || GUIDE_OVER.has(g.task.type)) && T.talking?.npc !== g;
+  // (anyTime: asleep is no matter — they're woken)
+  const canGuide = (g, s) => available(g) && (!g.inside || (s?.anyTime && g.task?.type === 'sleep')) && !g.following && !g.lost
+    && !g.netFight && !(g.fear > 0) && (!g.task || GUIDE_OVER.has(g.task.type) || (s?.anyTime && g.task.type === 'sleep')) && T.talking?.npc !== g;
   // Where the goal is — a spot beside it to stand (picked once a step)
   const leadSpot = (s, g) => {
     const i = T.intro.step;
@@ -495,7 +575,8 @@ export function installTownIntro(T, ctx) {
     for (const n of T.npcs) if (n.guiding && n !== g) unguide(n);
     if (!g) return;
     if (!wantsGuide(g)) { unguide(g); return; }
-    if (g.guiding || !canGuide(g) || !T.take(g)) return;
+    if (g.guiding || !canGuide(g, s) || !T.take(g)) return;
+    g.inside = false;
     g.guiding = true;
     T.setTask(g, { type: 'guide', dur: Infinity });
     // (back after a while: they ask again)
@@ -729,6 +810,7 @@ export function installTownIntro(T, ctx) {
       }
       case 'cook': return { act: 'cook:' };
       case 'harvest': return { act: 'pick' };
+      case 'veg': return T.inCart() ? null : { act: 'cartin' };
       case 'sell': return T.stand ? null : { act: T.stalls.focused() ? 'back' : 'stand' };
       case 'chop': {
         if (held !== 'foamSword') return { gear: 'foamSword', phone: 'sword' };
@@ -771,14 +853,32 @@ export function installTownIntro(T, ctx) {
   // Upkeep: a guide who's gone (dead, jailed) is replaced; a talk with nobody to give it, skipped
   const updateIntro = () => {
     guideBuys();
+    updateDelivery();
     if (!step()) { if (T.npcs.some((n) => n.guiding)) unguideAll(); return; }
     guideOf();
     noGuide();
     if (step()) assignGuide();
   };
+  // ── The veg up the mountain: the arrows to the wizard's stall while it's on, done once the
+  // cart's there ──
+  const updateDelivery = () => {
+    const s = step();
+    const on = s?.at === 'wizard' && T.intro.phase === 'do';
+    const w = T.layout.places.wizard;
+    T.driveTo(on ? { x: w.customer.x, z: w.customer.z, r: 3 } : null);
+    if (!on) return;
+    const c = T.cartRide?.()?.pose();
+    // (driven there: in it, or just out of it beside it)
+    if (c && dist2(c.x, c.z, w.x, w.z) < DELIVER_DIST && (T.inCart() || T.distToPlayer(c) < 5)) introNote('deliver');
+  };
+  // The cart's laden with veg (townCart.js): from taking the job till the wizard has it
+  const cartLaden = () => {
+    const s = step();
+    return !!s && ((s.cart && T.intro.phase === 'do') || !!s.unload);
+  };
 
   Object.assign(T, {
-    introAllowsPick, introEntry, introNote, introSnapshot: snapshot, introTalk, introTarget, isIntroGuide: isGuide,
+    cartLaden, introAllowsPick, introEntry, introNote, introSnapshot: snapshot, introTalk, introTarget, isIntroGuide: isGuide,
     introActs, introHighlight, introWalkTarget: walkTarget, startIntro: start, updateGuide, updateIntro, updateIntroWalk,
   });
 }

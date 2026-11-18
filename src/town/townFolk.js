@@ -224,6 +224,14 @@ export function installTownFolk(T, ctx) {
     // (a claim's over: back to the host's town)
     if (T.netMode === 'client') { release(n); return; }
     if (def.outlaw) { T.decideBandit(n); return; }
+    // The wizard keeps to his place up the mountain (no walk joins it to the town): his stall
+    // in his hours, bed at night, else a stroll round it
+    if (def.hermit) {
+      if (def.hours && inHours(h, def.hours)) startTask(n, 'work');
+      else if (night || n.needs.energy < 0.18) startTask(n, 'sleep');
+      else setTask(n, { type: 'wander', to: randomNear(n.home.x, n.home.z, 7), dur: rand(4, 10) });
+      return;
+    }
     // A drifter out at night may go after someone's purse
     if (n.role === 'drifter' && (h >= 21 || h < 4) && Math.random() < MUG_CHANCE && T.startMugging(n)) return;
     const options = [];

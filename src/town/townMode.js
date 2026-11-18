@@ -39,11 +39,11 @@
 // countdown, then (armed) a fight that only chases the player off their ground
 // (CAMP_CHASE_DIST) or (unarmed) a robbery. The sheriff pays bounties on them.
 //
-// Missions (townJobs.js): townsfolk give out jobs — a ❗ over whoever has one; talk to them to
-// take it, and back to them (❓) for the reward once it's done. The sheriff: bounties, guarding
-// a field from a raid; townsfolk: deliveries from real shortages, debts, a lost kid; the
-// drifter's shady job (no ❗ — he mentions it); three authored chains (CHAINS). Up to
-// MAX_ACTIVE_JOBS at once, shown in the quest tracker with 📍 markers in the world.
+// Missions (townJobs.js / townMissions.js): a ❗ over whoever has a job; talk to them to take it,
+// and back to them (❓) for the reward once it's done. The townsfolk's work comes in order, one
+// job after another — the first day's goals, then the jobs after (townIntro.js) — and the
+// sheriff pays for bandits beaten in the night (townBandits.js); nothing else is handed out
+// round town for now. Shown in the quest tracker with 📍 markers in the world.
 //
 // Bodies are a level of detail: only the nearest TOWN_MAX_BODIES townsfolk get a GLB character
 // (pooled per model); the rest walk the same paths as data. Someone fighting the player is
@@ -118,6 +118,7 @@ import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
 import { installTownCanoe } from './townCanoe.js';
 import { installTownCart } from './townCart.js';
+import { installTownDrive } from './townDrive.js';
 import { installTownTrees } from './townTrees.js';
 import { installTownBook } from './townBook.js';
 
@@ -170,14 +171,13 @@ export function createTownMode(ctx) {
   const goods = Object.fromEntries(GOOD_IDS.map((g) => [g, 0])); // what the player carries
   T.fishing = null;           // while the player's line is out (townFishing.js)
   T.cooking = null;           // { recipe, left, x, z } while something's on the fire (townCooking.js)
-  T.intro = null;             // the first day's goals (townIntro.js), null once done
+  T.intro = null;             // the first day's goals, then the jobs in order (townIntro.js), null once all done…
+  T.introAfter = null;        // …and then the last one's id
   T.jobs = [];                // posted + taken jobs (townJobs.js)
   T.nextJobId = 1;
-  T.chainsDone = new Set();
   T.jobsAt = 0;               // next time new jobs go out
   const markers = new Map();  // job id → 📍 / ❗ / ❓ sprite
   const campWatch = { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 }; // the player at the bandit camp
-  T.strongboxHeld = false;    // (chain: the sheriff's strongbox)
   T.raidNight = null;         // the night (its evening's day) the bandits last raided the town (townBandits.js)
   T.raidPlan = null;          // tonight's raid: { night, houses, hit, tally, reported }
   T.nightKills = { n: 0, coins: 0 }; // bandits the player beat at night, for the sheriff's thanks
@@ -479,8 +479,6 @@ export function createTownMode(ctx) {
     intro: T.introSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
-    chainsDone: [...T.chainsDone],
-    strongboxHeld: T.strongboxHeld,
     raidNight: T.raidNight,
     gangSize: T.gangSize,
     gangDay: T.gangDay,
@@ -528,8 +526,6 @@ export function createTownMode(ctx) {
     intro: T.introSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
-    chainsDone: [...T.chainsDone],
-    strongboxHeld: T.strongboxHeld,
     nightKills: { ...T.nightKills },
     ...T.homesSnapshot(),
     ...T.farmSnapshot(),
@@ -802,6 +798,7 @@ export function createTownMode(ctx) {
     flushCloud();
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     T.resetCart();
+    T.resetDrive();
     ctx.setIntroHighlight?.(null); // (the first day's ringed buttons)
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;
@@ -912,6 +909,7 @@ export function createTownMode(ctx) {
     T.updateFishing(dt);
     T.updateCanoe(dt);
     T.updateIntroWalk(dt);
+    T.updateDrive(dt);
     T.updateCooking(dt);
     T.updateFarm(dt);
     T.updateTrees(dt);
@@ -992,6 +990,7 @@ export function createTownMode(ctx) {
   installTownTrees(T, ctx);
   installTownCanoe(T, ctx);
   installTownCart(T, ctx);
+  installTownDrive(T, ctx);
   installTownBook(T, ctx);
 
   // ── The town book's Town page (townBook.js): everyone in town, their coins and a few stats ──
@@ -1140,6 +1139,6 @@ export function createTownMode(ctx) {
     // Standing in the canoe (townCanoe.js): the oar is the only thing in hand
     inCanoe: () => !!(T.active && T.ready && T.inCanoe()),
     // (dev console)
-    debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, goods, stalls: T.stalls, ctx, jobs: T.jobs, chainsDone: T.chainsDone, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
+    debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, goods, stalls: T.stalls, ctx, jobs: T.jobs, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
   };
 }

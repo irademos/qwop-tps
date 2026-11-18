@@ -7,9 +7,10 @@
 import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
+import { createDriveGrid } from './townDrive.js';
 import {
-  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
-  TREE_TRUNK_RADIUS, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
+  BUILDING_RE, CABIN_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
+  TREE_TRUNK_RADIUS, WIZARD_CABIN_STALL, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -285,49 +286,103 @@ export function installTownLayout(T, ctx) {
     if (campCell < 0) campCell = best(nav.cellsWhere((i) => nav.clearanceAt(i) >= 2), (i) => dC(i));
     const camp = campCell >= 0 ? cellPos(campCell) : { ...entrance };
     const campFire = { x: camp.x + 2.2, z: camp.z };
-    const strongbox = { x: camp.x - 1.6, z: camp.z + 1.4 };
     nav.block(camp.x, camp.z, 1.2);
     nav.block(campFire.x, campFire.z, 0.8);
     nav.refresh();
 
-    // The wizard's stall: out in the woods — the open spot with the most trees round it, well away
-    // from the houses and the bandit camp — its front to the most open side; his tent behind it
-    const treesNear = (x, z, r) => {
-      let k = 0;
-      for (const t of woods) if (Math.abs(t.x - x) < r && Math.abs(t.z - z) < r && dist2(t.x, t.z, x, z) < r) k += 1;
-      return k;
-    };
-    const wizCells = nav.cellsWhere((i) => {
-      const d = dC(i);
-      const x = nav.cellX(i);
-      const z = nav.cellZ(i);
-      return d >= WIZARD_STALL_DIST[0] && d <= WIZARD_STALL_DIST[1] && offRoad(i) && nav.clearanceAt(i) >= 2.5
-        && dist2(x, z, camp.x, camp.z) > 40 && buildings.every((b) => dist2(x, z, b.x, b.z) > b.radius + 10);
-    });
-    let wizCell = best(wizCells.filter((i, k) => k % 2 === 0), (i) => treesNear(nav.cellX(i), nav.cellZ(i), 11)
-      + Math.min(nav.clearanceAt(i), 5) * 0.4 - Math.abs(dC(i) - 45) * 0.03);
-    if (wizCell < 0) wizCell = best(nav.cellsWhere((i) => offRoad(i) && nav.clearanceAt(i) >= 2 && dC(i) > 20 && dC(i) < 60), (i) => -Math.abs(dC(i) - 35));
-    const wizPos = wizCell >= 0 ? cellPos(wizCell) : { x: C.x + 30, z: C.z };
-    let wizYaw = Math.atan2(C.x - wizPos.x, C.z - wizPos.z);
-    {
-      let bestOpen = -Infinity;
-      for (let k = 0; k < 8; k++) {
-        const yaw = wizYaw + k * Math.PI / 4;
-        const j = nav.indexAt(wizPos.x + Math.sin(yaw) * 1.6, wizPos.z + Math.cos(yaw) * 1.6);
-        const open = j >= 0 && nav.walkableIndex(j) ? nav.clearanceAt(j) - k * 0.05 : -1;
-        if (open > bestOpen) { bestOpen = open; wizYaw = yaw; }
+    // (the cabin: its front the side the drive route from the arrival spot comes up to; the
+    // stall WIZARD_CABIN_STALL m out past its walls — null if there's no level ground there)
+    function wizardAtCabin(b) {
+      const spawnAt = nav.nearestWalkable((market.x + fire.x) / 2, (market.z + fire.z) / 2);
+      const from = spawnAt >= 0 ? cellPos(spawnAt) : market;
+      const r = b.radius + WIZARD_CABIN_STALL;
+      const route = drive.route(from, { x: b.x, z: b.z, r: r + 1.5 });
+      const base = Math.min(...Array.from({ length: 16 }, (_, k) => groundAt(b.x + Math.sin(k * Math.PI / 8) * r, b.z + Math.cos(k * Math.PI / 8) * r, Infinity)));
+      if (!Number.isFinite(base)) return null;
+      // (the way out: toward the route's end, else the flattest side)
+      const yaw0 = route ? Math.atan2(route[route.length - 1].x - b.x, route[route.length - 1].z - b.z) : 0;
+      let yaw = yaw0;
+      let bestFlat = Infinity;
+      for (let k = 0; k < 16; k++) {
+        const a = yaw0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+        const x = b.x + Math.sin(a) * r;
+        const z = b.z + Math.cos(a) * r;
+        const y = groundAt(x, z, NaN);
+        let rough = 0;
+        for (const [dx, dz] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) rough = Math.max(rough, Math.abs(groundAt(x + dx, z + dz, Infinity) - y));
+        const score = rough + Math.abs(y - base) * 0.3 + Math.ceil(k / 2) * 0.12;
+        if (Number.isFinite(score) && score < bestFlat) { bestFlat = score; yaw = a; }
+        if (k === 0 && route && rough < 0.6) break;
       }
+      const x = b.x + Math.sin(yaw) * r;
+      const z = b.z + Math.cos(yaw) * r;
+      // (his patch of the grid, from just out of the stall's way)
+      nav.addStart(x + Math.sin(yaw) * 2, z + Math.cos(yaw) * 2);
+      nav.refresh();
+      const door = { x: b.x + Math.sin(yaw) * (b.radius + 0.8), z: b.z + Math.cos(yaw) * (b.radius + 0.8) };
+      return { x, z, yaw, hutAt: door, cabin: { x: b.x, z: b.z, radius: b.radius } };
     }
-    const wizard = { x: wizPos.x, z: wizPos.z, yaw: wizYaw };
-    T.stalls.setOutdoor('wizard', { ...wizard, y: groundAt(wizPos.x, wizPos.z) });
-    nav.block(wizPos.x, wizPos.z, 0.55); // (solid, like the market stalls)
-    nav.refresh();
-    const hutAt = {
-      x: wizPos.x - Math.sin(wizYaw) * WIZARD_HUT_DIST + Math.cos(wizYaw) * 1.5,
-      z: wizPos.z - Math.cos(wizYaw) * WIZARD_HUT_DIST - Math.sin(wizYaw) * 1.5,
+    // The wizard's stall out in the woods: the open spot with the most trees round it, well away
+    // from the houses and the bandit camp — its front to the most open side; his tent behind it
+    function wizardInWoods() {
+      const treesNear = (x, z, r) => {
+        let k = 0;
+        for (const t of woods) if (Math.abs(t.x - x) < r && Math.abs(t.z - z) < r && dist2(t.x, t.z, x, z) < r) k += 1;
+        return k;
+      };
+      const wizCells = nav.cellsWhere((i) => {
+        const d = dC(i);
+        const x = nav.cellX(i);
+        const z = nav.cellZ(i);
+        return d >= WIZARD_STALL_DIST[0] && d <= WIZARD_STALL_DIST[1] && offRoad(i) && nav.clearanceAt(i) >= 2.5
+          && dist2(x, z, camp.x, camp.z) > 40 && buildings.every((b) => dist2(x, z, b.x, b.z) > b.radius + 10);
+      });
+      let wizCell = best(wizCells.filter((i, k) => k % 2 === 0), (i) => treesNear(nav.cellX(i), nav.cellZ(i), 11)
+        + Math.min(nav.clearanceAt(i), 5) * 0.4 - Math.abs(dC(i) - 45) * 0.03);
+      if (wizCell < 0) wizCell = best(nav.cellsWhere((i) => offRoad(i) && nav.clearanceAt(i) >= 2 && dC(i) > 20 && dC(i) < 60), (i) => -Math.abs(dC(i) - 35));
+      const wizPos = wizCell >= 0 ? cellPos(wizCell) : { x: C.x + 30, z: C.z };
+      let wizYaw = Math.atan2(C.x - wizPos.x, C.z - wizPos.z);
+      {
+        let bestOpen = -Infinity;
+        for (let k = 0; k < 8; k++) {
+          const yaw = wizYaw + k * Math.PI / 4;
+          const j = nav.indexAt(wizPos.x + Math.sin(yaw) * 1.6, wizPos.z + Math.cos(yaw) * 1.6);
+          const open = j >= 0 && nav.walkableIndex(j) ? nav.clearanceAt(j) - k * 0.05 : -1;
+          if (open > bestOpen) { bestOpen = open; wizYaw = yaw; }
+        }
+      }
+      return {
+        x: wizPos.x, z: wizPos.z, yaw: wizYaw, tent: true,
+        hutAt: {
+          x: wizPos.x - Math.sin(wizYaw) * WIZARD_HUT_DIST + Math.cos(wizYaw) * 1.5,
+          z: wizPos.z - Math.cos(wizYaw) * WIZARD_HUT_DIST - Math.sin(wizYaw) * 1.5,
+        },
+      };
+    }
+    // The drive grid (townDrive.js): cart routes over any ground the cart takes — up the mountain
+    const driveArgs = {
+      bounds: NAV_BOUNDS, getGroundY: ctx.getGroundY, waterDepth: ctx.waterDepth,
+      trees: woods.filter((t) => !STUMP_RE.test(t.file)),
+      // (the houses — their walls and porch posts: most of the bounds' circle — and the smaller
+      // things placed round the map: lamp posts…; not the bridges / docks — driven over)
+      props: ctx.getMapObjects(NAV_BOUNDS).filter((o) => !TREE_RE.test(o.file) && !/bridge|dock/i.test(o.file))
+        .map((o) => ({ x: o.x, z: o.z, r: BUILDING_RE.test(o.file) ? o.radius * 0.9 : Math.min(o.radius, 1.2) })),
     };
-    const hutCell = nav.nearestWalkable(hutAt.x, hutAt.z);
-    wizard.hut = hutCell >= 0 && dist2(nav.cellX(hutCell), nav.cellZ(hutCell), hutAt.x, hutAt.z) < 3 ? cellPos(hutCell) : { ...wizPos };
+    const drive = createDriveGrid(driveArgs);
+    T.driveGridArgs = driveArgs; // (dev console: T.createDriveGrid({ ...T.driveGridArgs, maxSlope… }))
+    // The wizard lives up the mountain, at the cabin there (the map's cabin.glb): his stall in
+    // front of it, facing the way the cart road comes up (the drive route's end), and he sleeps
+    // by its door; the patch round it is walked about on its own (nav.addStart — no walk joins
+    // it to the town). A map with no cabin: out in the woods, as before (wizardInWoods)
+    const cabin = ctx.getMapObjects(NAV_BOUNDS).find((o) => CABIN_RE.test(o.file)) ?? null;
+    const wizard = (cabin && wizardAtCabin(cabin)) || wizardInWoods();
+    T.stalls.setOutdoor('wizard', { x: wizard.x, z: wizard.z, yaw: wizard.yaw, y: groundAt(wizard.x, wizard.z) });
+    nav.block(wizard.x, wizard.z, 0.55); // (solid, like the market stalls)
+    nav.refresh();
+    {
+      const hutCell = nav.nearestWalkable(wizard.hutAt.x, wizard.hutAt.z);
+      wizard.hut = hutCell >= 0 && dist2(nav.cellX(hutCell), nav.cellZ(hutCell), wizard.hutAt.x, wizard.hutAt.z) < 3 ? cellPos(hutCell) : { x: wizard.x, z: wizard.z };
+    }
     wizard.keeper = T.stalls.spot('wizard', 'merchant');
     wizard.customer = T.stalls.spot('wizard', 'customer');
 
@@ -335,7 +390,7 @@ export function installTownLayout(T, ctx) {
     const fishSpot = shore[0] ?? null;
     const places = {
       center: C, market, marketStalls, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
-      homes, treeSpots, fields, tap, shore, fishSpot, patrol, entrance, camp, campFire, strongbox, wizard,
+      homes, treeSpots, fields, tap, shore, fishSpot, patrol, entrance, camp, campFire, wizard,
       // the player arrives between the shop and the fire
       spawn: (() => {
         const i = nav.nearestWalkable((market.x + fire.x) / 2, (market.z + fire.z) / 2);
@@ -350,7 +405,7 @@ export function installTownLayout(T, ctx) {
     // (the felled trees' stumps: the pack's own stump model, wherever it was placed)
     const stump = ctx.getMapObjects({ minX: -1e5, maxX: 1e5, minZ: -1e5, maxZ: 1e5 }).find((o) => STUMP_RE.test(o.file));
     T.buildTrees(props.group, choppable, stump?.object ?? null);
-    return { nav, places, trees: choppable, buildings: houses, props };
+    return { nav, drive, places, trees: choppable, buildings: houses, props };
   };
 
   // ── Props: the shops, campfire, jail cell, fields ──
@@ -396,18 +451,20 @@ export function installTownLayout(T, ctx) {
     group.add(cookPot);
     // The jail's cell door (townRooms.js builds the cell): swung open / shut in townMode.js
     const door = T.rooms.cellDoor();
-    const iron = new THREE.MeshStandardMaterial({ color: 0x2f2f35, roughness: 0.6, metalness: 0.3 });
     const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1, metalness: 0 });
     // The market stalls outside the shop (townMarket.js — who's selling sets their sign / goods)
     for (const st of places.marketStalls) T.stalls.buildMarket(group, { key: st.key, label: 'Free stall' });
-    // The wizard's stall (townStalls.js) and his tent behind it
+    // The wizard's stall (townStalls.js)
     T.stalls.buildOutdoor(group, { key: 'wizard', label: 'Wizard' });
-    const robe = new THREE.MeshStandardMaterial({ color: 0x4b2f7a, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+    // (his tent — only out in the woods: up the mountain he has the cabin)
     const hut = places.wizard.hut;
-    const wizTent = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1.9, 6, 1, true), robe);
-    wizTent.position.set(hut.x, groundAt(hut.x, hut.z) + 0.95, hut.z);
-    wizTent.castShadow = true;
-    group.add(wizTent);
+    if (places.wizard.tent) {
+      const robe = new THREE.MeshStandardMaterial({ color: 0x4b2f7a, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+      const wizTent = new THREE.Mesh(new THREE.ConeGeometry(1.2, 1.9, 6, 1, true), robe);
+      wizTent.position.set(hut.x, groundAt(hut.x, hut.z) + 0.95, hut.z);
+      wizTent.castShadow = true;
+      group.add(wizTent);
+    }
     const star = makeTextSprite('✨', { height: 0.3, size: 96, bg: null, pad: 10 });
     star.position.set(hut.x, groundAt(hut.x, hut.z) + 2.1, hut.z);
     group.add(star);
@@ -438,7 +495,7 @@ export function installTownLayout(T, ctx) {
         }
       }
     }
-    // The bandit camp: a ragged tent, a fire, the stolen strongbox
+    // The bandit camp: a ragged tent, a fire
     const cloth = new THREE.MeshStandardMaterial({ color: 0x6d5a44, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     const tent = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1.7, 4, 1, true), cloth);
     tent.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 0.85, places.camp.z);
@@ -448,15 +505,6 @@ export function installTownLayout(T, ctx) {
     const campFire = makeCampfire();
     campFire.group.position.set(places.campFire.x, groundAt(places.campFire.x, places.campFire.z), places.campFire.z);
     group.add(campFire.group);
-    const strongbox = new THREE.Group();
-    const boxBody = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.36, 0.38), new THREE.MeshStandardMaterial({ color: 0x7a5230, roughness: 0.9, metalness: 0 }));
-    boxBody.position.y = 0.18;
-    const boxBand = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.06, 0.4), iron);
-    boxBand.position.y = 0.3;
-    strongbox.add(boxBody, boxBand);
-    strongbox.position.set(places.strongbox.x, groundAt(places.strongbox.x, places.strongbox.z), places.strongbox.z);
-    strongbox.traverse((o) => { if (o.isMesh) o.castShadow = true; });
-    group.add(strongbox);
     // The fishing spot: a signpost on the bank
     if (places.fishSpot) {
       const fs = places.fishSpot;
@@ -474,7 +522,7 @@ export function installTownLayout(T, ctx) {
     const campSign = makeTextSprite('Bandit camp', { height: 0.28 });
     campSign.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 2.3, places.camp.z);
     group.add(campSign);
-    return { group, fire, door, campFire, strongbox, cookPot, wizTent };
+    return { group, fire, door, campFire, cookPot };
   };
 
   Object.assign(T, {
