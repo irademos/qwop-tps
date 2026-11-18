@@ -37,6 +37,24 @@ export function installTownTrade(T, ctx) {
     T.renderGoods();
     T.feedLine(`Ate a ${GOODS[g].label.toLowerCase()}. +${GOODS[g].heal} health`);
   };
+  // Dropping things from the bag (the town book's Bag page): goods, seeds or lock-picks — gone for good
+  const DROPPABLE = {
+    seeds: { label: 'seed', get: () => T.seeds, set: (n) => { T.seeds = n; } },
+    lockpick: { label: 'lock-pick', get: () => T.lockpicks, set: (n) => { T.lockpicks = n; } },
+  };
+  const dropItem = (id, n = 1) => {
+    if (T.sequence || ctx.isPlayerDead()) return 0;
+    const extra = DROPPABLE[id];
+    const have = extra ? extra.get() || 0 : GOODS[id] ? T.goods[id] || 0 : 0;
+    const k = Math.min(have, Math.max(1, Math.floor(n)));
+    if (k <= 0) return 0;
+    if (extra) extra.set(have - k);
+    else T.goods[id] = have - k;
+    T.renderGoods();
+    const label = extra ? extra.label : GOODS[id].label.toLowerCase();
+    T.feedLine(k === 1 ? `Dropped a ${label}.` : `Dropped ${k} × ${label}.`);
+    return k;
+  };
   const ripeCropNear = () => {
     const p = T.playerPos();
     for (const f of T.layout.places.fields) {
@@ -407,7 +425,7 @@ export function installTownTrade(T, ctx) {
     && T.isWorking(m)) ?? null;
 
   Object.assign(T, {
-    buyGear, calmNow, eat, enterRoom, focusStall, gain, gearState, getMagicTargets,
+    buyGear, calmNow, dropItem, eat, enterRoom, focusStall, gain, gearState, getMagicTargets,
     getWeaponTargets, leaveRoom, shopOpen, nearDoor, nearStall, nearestStall,
     mayPick, pickCrop, playerRoom, ripeCropNear, rooms, stallItemState, stalls, stallOpen,
     updateRegrowth, updateRooms, workingMerchant, workingWizard,

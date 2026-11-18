@@ -7267,9 +7267,16 @@ async function initCore(runtimeContext) {
   // screen, so it would cover the mode buttons) — see the mode handler
   let _phoneSwordQrDeferred = false;
   let _phoneSwordQrAutoShown = false; // the automatic popup has been put up once
+  // Under browser automation (Playwright / headless test runs — navigator.webdriver) or with
+  // ?noPhonePopup in the URL the popup never comes up by itself (it would cover the screenshots);
+  // ?phonePopup brings it back for a test of the popup itself. Settings → Show Phone QR Code still opens it.
+  const _urlParams = new URLSearchParams(location.search);
+  const PHONE_SWORD_AUTO_POPUP = _urlParams.has('phonePopup')
+    || (!navigator.webdriver && !_urlParams.has('noPhonePopup'));
   const autoShowPhoneSwordQr = (peerId) => {
     _phoneSwordQrAutoShown = true;
     if (peerId) _phoneSwordPeerId = peerId;
+    if (!PHONE_SWORD_AUTO_POPUP) return;
     if (!startOverlay.classList.contains('hidden')) {
       _phoneSwordQrDeferred = true;
       return;

@@ -4,15 +4,19 @@
 //         player red), ❗ / ❓ over whoever has a job / a reward, 📍 where a job's work is, the
 //         player's arrow and the other players of a shared town. Tap someone for who they are;
 //         drag to move the map, pinch / the wheel / + − to zoom, ⌖ back to the player.
-//   Town: what Settings → Town used to show — the player's bag (tap a food to eat), their jobs,
-//         and everyone in town sorted by coins (T.roster(), townMode.js).
+//   Bag:  what the player carries (goods, seeds, lock-picks); tap one for what it is and what can be
+//         done with it — Eat (food), Plant (seeds, on open ground), Drop one / Drop all.
+//   Jobs: the jobs taken (the quest tracker's entries).
+//   People: the town's summary and everyone in town sorted by coins (T.roster(), townMode.js).
 // Someone in a room (under the map — townRooms.js) is drawn at their house's door, faded.
 // Nothing here pauses the town. DOM + canvas only; installed onto T like the other town modules.
 import { NAV_BOUNDS, el } from './townConfig.js';
 
 const PAGES = [
   { id: 'map', label: 'Map' },
-  { id: 'town', label: 'Town' },
+  { id: 'bag', label: 'Bag' },
+  { id: 'jobs', label: 'Jobs' },
+  { id: 'people', label: 'People' },
 ];
 const FILTERS = [
   { id: 'all', label: 'Everyone', keep: () => true },
@@ -21,7 +25,7 @@ const FILTERS = [
   { id: 'outlaws', label: 'Bandits', keep: (p) => p.kind === 'outlaw' },
 ];
 const REFRESH_MS = 250;        // the map, while open
-const LIST_REFRESH_MS = 1000;  // the Town page, while open
+const LIST_REFRESH_MS = 1000;  // the Bag / Jobs / People pages, while open
 const MAP_PAD_M = 6;           // around the ground the map shows
 const TAP_RADIUS_PX = 16;
 const ZOOM_MIN = 1;            // the whole map fits
@@ -78,8 +82,8 @@ export function installTownBook(T, ctx) {
   const info = el('div', 'town-book-info', 'Tap someone on the map. Drag to move it, pinch or scroll to zoom.');
   mapPage.append(mapWrap, info);
 
-  // Town page (was Settings → Town)
-  const townPage = el('div', 'town-book-page');
+  // People page: the town's summary, then everyone in it
+  const peoplePage = el('div', 'town-book-page');
   const summary = el('div', 'settings-stats-grid');
   const summaryFields = {};
   for (const [key, label] of [['people', 'People'], ['players', 'Players'], ['coins', 'Coins in town'], ['day', 'Day']]) {
@@ -89,24 +93,35 @@ export function installTownBook(T, ctx) {
     summary.append(stat);
     summaryFields[key] = value;
   }
-  const bagTitle = el('h3', 'settings-section-title', 'Your Bag');
-  const bag = el('div', 'town-book-bag');
-  const jobsTitle = el('h3', 'settings-section-title', 'Jobs');
-  const jobs = el('div', 'town-book-jobs');
   const filters = el('div', 'town-roster-filters');
   const filterBtns = {};
   let filter = 'all';
   for (const f of FILTERS) {
     const chip = el('button', 'ui-chip', f.label);
     chip.type = 'button';
-    chip.addEventListener('click', () => { filter = f.id; renderTown(); });
+    chip.addEventListener('click', () => { filter = f.id; renderPeople(); });
     filterBtns[f.id] = chip;
     filters.append(chip);
   }
   const list = el('ol', 'town-roster');
-  townPage.append(summary, bagTitle, bag, jobsTitle, jobs, el('h3', 'settings-section-title', 'People'), filters, list);
+  peoplePage.append(summary, filters, list);
 
-  book.append(head, mapPage, townPage);
+  // Bag page: a grid of what's carried, and the picked thing's card with its actions
+  const bagPage = el('div', 'town-book-page');
+  const bagTitle = el('h3', 'settings-section-title', 'Your Bag');
+  const bag = el('div', 'town-book-bag');
+  const itemCard = el('div', 'town-book-item ui-panel hidden');
+  bagPage.append(bagTitle, bag, itemCard);
+  let pickedItem = null; // id of the thing picked in the bag
+  let bagSig = '';        // what the Bag page last showed
+
+  // Jobs page
+  const jobsPage = el('div', 'town-book-page');
+  const jobs = el('div', 'town-book-jobs');
+  jobsPage.append(jobs);
+
+  const pageEls = { map: mapPage, bag: bagPage, jobs: jobsPage, people: peoplePage };
+  book.append(head, mapPage, bagPage, jobsPage, peoplePage);
   overlay.append(book);
   T.hud.append(btn, overlay);
   // (a tap on the dark around the book closes it)
@@ -119,11 +134,11 @@ export function installTownBook(T, ctx) {
   const showPage = (id) => {
     page = id;
     for (const p of PAGES) tabBtns[p.id].classList.toggle('is-active', p.id === id);
-    mapPage.classList.toggle('hidden', id !== 'map');
-    townPage.classList.toggle('hidden', id !== 'town');
+    for (const [pid, pe] of Object.entries(pageEls)) pe.classList.toggle('hidden', pid !== id);
     restart();
   };
-  const tick = () => { if (page === 'map') drawMap(); else renderTown(); };
+  const RENDER = { bag: () => renderBag(), jobs: () => renderJobs(), people: () => renderPeople() };
+  const tick = () => { if (page === 'map') drawMap(); else RENDER[page]?.(); };
   const restart = () => {
     clearInterval(timer);
     timer = null;
@@ -447,32 +462,71 @@ export function installTownBook(T, ctx) {
     zoomBy(Math.exp(-e.deltaY * 0.0015), x, y);
   }, { passive: false });
 
-  // ── The Town page: summary, the bag, jobs, everyone and their coins (the richest crowned) ──
-  const renderTown = () => {
+  // ── The Bag page: tap a thing for its card (Eat / Plant / Drop) ──
+  const renderBag = () => {
     const roster = T.roster?.();
-    if (!roster) return;
-    const people = roster.people ?? [];
-    const known = (p) => Number.isFinite(p.coins);
-    summaryFields.people.textContent = String(people.filter((p) => p.kind === 'townsfolk' || p.kind === 'outlaw').length);
-    summaryFields.players.textContent = String(people.filter((p) => p.kind === 'you' || p.kind === 'player').length);
-    summaryFields.coins.textContent = `🪙 ${people.reduce((s, p) => s + (known(p) ? p.coins : 0), 0)}`;
-    summaryFields.day.textContent = String(roster.day ?? '—');
-
-    // The bag (tap a food to eat it)
-    const goods = roster.bag?.goods ?? [];
-    bagTitle.textContent = roster.bag ? `Your Bag · 🎒 ${goods.reduce((s, g) => s + g.n, 0)}/${roster.bag.max}` : 'Your Bag';
-    bag.replaceChildren(...goods.map((g) => {
-      const b = el('button', 'ui-chip town-book-good', `${g.emoji} ${g.n}`);
+    if (!roster?.bag) return;
+    const goods = roster.bag.goods ?? [];
+    const items = [...goods, ...(roster.bag.extras ?? [])];
+    bagTitle.textContent = `Your Bag · 🎒 ${goods.reduce((sum, g) => sum + g.n, 0)}/${roster.bag.max}`;
+    if (pickedItem && !items.some((it) => it.id === pickedItem && it.n > 0)) pickedItem = null;
+    // (rebuilt only when something changed — a rebuild under a finger would lose the tap)
+    const { health, max } = ctx.getHealth?.() ?? {};
+    const full = Number.isFinite(health) && health >= max;
+    const canPlant = !!T.canPlant?.();
+    const sig = JSON.stringify([items.map((it) => [it.id, it.n]), pickedItem, full, canPlant, roster.bag.max]);
+    if (sig === bagSig) return;
+    bagSig = sig;
+    bag.replaceChildren(...items.map((it) => {
+      const b = el('button', `town-book-good${it.id === pickedItem ? ' is-active' : ''}${it.n > 0 ? '' : ' is-empty'}`);
       b.type = 'button';
-      const canEat = g.food && g.n > 0;
-      b.disabled = !canEat;
-      b.title = g.food ? `Eat ${g.label} (+${g.heal} health)` : g.label;
-      if (canEat) b.addEventListener('click', () => { T.eat(g.id); renderTown(); });
+      b.title = it.label;
+      b.append(el('span', 'town-book-good-icon', it.emoji), el('span', 'town-book-good-n', String(it.n)),
+        el('span', 'town-book-good-label', it.label));
+      b.disabled = it.n <= 0;
+      if (it.n > 0) b.addEventListener('click', () => { pickedItem = pickedItem === it.id ? null : it.id; renderBag(); });
       return b;
     }));
-    if (goods.some((g) => g.food && g.n > 0)) bag.append(el('div', 'settings-muted town-book-hint', 'Tap a food to eat it.'));
+    const it = items.find((e) => e.id === pickedItem);
+    itemCard.classList.toggle('hidden', !it);
+    if (!it) {
+      itemCard.replaceChildren();
+      if (!bag.querySelector('.town-book-hint')) bag.append(el('div', 'settings-muted town-book-hint', 'Tap something for what you can do with it.'));
+      return;
+    }
+    const facts = [];
+    if (it.food) facts.push(`+${it.heal} health when eaten`);
+    if (it.good) facts.push(`worth 🪙 ${it.price}`);
+    if (it.plant) facts.push('plant one on open ground in front of you');
+    if (it.id === 'lockpick') facts.push('opens one locked door, then breaks');
+    const actions = el('div', 'town-book-item-actions');
+    const act = (label, fn, { primary = false, disabled = false, title = '' } = {}) => {
+      const b = el('button', primary ? 'ui-btn' : 'ui-btn-secondary', label);
+      b.type = 'button';
+      b.disabled = disabled;
+      if (title) b.title = title;
+      b.addEventListener('click', () => { fn(); renderBag(); });
+      actions.append(b);
+    };
+    if (it.food) {
+      act('Eat', () => T.eat(it.id), { primary: true, disabled: full, title: full ? 'You\'re not hungry.' : '' });
+    }
+    if (it.plant) {
+      act('Plant', () => T.plantSeed?.(), { primary: true, disabled: !canPlant, title: canPlant ? '' : 'Stand on open, dry ground outdoors to plant.' });
+    }
+    act('Drop one', () => T.dropItem?.(it.id, 1));
+    if (it.n > 1) act(`Drop all (${it.n})`, () => T.dropItem?.(it.id, it.n));
+    itemCard.replaceChildren(
+      el('div', 'town-book-item-name', `${it.emoji} ${it.label} × ${it.n}`),
+      el('div', 'town-book-item-meta', facts.join(' · ')),
+      actions,
+    );
+  };
 
-    // Jobs
+  // ── The Jobs page ──
+  const renderJobs = () => {
+    const roster = T.roster?.();
+    if (!roster) return;
     const js = roster.jobs ?? [];
     jobs.replaceChildren(...(js.length ? js.map((j) => {
       const row = el('div', 'town-roster-row');
@@ -481,8 +535,19 @@ export function installTownBook(T, ctx) {
       row.append(who);
       return row;
     }) : [el('div', 'settings-muted', 'No jobs right now — look for ❗ over townsfolk (or on the map).')]));
+  };
 
-    // People
+  // ── The People page: summary, everyone and their coins (the richest crowned) ──
+  const renderPeople = () => {
+    const roster = T.roster?.();
+    if (!roster) return;
+    const people = roster.people ?? [];
+    const known = (p) => Number.isFinite(p.coins);
+    summaryFields.people.textContent = String(people.filter((p) => p.kind === 'townsfolk' || p.kind === 'outlaw').length);
+    summaryFields.players.textContent = String(people.filter((p) => p.kind === 'you' || p.kind === 'player').length);
+    summaryFields.coins.textContent = `🪙 ${people.reduce((sum, p) => sum + (known(p) ? p.coins : 0), 0)}`;
+    summaryFields.day.textContent = String(roster.day ?? '—');
+
     for (const [id, chip] of Object.entries(filterBtns)) {
       chip.classList.toggle('is-active', id === filter);
       chip.classList.toggle('hidden', id === 'outlaws' && !people.some((p) => p.kind === 'outlaw'));
@@ -518,6 +583,8 @@ export function installTownBook(T, ctx) {
     toggle(false);
     base = null;
     picked = null;
+    pickedItem = null;
+    bagSig = '';
     pointers.clear();
     info.textContent = 'Tap someone on the map. Drag to move it, pinch or scroll to zoom.';
   };

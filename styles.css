@@ -1528,17 +1528,54 @@ body.settings-open #inventory-button {
   color: var(--text);
 }
 
-/* The town book's Town page (src/town/townBook.js): the player's bag (tap a food to eat) and jobs */
+/* The town book's Bag page (src/town/townBook.js): a grid of what's carried; tap one for its card (Eat / Plant / Drop) */
 .town-book-bag {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
 }
 
-.town-book-good:disabled { opacity: 1; cursor: default; }
+.town-book-good {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
 
-.town-book-hint { flex-basis: 100%; font-size: 12px; }
+.town-book-good:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-hover); }
+.town-book-good.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.town-book-good.is-empty { opacity: 0.45; cursor: default; }
+.town-book-good-icon { font-size: 26px; line-height: 1; }
+.town-book-good-n {
+  position: absolute;
+  top: 4px;
+  right: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.town-book-good-label { font-size: 12px; color: var(--text-muted); text-align: center; }
+
+.town-book-hint { grid-column: 1 / -1; font-size: 12px; }
+
+.town-book-item {
+  margin-top: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.town-book-item-name { font-weight: 700; color: var(--text); }
+.town-book-item-meta { font-size: 12px; color: var(--text-muted); }
+.town-book-item-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 
 .town-book-jobs {
   display: flex;
@@ -1546,7 +1583,7 @@ body.settings-open #inventory-button {
   gap: 6px;
 }
 
-/* The town book's Town page: who lives in town and their coins (the richest wears the crown) */
+/* The town book's People page: who lives in town and their coins (the richest wears the crown) */
 .town-roster-filters {
   display: flex;
   flex-wrap: wrap;
@@ -5049,7 +5086,8 @@ body.settings-open .town-book-overlay { display: none !important; }
 }
 .town-book-head { display: flex; align-items: center; gap: 10px; }
 .town-book-title { font: 800 18px var(--font-display); white-space: nowrap; }
-.town-book-tabs { display: flex; gap: 6px; flex: 1; }
+.town-book-tabs { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.town-book-tabs .ui-chip { flex: none; }
 .town-book-close { min-height: 36px; min-width: 36px; padding: 0 10px; }
 .town-book-page { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
 .town-book-page.hidden { display: none; }

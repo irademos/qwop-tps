@@ -475,6 +475,8 @@ export function installTownFarming(T, ctx) {
   };
 
   Object.assign(T, {
+    // (the town book's Bag page: 🌱 Plant)
+    plantSeed: plant, canPlant: () => !!plantSpot(),
     buildFarm, farmActs, farmSnapshot, fieldOwner, handleFarmNet, resetFarm, restoreFarm,
     updateFarm,
     applyFieldOwners: (f) => { T.fieldOwners = cleanOwners(f); renderSigns(); },
