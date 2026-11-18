@@ -17,6 +17,10 @@
 // too slow, snapped, lost it) does it show ⬆ Pull the rod! / 🌀 Reel in! at those moments, until
 // a fish is landed.
 //
+// On foot in Town (T.castAhead) a cast goes straight out in front from wherever the player
+// stands (castAheadTarget — a dock's end, a bank, a lake shore); with no open water along the line
+// the bobber comes down on the ground and is reeled straight back in. What's below is for doing
+// it properly — fish per water body, runs kept on water:
 // Fishing anywhere there's water would mean: `atSpot` → "water within reach" over the whole map
 // (the town's nav grid only covers NAV_BOUNDS — elsewhere sample `ctx.getWaterY` / the map's
 // `sampleMapWaterLevel` in a ring in front of the player instead of `nav.isWater`), a cast that
@@ -37,7 +41,7 @@ import {
   FISH_CANCEL_DIST, FISH_CANOE_DRIFT, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER,
   FISH_HOOK_S, FISH_KEY_REEL, FISH_LAND_DIST, FISH_LINE_MAX, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S, FISH_PULL_KEEP,
   FISH_PULL_SWING, FISH_PULL_TENSION, FISH_REEL_M, FISH_RUN_S, FISH_RUN_SPEED, FISH_SETTLE_S, FISH_SIZES,
-  FISH_SPOT_RADIUS, FISH_TENSION_DECAY, FISH_TENSION_PER_TURN, FISH_TIRED_S, FISH_WAIT_S, NAV_CELL,
+  FISH_MIN_DEPTH, FISH_SPOT_RADIUS, FISH_TENSION_DECAY, FISH_TENSION_PER_TURN, FISH_TIRED_S, FISH_WAIT_S, NAV_CELL,
   dist2, el, rand,
 } from './townConfig.js';
 
@@ -99,8 +103,11 @@ export function installTownFishing(T, ctx) {
   // ── Where: the fishing spot, and the water a cast can reach from it ──
   const spot = () => T.layout?.places.fishSpot ?? null;
   const anywhere = () => !!T.fishAnywhere?.();
+  // (Town on foot — T.castAhead: a cast goes straight out in front, wherever the player stands;
+  // over dry ground it just comes back in — so a dock, a bank, a lake shore all work)
+  const ahead = () => !!T.castAhead && !anywhere();
   const atSpot = () => {
-    if (anywhere()) return true;
+    if (anywhere() || ahead()) return true;
     const s = spot();
     if (!s) return false;
     const p = T.playerPos();
@@ -108,6 +115,31 @@ export function installTownFishing(T, ctx) {
   };
   // Where the bobber lands: the water nearest `dist` m in front of the player
   const _fwd = new THREE.Vector3();
+  // Open water at (x, z): the surface over the ground there (not a dock's deck / a bridge over it)
+  const openWater = (x, z) => {
+    const wy = ctx.getWaterY(x, z);
+    if (wy == null || !(ctx.waterDepth?.(x, z) > FISH_MIN_DEPTH)) return false;
+    const gy = ctx.getGroundY(x, z);
+    return !Number.isFinite(gy) || gy < wy - 0.05;
+  };
+  // Straight out in front (T.castAhead): the first open water from `dist` back toward the player
+  // (a short cast from the bank still lands on it), else on past it; { at, dry } — dry: no water
+  // along the line, the bobber lands `dist` out on the ground and comes back in
+  const castAheadTarget = (dist) => {
+    const p = T.playerPos();
+    ctx.getPlayerModel()?.getWorldDirection(_fwd);
+    const l = Math.hypot(_fwd.x, _fwd.z) || 1;
+    const fx = _fwd.x / l;
+    const fz = _fwd.z / l;
+    const at = (d) => ({ x: p.x + fx * d, z: p.z + fz * d });
+    let hit = null;
+    for (let d = dist; d >= 1.5 && !hit; d -= 0.5) { const q = at(d); if (openWater(q.x, q.z)) hit = q; }
+    for (let d = dist + 0.5; d <= FISH_CAST_DIST[1] && !hit; d += 0.5) { const q = at(d); if (openWater(q.x, q.z)) hit = q; }
+    if (hit) return { at: new THREE.Vector3(hit.x, ctx.getWaterY(hit.x, hit.z), hit.z), dry: false };
+    const q = at(dist);
+    const gy = ctx.getGroundY(q.x, q.z);
+    return { at: new THREE.Vector3(q.x, Number.isFinite(gy) ? gy : p.y ?? 0, q.z), dry: true };
+  };
   const castTarget = (dist) => {
     const p = T.playerPos();
     const nav = T.layout.nav;
@@ -195,12 +227,17 @@ export function installTownFishing(T, ctx) {
     }
     if (T.bagRoom() <= 0) { T.bagFullNote(); return false; }
     const rod = ctx.getRodModel();
-    const at = rod && castTarget(FISH_CAST_DIST[0] + (FISH_CAST_DIST[1] - FISH_CAST_DIST[0]) * power);
+    if (!rod) return false;
+    const dist = FISH_CAST_DIST[0] + (FISH_CAST_DIST[1] - FISH_CAST_DIST[0]) * power;
+    let at;
+    let dry = false;
+    if (ahead()) ({ at, dry } = castAheadTarget(dist));
+    else at = castTarget(dist);
     if (!at) { say('No water in reach — face the water.'); return false; }
     const p = T.playerPos();
-    const d = Math.hypot(at.x - p.x, at.z - p.z);
+    const d = Math.max(0.5, Math.hypot(at.x - p.x, at.z - p.z));
     T.fishing = {
-      phase: 'cast', x: p.x, z: p.z, dir: { x: (at.x - p.x) / d, z: (at.z - p.z) / d }, d, t: 0,
+      phase: 'cast', dry, x: p.x, z: p.z, dir: { x: (at.x - p.x) / d, z: (at.z - p.z) / d }, d, t: 0,
       left: rand(...FISH_WAIT_S), nibble: 0, nibbled: Math.random() < FISH_NIBBLE_CHANCE,
       settleAt: T.simT + FISH_SETTLE_S, fish: null,
     };
@@ -280,7 +317,12 @@ export function installTownFishing(T, ctx) {
       if (gesture?.kind === 'pull') { used(); pull(); }
       f.t += dt;
       if (f.phase === 'cast') {
-        if (rig?.isOut()) { f.phase = 'wait'; f.t = 0; }
+        if (rig?.isOut()) {
+          // (it came down on dry ground: back in it comes)
+          if (f.dry) { finish(); say('No water there — cast out over the water.'); refreshHud(); return; }
+          f.phase = 'wait';
+          f.t = 0;
+        }
       } else if (f.phase === 'wait') {
         // Reeling in a waiting line just brings the bobber back
         if (turns > 0) f.d -= turns * FISH_REEL_M;
