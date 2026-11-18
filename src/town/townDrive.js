@@ -8,7 +8,9 @@
 // T.layout.drive): route(from, goal: { x, z, r }) → [{ x, z }, …] from `from` to within r of
 // the goal, or null.
 // installTownDrive(T, ctx): T.driveTo(target | null) — arrows along the route to target
-// ({ x, z, r }) from wherever the player (or the cart they're in) is, re-planned as they go;
+// ({ x, z, r, via? }) from wherever the player (or the cart they're in) is, re-planned as they go;
+// `via` = waypoints ([{ x, z, r? }]) the route goes through first, in order — each dropped once
+// the player is within its r (VIA_R) of it, or well past it (under half its distance from the goal);
 // T.updateDrive(dt) each frame; T.driveRoute() the route now (the town book could draw it).
 
 import * as THREE from 'three';
@@ -29,6 +31,7 @@ const ARROW_GAP = 3;        // m between them
 const ARROW_LIFT = 0.18;    // m over the ground
 const REPLAN_S = 1.5;       // s between route updates
 const OFF_ROUTE = 5;        // m off the route: re-planned at once
+const VIA_R = 6;            // m — a waypoint this close is reached
 
 export function createDriveGrid({ bounds, getGroundY, waterDepth, trees = [], props = [], maxSlope = MAX_SLOPE, maxGrade = MAX_GRADE, gradeCost = GRADE_COST }) {
   const half = CELL / 2;
@@ -230,6 +233,7 @@ export function installTownDrive(T, ctx) {
   let path = null;          // the route now
   let lens = null;          // distance along it at each point
   let planAt = 0;
+  let viaAt = 0;            // the next waypoint of target.via
   let group = null;
   const arrows = [];
   const ensureArrows = () => {
@@ -257,9 +261,20 @@ export function installTownDrive(T, ctx) {
   const plan = () => {
     planAt = T.simT + REPLAN_S;
     const drive = T.layout?.drive;
-    path = drive && target ? drive.route(from(), target) : null;
-    // (no route — the player somewhere it can't start from: straight there)
-    if (!path && target) { const p = from(); path = [{ x: p.x, z: p.z }, { x: target.x, z: target.z }]; }
+    path = null;
+    if (target) {
+      // (through the waypoints still ahead, then to the goal; a leg with no route goes straight)
+      const legs = [...target.via.slice(viaAt), target];
+      const p = from();
+      let start = { x: p.x, z: p.z };
+      path = [start];
+      for (const g of legs) {
+        const leg = drive?.route(start, { x: g.x, z: g.z, r: g.r ?? VIA_R }) ?? [start, { x: g.x, z: g.z }];
+        path.push(...leg.slice(1));
+        start = path[path.length - 1];
+      }
+      if (path.length < 2) path.push({ x: target.x, z: target.z });
+    }
     lens = path ? [0] : null;
     if (path) for (let i = 1; i < path.length; i++) lens.push(lens[i - 1] + Math.hypot(path[i].x - path[i - 1].x, path[i].z - path[i - 1].z));
   };
@@ -290,7 +305,8 @@ export function installTownDrive(T, ctx) {
   const driveTo = (t) => {
     if (!t) { target = null; path = null; hide(); return; }
     if (target && t.x === target.x && t.z === target.z) return;
-    target = { x: t.x, z: t.z, r: t.r ?? 4 };
+    target = { x: t.x, z: t.z, r: t.r ?? 4, via: t.via ?? [] };
+    viaAt = 0;
     planAt = 0;
   };
   const updateDrive = () => {
@@ -298,6 +314,16 @@ export function installTownDrive(T, ctx) {
     ensureArrows();
     if (group.parent !== T.root) T.root.add(group);
     const p = from();
+    // (a waypoint reached, or well past — the player less than half as far from the goal as it
+    // is: on to the next)
+    const v = target.via[viaAt];
+    if (v) {
+      if (Math.hypot(p.x - v.x, p.z - v.z) < (v.r ?? VIA_R)
+        || Math.hypot(p.x - target.x, p.z - target.z) < 0.5 * Math.hypot(v.x - target.x, v.z - target.z)) {
+        viaAt++;
+        planAt = 0;
+      }
+    }
     if (T.simT > planAt || !path) plan();
     let pr = project(p);
     if (pr.off > OFF_ROUTE) { plan(); pr = project(p); }
