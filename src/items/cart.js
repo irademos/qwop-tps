@@ -23,7 +23,11 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // water deeper than MAX_WADE, a tree trunk. Down it goes any way: a drop steeper than it can follow
 // (FALL_STEP) and it's off the edge, falling with gravity (FALL_GRAVITY) until it lands. Dust
 // soft dust puffs rise behind its back wheels as it rolls (DUST_*). The camera eases round behind it.
-// Pushing into something it can't pass (not water), where it hits decides what it does
+// A tree, or a slope too steep to climb, slides it past a little off to one side (slidePast).
+// Ground falling away steeper than TUMBLE_SLOPE (near and further on — a ledge is a fall) sends
+// it tumbling: the rider thrown out downhill, the cart rolling over and over down the steepest
+// way till the ground's gentle, then lying on its side and righting itself like a flip.
+// Pushing into a wall or a tree it can't slide past, where it hits decides what it does
 // (contactAt — its leading corners, the way it rolls):
 //  - head on (both leading corners, or its middle): it rears up — the leading wheels ride up
 //    the wall, pivoting on the trailing axle (st.rear, REAR_*), fast and harder the faster it hit
@@ -72,7 +76,10 @@ const TURN_RATE = 1.5;                       // rad/s at full sideways lean, rol
 const TURN_STILL = 0.55;                     // rad/s at full lean, stopped (pushed round)
 const TURN_FULL_SPEED = 1.5;                 // m/s — at this speed or more it turns at TURN_RATE
 const SLOPE_PULL = 2.5;                      // m/s² downhill per unit of slope along it
-const MAX_UP_SLOPE = 0.9;                    // rise / run it rolls up (~42°) — ground ahead of it, the way it rolls (down: any)
+const MAX_UP_SLOPE = 1.2;                    // rise / run it rolls up (~50°) — ground ahead of it, the way it rolls (down: see TUMBLE_SLOPE)
+const WALL_RISE = 1.0;                       // m — a corner's ground this far over its middle's is a wall, not a slope
+const SLIDE_ANGLES = [0.35, 0.7, 1.05];      // rad off its heading tried, each way, to slide past a tree / up a slope
+const SLIDE_KEEP = 0.85;                     // share of the speed kept sliding past
 const MAX_STEP_UP = 0.3;                     // m its middle can step up in one go (a kerb; more is a wall)
 const TURN_SLOPE_SLACK = 0.6;                // turning on the spot: corners may rise this much steeper (it's already there)
 const AIR_CLEAR = 0.1;                       // m — in the air, ground over its bottom by this much is a wall
@@ -130,6 +137,17 @@ const REAR_DAMP = 3;                         // 1/s
 const REAR_SPIN_FROM = 0.3;                  // rad reared before it spins
 const REAR_SPIN_RATE = 3;                    // rad/s spinning on its trailing wheels
 const REAR_SLIDE_STEP = 0.04;                // m a try rolling back off the wall coming down
+// Tumbling down a very steep slope: the rider thrown out, the cart rolling over and over down it
+const TUMBLE_SLOPE = 1.35;                   // drop / run (~53°) downhill, near and further on, that sends it over
+const TUMBLE_NEAR = 0.6;                     // m — the slope measured this far out …
+const TUMBLE_FAR = 1.5;                      // … and this far (a ledge is a fall, not a slope)
+const TUMBLE_G = 14;                         // m/s² down a vertical slope (× sin of the slope)
+const TUMBLE_DRAG = 0.6;                     // 1/s rolling
+const TUMBLE_STOP_DRAG = 4;                  // 1/s once the ground's gentle
+const TUMBLE_END_SLOPE = 0.35;               // ground gentler than this: it comes to a stop
+const TUMBLE_R = 0.45;                       // m — the rolling cart's middle over the ground
+const TUMBLE_MAX_S = 7;                      // s at most
+const TUMBLE_SETTLE_S = 0.45;                // s rolling onto its side at the bottom
 
 let templatePromise = null;
 let floorY = MODEL_FLOOR_FALLBACK_Y;         // the bed's floor, model units
@@ -324,7 +342,7 @@ export function createCartRide(ctx) {
   ctx.parent.add(model.group);
   const dust = createCartDust(ctx.parent);
   let dustDue = 0;
-  const st = { tip: 0, tipV: 0, tipSide: 1, rear: 0, rearV: 0, rearDir: 1, spinDir: 1, pushDir: 1, mode: null, flip: null, vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
+  const st = { tip: 0, tipV: 0, tipSide: 1, rear: 0, rearV: 0, rearDir: 1, spinDir: 1, pushDir: 1, mode: null, slideSide: 1, throwDir: null, flip: null, vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
   const ride = { y: 0, yaw: 0, camDist: 0 }; // (controls.ride)
   let riding = false;
   let holding = false;
@@ -363,7 +381,7 @@ export function createCartRide(ctx) {
     }
     return [[mx + hw, f], [mx - hw, f], [mx + hw, b], [mx - hw, b], [mx, f], [mx, b]];
   };
-  let blockedBy = null;                       // why fits() last said no ('water' / null)
+  let blockedBy = null;                       // why fits() last said no ('water' / 'trunk' / 'slope' / 'wall' / null)
   // Whether the cart fits at a pose. `roll` (rolling there): { dir — +1 forward / −1 back / 0
   // turning on the spot, y — its height now, air — in the air }; without it (parking) every
   // corner's slope counts. Rolling, only the ground ahead the way it goes counts: up it's
@@ -380,10 +398,13 @@ export function createCartRide(ctx) {
       if (ahead && g > roll.y + AIR_CLEAR) return false;
     } else {
       const limit = roll?.dir === 0 ? MAX_UP_SLOPE + TURN_SLOPE_SLACK : MAX_UP_SLOPE;
-      if (ahead && Math.abs(lz) > 1e-3 && (g - mid) / Math.abs(lz) > limit) return false;
+      if (ahead && Math.abs(lz) > 1e-3 && (g - mid) / Math.abs(lz) > limit) {
+        blockedBy = g - mid > WALL_RISE ? 'wall' : 'slope';
+        return false;
+      }
     }
     if (ctx.waterDepth(p.x, p.z) > MAX_WADE) { blockedBy = 'water'; return false; }
-    if (pushOutOfObstacles(p.x, p.z, g + 0.4, TRUNK_PROBE_R)) return false;
+    if (pushOutOfObstacles(p.x, p.z, g + 0.4, TRUNK_PROBE_R)) { blockedBy = 'trunk'; return false; }
     return true;
   };
   const midGround = (x, z, yaw, mx) => {
@@ -396,9 +417,33 @@ export function createCartRide(ctx) {
     const { g: mid, wet } = midGround(x, z, yaw, corners[4][0]);
     if (!Number.isFinite(mid)) return false;
     if (wet) { blockedBy = 'water'; return false; }
-    if (roll && !roll.air && mid - roll.y > MAX_STEP_UP) return false;
+    if (roll && !roll.air && mid - roll.y > MAX_STEP_UP) { blockedBy = 'wall'; return false; }
     for (const [lx, lz] of corners) if (!cornerOk(x, z, yaw, lx, lz, mid, roll)) return false;
     return true;
+  };
+  // The steepest way down from a spot, `d` m out: { s — drop / run, dx, dz — that way (unit) }
+  const DOWN_DIRS = 12;
+  const steepestDown = (x, z, d) => {
+    const g0 = groundAt(x, z);
+    const out = { s: 0, dx: 0, dz: 0 };
+    if (!Number.isFinite(g0)) return out;
+    for (let i = 0; i < DOWN_DIRS; i++) {
+      const a = (i / DOWN_DIRS) * Math.PI * 2;
+      const dx = Math.sin(a);
+      const dz = Math.cos(a);
+      const g = groundAt(x + dx * d, z + dz * d);
+      const sl = Number.isFinite(g) ? (g0 - g) / d : 0;
+      if (sl > out.s) Object.assign(out, { s: sl, dx, dz });
+    }
+    return out;
+  };
+  // Whether the ground falls away too steeply to stay on (near and further on — not a ledge)
+  const tooSteep = (x, z) => {
+    const near = steepestDown(x, z, TUMBLE_NEAR);
+    if (near.s < TUMBLE_SLOPE) return null;
+    const far = steepestDown(x, z, TUMBLE_FAR);
+    if (far.s < TUMBLE_SLOPE * 0.85 || far.dx * near.dx + far.dz * near.dz < 0.5) return null;
+    return near;
   };
   // Where it hits rolling into a pose it doesn't fit (its leading end, the way it rolls `dir`):
   // 'head' (both leading corners, or its middle), 'left' / 'right' (that corner alone)
@@ -488,6 +533,14 @@ export function createCartRide(ctx) {
   // (tipped: turned about the low side's bottom edge — raised, and shifted toward that side)
   // (reared: turned about the trailing wheels — raised, and shifted back)
   const placeModel = () => {
+    if (st.flip?.phase === 'tumble' || st.flip?.phase === 'settle') {
+      // (rolling over about its middle, TUMBLE_R over the ground)
+      const a = st.flip.ang;
+      const o = worldXZ(0, 0, st.yaw, TUMBLE_R * Math.sin(a), 0);
+      model.group.position.set(st.x + o.x, st.y + TUMBLE_R - TUMBLE_R * Math.cos(a), st.z + o.z);
+      model.group.rotation.set(0, st.yaw, a);
+      return;
+    }
     const { tip, rear } = st;
     const ox = tip > 1e-4 ? -st.tipSide * CART_HALF_WIDTH * (1 - Math.cos(tip)) : 0;
     const oz = rear > 1e-4 ? -st.rearDir * HB * (1 - Math.cos(rear)) : 0;
@@ -590,6 +643,64 @@ export function createCartRide(ctx) {
     f.t += dt;
     st.rear *= Math.exp(-5 * dt);
     st.rearV = 0;
+    if (f.phase === 'tumble') {
+      // Down the slope, rolling over and over: gravity along the steepest way down, drag, stopped
+      // by walls / trees / deep water
+      const down = steepestDown(st.x, st.z, TUMBLE_NEAR);
+      const sn = down.s / Math.hypot(1, down.s);
+      f.vx += down.dx * TUMBLE_G * sn * dt;
+      f.vz += down.dz * TUMBLE_G * sn * dt;
+      const drag = Math.exp(-(down.s < TUMBLE_END_SLOPE ? TUMBLE_STOP_DRAG : TUMBLE_DRAG) * dt);
+      f.vx *= drag;
+      f.vz *= drag;
+      const sp = Math.hypot(f.vx, f.vz);
+      const nx = st.x + f.vx * dt;
+      const nz = st.z + f.vz * dt;
+      const g0 = groundAt(st.x, st.z);
+      const g1 = groundAt(nx, nz);
+      const blocked = !Number.isFinite(g1) || (Number.isFinite(g0) && g1 - g0 > MAX_STEP_UP)
+        || ctx.waterDepth(nx, nz) > MAX_WADE || pushOutOfObstacles(nx, nz, g1 + 0.4, TUMBLE_R * 0.6);
+      if (blocked) {
+        if (sp > 2) ctx.onBump?.();
+        f.vx = 0;
+        f.vz = 0;
+      } else {
+        st.x = nx;
+        st.z = nz;
+        st.y = g1;
+        f.ang += (sp * dt) / TUMBLE_R;
+        // (its side toward the way it rolls)
+        if (sp > 0.3) st.yaw = wrap(st.yaw + wrap(Math.atan2(f.vx, f.vz) - Math.PI / 2 - st.yaw) * ease(6, dt));
+        // (a thud each time it comes down on its wheels or its top)
+        const half = Math.floor(f.ang / Math.PI);
+        if (half !== f.half) { f.half = half; if (sp > 1.5) ctx.onBump?.(); }
+      }
+      if (blocked || f.t > TUMBLE_MAX_S || (down.s < TUMBLE_END_SLOPE && sp < 0.3)) {
+        // (onto its side: the nearest turn of it lying down)
+        f.phase = 'settle';
+        f.t = 0;
+        f.from = f.ang;
+        f.to = Math.PI / 2 + Math.round((f.ang - Math.PI / 2) / (Math.PI * 2)) * Math.PI * 2;
+      }
+      placeModel();
+      return;
+    }
+    if (f.phase === 'settle') {
+      const u = Math.min(1, f.t / TUMBLE_SETTLE_S);
+      f.ang = f.from + (f.to - f.from) * u * u * (3 - 2 * u);
+      if (u < 1) { placeModel(); return; }
+      // Lying on its side: from here as a flip (its model left where it is)
+      placeModel();
+      const at = model.group.position.clone();
+      Object.assign(st, { tip: FLIP_LIE, tipV: 0, tipSide: 1, roll: 0, pitch: 0 });
+      const off = worldXZ(0, 0, st.yaw, -CART_HALF_WIDTH, 0);
+      st.x = at.x - off.x;
+      st.z = at.z - off.z;
+      st.y = at.y - CART_HALF_WIDTH;
+      f.phase = 'lie';
+      f.t = 0;
+      ctx.onBump?.();
+    }
     if (f.phase === 'fall') {
       st.tipV += TIP_GRAVITY * 1.5 * dt;
       st.tip += st.tipV * dt;
@@ -605,7 +716,8 @@ export function createCartRide(ctx) {
       const u = Math.min(1, f.t / FLIP_RIGHT_S);
       st.tip = FLIP_LIE * (1 - u * u * (3 - 2 * u));
       if (u >= 1) {
-        Object.assign(st, { tip: 0, tipV: 0, rear: 0, flip: null });
+        Object.assign(st, { tip: 0, tipV: 0, rear: 0, flip: null, settled: false });
+        settle(0); // (back on the ground under it)
         ctx.onBump?.();
       }
     }
@@ -679,6 +791,26 @@ export function createCartRide(ctx) {
     return { ix: THREE.MathUtils.clamp(ix, -1, 1), iz: THREE.MathUtils.clamp(iz, -1, 1) };
   };
 
+  // Blocked by a tree / a slope too steep: the same step a little off to one side (the way the
+  // phone leans first, else either), the cart turning a little that way. → true if it went.
+  const slidePast = (yaw, step, rollAt, ix) => {
+    const first = Math.abs(ix) > 0.15 ? Math.sign(ix) : (st.slideSide || 1);
+    for (const a of SLIDE_ANGLES) {
+      for (const sd of [first, -first]) {
+        const h = yaw + sd * a * Math.sign(step);
+        const len = Math.abs(step) * SLIDE_KEEP;
+        const nx = st.x + Math.sin(h) * len * Math.sign(step);
+        const nz = st.z + Math.cos(h) * len * Math.sign(step);
+        const ny = wrap(yaw + sd * a * 0.25 * Math.sign(step));
+        if (fits(nx, nz, ny, rollAt, null)) {
+          Object.assign(st, { x: nx, z: nz, yaw: ny, slideSide: sd });
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   // Before the controls move the player: the speed, the turn, the ground, the camera
   const update = (dt) => {
     dt = Math.min(0.1, Math.max(0, dt));
@@ -720,14 +852,22 @@ export function createCartRide(ctx) {
     const fromY = st.air ? st.y : groundAt(st.x, st.z);
     const rollAt = { dir, y: Number.isFinite(fromY) ? fromY : st.y, air: st.air };
     let lift = 0;
-    if (fits(nx, nz, yaw, rollAt, tilt())) {
+    const fitsThere = fits(nx, nz, yaw, rollAt, tilt());
+    const why = blockedBy; // (what stopped it — the tries below overwrite blockedBy)
+    if (fitsThere) {
       Object.assign(st, { x: nx, z: nz, yaw });
       moved = step;
       if (!st.air) model.spin(step);
+    } else if (!st.air && !lifted && dir !== 0 && (why === 'trunk' || why === 'slope') && slidePast(yaw, step, rollAt, ix)) {
+      // (glanced off a tree / found a gentler way up: slid past, steering a little that way)
+      moved = Math.abs(step) * SLIDE_KEEP * Math.sign(step);
+      model.spin(moved);
+      st.v *= SLIDE_KEEP;
     } else {
-      // Up against something: pushing on into it (not water) tips it up — first, which side lifts
-      const intoWater = blockedBy === 'water';
-      if (!st.air && !holding && !intoWater && Math.abs(iz) > 0.15 && dir !== 0) {
+      // Up against something: pushing on into a wall or a tree tips it up (too steep a slope, or
+      // water, just stops it) — first, where it hits
+      const lifts = why === 'wall' || why === 'trunk' || why === null;
+      if (!st.air && !holding && lifts && Math.abs(iz) > 0.15 && dir !== 0) {
         if (st.tip < 0.02 && st.rear < 0.02) {
           // Fresh contact: where it hits — head on it rears up, a corner lifts that side
           const impact = Math.min(1, Math.abs(st.v) / MAX_SPEED);
@@ -763,8 +903,21 @@ export function createCartRide(ctx) {
         : updateTip(dt, holding ? 0 : lift, holding ? 0 : ix, spinRoll);
     if (st.rear < 1e-3 && st.tip < 1e-3 && lift <= 0) st.mode = null;
     if (liftOut === 'flip') {
+      st.throwDir = null;
       placeModel();
       return 'flip';
+    }
+    // Over the edge of something very steep going down (not in water): it tumbles to the bottom
+    if (!st.air && !lifted && !st.flip && !(ctx.waterDepth(st.x, st.z) > 0.05)) {
+      const down = tooSteep(st.x, st.z);
+      if (down) {
+        const sp = Math.max(1, Math.abs(st.v));
+        st.flip = { phase: 'tumble', t: 0, ang: 0, half: 0, vx: down.dx * sp, vz: down.dz * sp };
+        Object.assign(st, { tip: 0, tipV: 0, rear: 0, rearV: 0, mode: null, roll: 0, pitch: 0 });
+        st.throwDir = { x: down.dx, z: down.dz };
+        placeModel();
+        return 'flip';
+      }
     }
     if (settle(dt, moved) === 'thud' && st.t - st.bumpAt > 0.3) { st.bumpAt = st.t; ctx.onBump?.(); }
     kickDust(moved, dt);
@@ -823,7 +976,7 @@ export function createCartRide(ctx) {
     isFlipped: () => !!st.flip,
     state: () => ({ ...st, flip: st.flip ? { ...st.flip } : null }), // (dev console)
     // The way the rider is thrown going over: toward the low side (world { x, z }, unit)
-    throwDir: () => worldXZ(0, 0, st.yaw, -st.tipSide, 0),
+    throwDir: () => st.throwDir ?? worldXZ(0, 0, st.yaw, -st.tipSide, 0),
     isHolding: () => riding && holding,
   };
 }

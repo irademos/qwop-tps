@@ -117,7 +117,7 @@ export function installTownCart(T, ctx) {
       const dir = ride.throwDir();
       leave({ step: false });
       ctx.throwPlayer?.(dir);
-      T.feedLine('The cart tipped over!');
+      T.feedLine(ride.state().flip?.phase === 'tumble' ? 'The cart went tumbling down the slope!' : 'The cart tipped over!');
     }
   };
   const cartAfterControls = () => ride?.afterControls();
