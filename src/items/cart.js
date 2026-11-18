@@ -27,6 +27,8 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // Ground falling away steeper than TUMBLE_SLOPE (near and further on — a ledge is a fall) sends
 // it tumbling: the rider thrown out downhill, the cart rolling over and over down the steepest
 // way till the ground's gentle, then lying on its side and righting itself like a flip.
+// Stuck (pushing / steering, nothing moving for STUCK_S): down on its wheels and out of whatever's
+// inside it (unstick). Left alone a while, townCart.js puts it back at its parking spot.
 // Pushing into a wall or a tree it can't slide past, where it hits decides what it does
 // (contactAt — its leading corners, the way it rolls):
 //  - head on (both leading corners, or its middle): it rears up — the leading wheels ride up
@@ -112,6 +114,10 @@ const CAM_MANUAL_S = 1.5;                    // s after the player turns the cam
 const CAM_BACK = 1.6;                        // m further back in the cart (it fills the view otherwise)
 const RIDER_TURN_RATE = 8;                   // 1/s — holding something: the rider turning to the camera's way
 const TELEPORT_DIST = 1.5;                   // m moved by someone else in a frame: get out
+// Stuck watchdog: pushing / steering with nothing moving this long → down on its wheels and, if it
+// doesn't fit where it is (a trunk inside it), moved to the nearest spot it does
+const STUCK_S = 0.8;
+const UNSTICK_MAX_R = 1.8;                   // m searched round it
 // Tipping up against what it can't pass / flipping over
 const TIP_PUSH = 8;                          // rad/s² lifting at full push into something, flat …
 const TIP_PUSH_TOP = 0.6;                    // … fading to none at this tip (so pushing holds it at ~0.45)
@@ -343,7 +349,7 @@ export function createCartRide(ctx) {
   ctx.parent.add(model.group);
   const dust = createCartDust(ctx.parent);
   let dustDue = 0;
-  const st = { tip: 0, tipV: 0, tipSide: 1, rear: 0, rearV: 0, rearDir: 1, spinDir: 1, pushDir: 1, mode: null, slideSide: 1, throwDir: null, flip: null, vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
+  const st = { tip: 0, tipV: 0, tipSide: 1, rear: 0, rearV: 0, rearDir: 1, spinDir: 1, pushDir: 1, mode: null, slideSide: 1, throwDir: null, stuckT: 0, flip: null, vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
   const ride = { y: 0, yaw: 0, camDist: 0 }; // (controls.ride)
   let riding = false;
   let holding = false;
@@ -760,7 +766,7 @@ export function createCartRide(ctx) {
     if (riding || !c || st.flip) return false;
     riding = true;
     holding = false;
-    Object.assign(st, { v: 0, riderYaw: st.yaw, camYaw: null, manualAt: -Infinity, tip: 0, tipV: 0, rear: 0, rearV: 0 });
+    Object.assign(st, { v: 0, riderYaw: st.yaw, camYaw: null, manualAt: -Infinity, tip: 0, tipV: 0, rear: 0, rearV: 0, mode: null, stuckT: 0 });
     const s = standPoint();
     c.playerX = s.x;
     c.playerZ = s.z;
@@ -842,6 +848,31 @@ export function createCartRide(ctx) {
     return false;
   };
 
+  // Freed: down on its wheels (as getting back in does) and, if it doesn't fit where it is, moved
+  // to the nearest spot round it that it does
+  const unstick = () => {
+    Object.assign(st, { tip: 0, tipV: 0, rear: 0, rearV: 0, mode: null, v: 0, stuckT: 0 });
+    const y = groundAt(st.x, st.z);
+    const r = { dir: 0, y: Number.isFinite(y) ? y : st.y, air: false };
+    if (!fits(st.x, st.z, st.yaw, r)) {
+      search: for (let d = 0.15; d <= UNSTICK_MAX_R; d += 0.15) {
+        for (let k = 0; k < 16; k++) {
+          const a = (k / 16) * Math.PI * 2;
+          const x = st.x + Math.sin(a) * d;
+          const z = st.z + Math.cos(a) * d;
+          const gy = groundAt(x, z);
+          if (fits(x, z, st.yaw, { dir: 0, y: Number.isFinite(gy) ? gy : st.y, air: false })) {
+            st.x = x;
+            st.z = z;
+            break search;
+          }
+        }
+      }
+    }
+    st.settled = false;
+    settle(0);
+  };
+
   // Before the controls move the player: the speed, the turn, the ground, the camera
   const update = (dt) => {
     dt = Math.min(0.1, Math.max(0, dt));
@@ -872,6 +903,9 @@ export function createCartRide(ctx) {
     const turnRate = TURN_STILL + (TURN_RATE - TURN_STILL) * Math.min(1, Math.abs(st.v) / TURN_FULL_SPEED);
     // (tipped / reared up: it turns about its wheels still down — updateTip / updateRear)
     const lifted = st.tip > 0.02 || st.rear > 0.02;
+    const x0 = st.x;
+    const z0 = st.z;
+    const yaw0 = st.yaw;
     const yaw = lifted ? st.yaw : wrap(st.yaw + ix * turnRate * dt);
     const step = st.v * dt;
     const nx = st.x + Math.sin(yaw) * step;
@@ -889,7 +923,7 @@ export function createCartRide(ctx) {
       Object.assign(st, { x: nx, z: nz, yaw });
       moved = step;
       if (!st.air) model.spin(step);
-    } else if (!st.air && !lifted && dir !== 0 && (why === 'trunk' || why === 'slope') && slidePast(yaw, step, rollAt, ix, why, dt)) {
+    } else if (!st.air && dir !== 0 && (why === 'trunk' || (why === 'slope' && !lifted)) && slidePast(yaw, step, rollAt, ix, why, dt)) {
       // (glanced off a tree / found a gentler way up: slid past, steering a little that way)
       moved = Math.abs(step) * SLIDE_KEEP * Math.sign(step);
       model.spin(moved);
@@ -951,6 +985,11 @@ export function createCartRide(ctx) {
       }
     }
     if (settle(dt, moved) === 'thud' && st.t - st.bumpAt > 0.3) { st.bumpAt = st.t; ctx.onBump?.(); }
+    // (stuck: pushing or steering, nothing moving)
+    const trying = !holding && !st.air && (Math.abs(iz) > 0.15 || Math.abs(ix) > 0.15);
+    const went = Math.abs(moved) > 0.002 || Math.abs(wrap(st.yaw - yaw0)) > 0.002 || Math.hypot(st.x - x0, st.z - z0) > 0.002;
+    st.stuckT = trying && !went ? st.stuckT + dt : 0;
+    if (st.stuckT > STUCK_S) unstick();
     kickDust(moved, dt);
     placeModel();
     const s = standPoint();
@@ -1005,6 +1044,7 @@ export function createCartRide(ctx) {
     group: model.group,
     isRiding: () => riding,
     isFlipped: () => !!st.flip,
+    unstick, // (dev console)
     state: () => ({ ...st, flip: st.flip ? { ...st.flip } : null }), // (dev console)
     // The way the rider is thrown going over: toward the low side (world { x, z }, unit)
     throwDir: () => st.throwDir ?? worldXZ(0, 0, st.yaw, -st.tipSide, 0),
