@@ -97,17 +97,16 @@ export const PRODUCE = { woodcutter: ['wood', 2, 3], farmer: ['crops', 2, 4], fi
 export const CARRY_MAX = 14;                // goods a seller keeps on hand (no more made past it)
 export const MERCHANT_START_CASH = 60;      // coins the weaponsmith starts out with
 export const SELLER_START_CASH = 25;        // coins a seller starts out with (to buy the player's goods)
-// The market (townMarket.js): stalls outside the shop, open to anyone who stands behind one —
-// the sellers in their selling hours (ROLES sellHours — fish in the morning, veg in the
-// afternoon, so there's always some food), the player whenever
-export const MARKET_STALLS = 5;             // how many stalls (fewer if there's no room)
-export const MARKET_STALL_DIST = [4.5, 20];   // m from the shop's door
-export const MARKET_STALL_GAP = 3.8;        // m between stalls
+// The market (townMarket.js): selling spots open to anyone who stands at one — two stalls
+// outside the shop (either side of its door) and three along each of its side counters — the
+// sellers in their selling hours (ROLES sellHours — fish in the morning, veg in the afternoon,
+// so there's always some food), the player whenever
 export const STALL_KEEPER_DIST = 0.9;       // m from a stall's keeper spot (behind it) to be the one selling there
 export const STAND_ACT_DIST = 1.6;          // m — Sell here behind a free stall
 export const STAND_LEAVE_DIST = 2.2;        // m walked off it closes the player's stand
 export const STALL_BUY_DIST = 2.6;          // m from a stall's front — Buy from <name>
-export const STAND_SALE_LINE_S = 1.2;       // s a shopper waits at the player's stand before buying
+export const OFFER_WAIT_S = 18;             // s a customer at the player's spot waits for an answer
+export const DECLINED_S = 90;              // s a customer the player said no to keeps away from the player's spot
 export const WOOD_BUY_CHANCE = 0.25;        // a townsperson's decision in the day: some firewood (once a day)
 export const TRADE_DIST = 3.4;              // m from the shop's back counter (the wizard's stall) for its buttons (🛒 Shop, 🔮 Wizard)
 // The rooms (townRooms.js): two of the town's houses are the shop and the jail (the sheriff's

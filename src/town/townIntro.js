@@ -78,10 +78,10 @@ const STEPS = [
   },
   {
     id: 'sell', guide: 'farmer', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'stall',
-    progress: 'Stand behind a free market stall and press Sell here',
-    done: 'There — coins in your pocket! Fish sells in the morning, veg in the afternoon. Stay at your stall and folk keep coming.',
+    progress: 'Stand behind a free market stall, press Sell here, then sell to me',
+    done: 'There — coins in your pocket! Fish sells in the morning, veg in the afternoon. Stay at your stall and folk keep coming — you say yes or no to each.',
     tips: [
-      'Walk round behind a free stall — the sign says so — and press Sell here.',
+      'Walk round behind a free stall — the sign says so — and press Sell here. There are spots inside the shop too, along the side counters.',
       'Cooked food fetches more than raw.',
       'You can sell to us sellers too: talk to me and press Sell. We pay less than folk at a stall, mind.',
     ],
@@ -745,22 +745,28 @@ export function installTownIntro(T, ctx) {
     if (T.stand) return T.stallByKey(T.stand.key);
     let st = T.intro.stallKey ? T.stallByKey(T.intro.stallKey) : null;
     if (!st || !free(st)) {
-      st = (T.layout.places.marketStalls ?? []).find(free) ?? null;
+      // (outside first: the walk there doesn't go indoors)
+      const all = T.marketSpots();
+      st = all.find((x) => !x.indoor && free(x)) ?? all.find(free) ?? null;
       T.intro.stallKey = st?.key ?? null;
     }
     return st;
   };
-  // The farmer buys the first thing off the player's stall once they're in front of it
+  // The farmer asks to buy the first thing off the player's stall once they're in front of it
+  // (again a while after a no)
+  let guideAskedAt = -1e9;
   const guideBuys = () => {
     const s = step();
     if (s?.id !== 'sell' || T.intro.phase !== 'do' || T.intro.debrief || !T.stand) return;
     const g = T.npcById(T.intro.guideId);
     const st = T.stallByKey(T.stand.key);
     if (!g?.alive || !st || dist2(g.x, g.z, st.customer.x, st.customer.z) > 6) return;
+    if (T.offerPending(g) || T.simT - guideAskedAt < 20) return;
     const good = ['crops', ...FOOD_IDS, ...GOOD_IDS].find((x) => T.goods[x] > 0);
     if (!good) return;
+    guideAskedAt = T.simT;
     g.money = Math.max(g.money, goodPrice(good));
-    T.buyFood(g, { type: 'eat', stall: st.key, g: good });
+    T.askPlayer(g, good);
   };
   // Upkeep: a guide who's gone (dead, jailed) is replaced; a talk with nobody to give it, skipped
   const updateIntro = () => {

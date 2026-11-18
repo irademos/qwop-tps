@@ -1,7 +1,7 @@
 // Town: farming. The farmers' fields (townLayout.js) can be bought — walk up to one and 🌱 Buy
 // this field (FIELD_PRICE, paid to the farmer who works it; no talking needed): its crops are the
 // player's to pick from then on (no theft), and the farmer stops working it. Seeds come from the
-// shop (SHOP_GEAR 'seeds' → T.seeds) and are planted anywhere (🌱 Plant a seed — a little dirt
+// farmers (SHOP_GEAR 'seeds', SELLER_GEAR → T.seeds) and are planted anywhere (🌱 Plant a seed — a little dirt
 // pile in front of the player); each grows one veg in a town day (VEG_DRY_S), or in VEG_WET_S
 // while its soil is wet, then 🥕 Pick your veg. The water: the hose at the tap (a grabbable —
 // townGrab.js: ✋ Grab the hose with empty hands / ✋ Drop it; the player can't walk further than

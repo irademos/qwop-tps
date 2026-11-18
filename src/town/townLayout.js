@@ -8,7 +8,7 @@ import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import {
-  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, MARKET_STALLS, MARKET_STALL_DIST, MARKET_STALL_GAP, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CAMP_DIST, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
@@ -180,38 +180,38 @@ export function installTownLayout(T, ctx) {
       homes.push(home);
     }
     if (!homes.length) homes.push({ ...fire, room: null });
-    // The market stalls (townMarket.js): round the shop's door, a market square — each facing
-    // the door, clear of the fire, the houses (and their doors) and each other, keeper (behind) and customer
-    // (in front) spots on walkable ground
+    // The market stalls (townMarket.js): two, one either side of the shop's door, a little out
+    // from the house, facing the road in front of it (the way out of the door) — the stall
+    // itself off the road / trail (its customers stand at the road's edge), clear of the doors
     const shopDoor = shops.shop.door;
-    const stallCells = nav.cellsWhere((i) => {
-      const x = nav.cellX(i);
-      const z = nav.cellZ(i);
-      const d = dist2(x, z, shopDoor.x, shopDoor.z);
-      return d >= MARKET_STALL_DIST[0] && d <= MARKET_STALL_DIST[1] && nav.clearanceAt(i) >= 1.6
-        && dist2(x, z, fire.x, fire.z) > 4.5 && dist2(x, z, jailDoor.x, jailDoor.z) > 4
-        && buildings.every((b) => dist2(x, z, b.x, b.z) > b.radius + 1.6)
-        && Object.values(rooms).every((r) => !r.door || dist2(x, z, r.door.x, r.door.z) > 3.5)
-        && homes.every((h) => dist2(x, z, h.x, h.z) > 2.5);
-    });
+    const outYaw = shops.shop.exitYaw;
+    const out = { x: Math.sin(outYaw), z: Math.cos(outYaw) };
+    const side = { x: Math.cos(outYaw), z: -Math.sin(outYaw) };
+    const at = (x, z, a, b) => ({ x: x + out.x * a + side.x * b, z: z + out.z * a + side.z * b });
+    const cellOk = (p, offRoadToo) => {
+      const i = nav.indexAt(p.x, p.z);
+      return i >= 0 && nav.walkableIndex(i) && (!offRoadToo || nav.kindAt(i) === 0);
+    };
+    const fits = (c, strict) => {
+      // (its footprint: ±0.8 m across, ±0.5 m front to back; behind it the keeper, in front the customer)
+      for (const [a, b] of [[0, 0], [0.5, 0.8], [0.5, -0.8], [-0.5, 0.8], [-0.5, -0.8]]) if (!cellOk(at(c.x, c.z, a, b), strict)) return false;
+      if (!cellOk(at(c.x, c.z, -0.8, 0)) || !cellOk(at(c.x, c.z, 1.3, 0))) return false;
+      return Object.values(rooms).every((r) => !r.door || dist2(c.x, c.z, r.door.x, r.door.z) > 2.2)
+        && homes.every((h) => dist2(c.x, c.z, h.x, h.z) > 1.5);
+    };
     const marketStalls = [];
-    const stallSpot = (st, lz) => ({ x: st.x + Math.sin(st.yaw) * lz, z: st.z + Math.cos(st.yaw) * lz });
-    for (let k = 0; k < MARKET_STALLS; k++) {
-      const pick = best(stallCells.filter((i) => marketStalls.every((m) => dist2(nav.cellX(i), nav.cellZ(i), m.x, m.z) > MARKET_STALL_GAP)),
-        (i) => Math.min(nav.clearanceAt(i), 3) * 0.5 + (offRoad(i) ? 1 : 0) + (nearRoad(i, 2.5) ? 0.8 : 0)
-          - dist2(nav.cellX(i), nav.cellZ(i), shopDoor.x, shopDoor.z) * 0.12);
-      if (pick < 0) break;
-      const x = nav.cellX(pick);
-      const z = nav.cellZ(pick);
-      const st = { key: `mkt${k}`, x, z, yaw: Math.atan2(shopDoor.x - x, shopDoor.z - z) };
-      const keeper = stallSpot(st, -0.8);
-      const customer = stallSpot(st, 1.3);
-      if (!nav.isWalkable(keeper.x, keeper.z) || !nav.isWalkable(customer.x, customer.z)) {
-        stallCells.splice(stallCells.indexOf(pick), 1);
-        k -= 1;
-        continue;
+    for (const sgn of [-1, 1]) {
+      let found = null;
+      for (const strict of [true, false]) {
+        for (let b = 2.6; b <= 7.5 && !found; b += 0.4) {
+          for (let a = 0.4; a <= 3.6 && !found; a += 0.4) {
+            const c = at(shopDoor.x, shopDoor.z, a, b * sgn);
+            if (fits(c, strict)) found = c;
+          }
+        }
+        if (found) break;
       }
-      marketStalls.push(st);
+      if (found) marketStalls.push({ key: `mkt${marketStalls.length}`, x: found.x, z: found.z, yaw: outYaw });
     }
     for (const st of marketStalls) {
       T.stalls.setOutdoor(st.key, { x: st.x, z: st.z, yaw: st.yaw, y: groundAt(st.x, st.z) });

@@ -1,8 +1,9 @@
 // Town mode economy: the goods townsfolk (and the player) make, buy and sell. Each producer
-// sells their own at a market stall outside the shop (townMarket.js) — the fisher fish, the
-// farmer veg, the woodcutter wood — out of what they carry (n.carry), at a set price; the
-// player sells to them by talking, or stands at an open stall and sells to whoever comes up.
-// The shop (the weaponsmith) sells gear and seeds only.
+// sells their own at a selling spot (townMarket.js — a market stall outside the shop, or a spot
+// along the shop's side counters): the fisher fish (and fishing rods), the farmer veg (and
+// seeds), the woodcutter wood — goods out of what they carry (n.carry), at a set price; the
+// player buys / sells with them by talking, or takes a free spot and sells to whoever comes up.
+// The shop's back counter is the weaponsmith's: the rest of the gear.
 
 // price: what one costs (coins, set — no haggling); heal: health a bite gives the player;
 // cooked: made at the campfire's pot (townCooking.js — RECIPES) — nobody else makes them, so
@@ -17,14 +18,19 @@ export const GOODS = {
 export const GOOD_IDS = Object.keys(GOODS);
 export const RAW_IDS = GOOD_IDS.filter((g) => !GOODS[g].cooked);
 export const FOOD_IDS = GOOD_IDS.filter((g) => GOODS[g].food);
-// Who sells what (their own good, made at work — townConfig.js PRODUCE)
+// Who sells what: their own good (made at work — townConfig.js PRODUCE) and the gear of their
+// trade (SHOP_GEAR ids — always in stock: they make their own)
 export const SELLER_GOOD = { fisher: 'fish', farmer: 'crops', woodcutter: 'wood' };
+export const SELLER_GEAR = { fisher: ['rod'], farmer: ['seeds'] };
+// Everything a selling spot can show (townStalls.js)
+export const MARKET_WARES = [...Object.keys(GOODS), 'seeds', 'rod'];
 const BUY_BACK_SHARE = 0.6; // what a seller pays the player for one of their own good, as a share of its price
 export const goodPrice = (g) => GOODS[g].price;
 export const buyBackPrice = (g) => Math.max(1, Math.floor(GOODS[g].price * BUY_BACK_SHARE));
 
-// The shop's gear (townStalls.js — the weaponsmith's: seeds on the back counter, this on the side
-// ones). kind = what ctx.grantItem gets (seeds / lockpick are the town's own: townTrade.js); needs = a weapon that must be owned first
+// The gear (townStalls.js — the weaponsmith's on the shop's back counter, but seeds — the
+// farmers' — and the rod — the fishers' — SELLER_GEAR). kind = what ctx.grantItem gets
+// (seeds / lockpick are the town's own: townTrade.js); needs = a weapon that must be owned first
 export const SHOP_GEAR = [
   { id: 'sword',  kind: 'sword',  label: 'Sword',      emoji: '🗡️', price: 30,  desc: 'Swing it with the phone. Chops trees too.' },
   { id: 'rod',    kind: 'rod',    label: 'Fishing Rod', emoji: '🎣', price: 25,  desc: 'Swing it forward to cast at the fishing spot, pull back to hook, reel it in.' },

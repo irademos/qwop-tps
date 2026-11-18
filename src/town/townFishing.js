@@ -1,4 +1,4 @@
-// Town: fishing. The rod is bought at the shop (SHOP_GEAR 'rod') and held like the
+// Town: fishing. The rod is bought from a fisher (SHOP_GEAR 'rod', SELLER_GEAR — townMarket.js) and held like the
 // sword — it is the sword weapon in rod form, swung with the phone's gyro (bootstrapGameApp.js).
 // At the fishing spot (one for now — the shore spot nearest the middle, `places.fishSpot`), or
 // anywhere out in the canoe (T.fishAnywhere — townCanoe.js: the rod comes out there too, the

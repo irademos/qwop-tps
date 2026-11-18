@@ -805,6 +805,7 @@ export function createTownMode(ctx) {
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;
     T.closeStand();
+    T.resetMarket();
     T.resetHomes();
     T.resetFarm();
     T.resetTrees();
