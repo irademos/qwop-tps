@@ -680,15 +680,15 @@ export function createCartRide(ctx) {
         // (onto its side: the nearest turn of it lying down)
         f.phase = 'settle';
         f.t = 0;
-        f.from = f.ang;
-        f.to = Math.PI / 2 + Math.round((f.ang - Math.PI / 2) / (Math.PI * 2)) * Math.PI * 2;
+        f.a0 = f.ang;
+        f.a1 = Math.PI / 2 + Math.round((f.ang - Math.PI / 2) / (Math.PI * 2)) * Math.PI * 2;
       }
       placeModel();
       return;
     }
     if (f.phase === 'settle') {
       const u = Math.min(1, f.t / TUMBLE_SETTLE_S);
-      f.ang = f.from + (f.to - f.from) * u * u * (3 - 2 * u);
+      f.ang = f.a0 + (f.a1 - f.a0) * u * u * (3 - 2 * u);
       if (u < 1) { placeModel(); return; }
       // Lying on its side: from here as a flip (its model left where it is)
       placeModel();
@@ -712,10 +712,26 @@ export function createCartRide(ctx) {
         ctx.onBump?.();
       }
     } else if (f.phase === 'lie') {
-      if (f.t >= FLIP_LIE_S) { f.phase = 'right'; f.t = 0; }
+      if (f.t >= FLIP_LIE_S) {
+        f.phase = 'right';
+        f.t = 0;
+        // (where it'll stand: the ground under its wheels there — eased onto while it rights itself)
+        const keep = { y: st.y, pitch: st.pitch, roll: st.roll, settled: st.settled };
+        st.settled = false;
+        settle(0);
+        f.from = { y: keep.y, pitch: keep.pitch, roll: keep.roll };
+        f.to = { y: st.y, pitch: st.pitch, roll: st.roll };
+        Object.assign(st, keep);
+      }
     } else {
       const u = Math.min(1, f.t / FLIP_RIGHT_S);
-      st.tip = FLIP_LIE * (1 - u * u * (3 - 2 * u));
+      const k = u * u * (3 - 2 * u);
+      st.tip = FLIP_LIE * (1 - k);
+      if (f.from && f.to) {
+        st.y = f.from.y + (f.to.y - f.from.y) * k;
+        st.pitch = f.from.pitch + (f.to.pitch - f.from.pitch) * k;
+        st.roll = f.from.roll + (f.to.roll - f.from.roll) * k;
+      }
       if (u >= 1) {
         Object.assign(st, { tip: 0, tipV: 0, rear: 0, flip: null, settled: false });
         settle(0); // (back on the ground under it)
