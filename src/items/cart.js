@@ -322,7 +322,7 @@ export function createCartRide(ctx) {
   ctx.parent.add(model.group);
   const dust = createCartDust(ctx.parent);
   let dustDue = 0;
-  const st = { tip: 0, tipV: 0, tipSide: 1, rear: 0, rearV: 0, rearDir: 1, spinDir: 1, flip: null, vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
+  const st = { tip: 0, tipV: 0, tipSide: 1, rear: 0, rearV: 0, rearDir: 1, spinDir: 1, pushDir: 1, mode: null, flip: null, vy: 0, air: false, x: 0, z: 0, yaw: 0, y: 0, pitch: 0, roll: 0, v: 0, riderYaw: 0, camYaw: null, manualAt: -Infinity, t: 0, settled: false, bumpAt: -Infinity };
   const ride = { y: 0, yaw: 0, camDist: 0 }; // (controls.ride)
   let riding = false;
   let holding = false;
@@ -504,6 +504,9 @@ export function createCartRide(ctx) {
     Object.assign(st, { x: o.x, z: o.z, yaw });
     return true;
   };
+  // … about its trailing axle (the way it was rolling `dir`), else its middle, else a half step
+  const turnAway = (da, dir, roll) => turnAbout(da, -(dir || 1) * HB, roll)
+    || turnAbout(da, 0, roll) || turnAbout(da / 2, -(dir || 1) * HB, roll);
   // Reared up (head on): pushed up, pulled down / over, spinning on its trailing wheels the way
   // it leans; coming down it rolls back off the wall if it must. → 'flip' when it goes over.
   const updateRear = (dt, lift, ix, roll) => {
@@ -513,7 +516,7 @@ export function createCartRide(ctx) {
     if (st.rear > REAR_SPIN_FROM) {
       if (Math.abs(ix) > 0.15) st.spinDir = Math.sign(ix);
       const k = Math.min(1, (st.rear - REAR_SPIN_FROM) / 0.3) * Math.max(0.5, Math.abs(ix));
-      turnAbout(st.spinDir * REAR_SPIN_RATE * k * dt, -st.rearDir * HB, roll);
+      turnAway(st.spinDir * REAR_SPIN_RATE * k * dt, st.rearDir, roll);
     }
     if (next < st.rear && !fits(st.x, st.z, st.yaw, roll, tilt(st.tip, next))) {
       // (coming down onto the wall: rolled back off it, a little at a time)
@@ -546,7 +549,7 @@ export function createCartRide(ctx) {
     if (st.tip > TIP_SPIN_FROM && roll) {
       const way = Math.abs(ix) > 0.15 ? Math.sign(ix) : -st.tipSide;
       const k = Math.min(1, (st.tip - TIP_SPIN_FROM) / 0.3) * (Math.abs(ix) > 0.15 ? Math.abs(ix) : 0.6);
-      turnAbout(way * TIP_SPIN_RATE * k * dt, 0, roll);
+      turnAway(way * TIP_SPIN_RATE * k * dt, st.pushDir, roll);
     }
     let acc = TIP_GRAVITY * Math.sin(st.tip - TIP_BALANCE) + TIP_PUSH * lift;
     if (st.tip > 0.02) acc += (Math.random() - 0.5) * 2 * TIP_WOBBLE * Math.min(1, Math.abs(st.v) / MAX_SPEED);
@@ -718,6 +721,7 @@ export function createCartRide(ctx) {
           // Fresh contact: where it hits — head on it rears up, a corner lifts that side
           const impact = Math.min(1, Math.abs(st.v) / MAX_SPEED);
           const hit = contactAt(nx, nz, yaw, dir, rollAt);
+          st.pushDir = dir;
           if (hit === 'head') {
             st.mode = 'rear';
             st.rearDir = dir;
@@ -735,6 +739,12 @@ export function createCartRide(ctx) {
       if (!lifted && fits(st.x, st.z, yaw, { ...rollAt, dir: 0 }, tilt())) st.yaw = yaw;
       if (Math.abs(st.v) > 1 && st.t - st.bumpAt > 0.6) { st.bumpAt = st.t; ctx.onBump?.(); }
       st.v = 0;
+    }
+    // (reared up: still pressing on if the cart full length couldn't go there — its raised end
+    // creeping up the wall isn't getting past it)
+    if (!lift && st.mode === 'rear' && !holding && Math.abs(iz) > 0.15 && Math.sign(iz) === st.rearDir
+      && !fits(st.x + Math.sin(st.yaw) * st.rearDir * 0.05, st.z + Math.cos(st.yaw) * st.rearDir * 0.05, st.yaw, { ...rollAt, dir: st.rearDir }, tilt(st.tip, 0))) {
+      lift = Math.abs(iz);
     }
     const spinRoll = { ...rollAt, dir: 0 };
     const liftOut = st.air ? null
