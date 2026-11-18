@@ -80,6 +80,7 @@ const MAX_UP_SLOPE = 1.2;                    // rise / run it rolls up (~50°) �
 const WALL_RISE = 1.0;                       // m — a corner's ground this far over its middle's is a wall, not a slope
 const SLIDE_ANGLES = [0.35, 0.7, 1.05];      // rad off its heading tried, each way, to slide past a tree / up a slope
 const SLIDE_KEEP = 0.85;                     // share of the speed kept sliding past
+const TRUNK_SIDESTEP = 1.6;                  // m/s it shuffles sideways round a tree dead ahead
 const MAX_STEP_UP = 0.3;                     // m its middle can step up in one go (a kerb; more is a wall)
 const TURN_SLOPE_SLACK = 0.6;                // turning on the spot: corners may rise this much steeper (it's already there)
 const AIR_CLEAR = 0.1;                       // m — in the air, ground over its bottom by this much is a wall
@@ -793,8 +794,22 @@ export function createCartRide(ctx) {
 
   // Blocked by a tree / a slope too steep: the same step a little off to one side (the way the
   // phone leans first, else either), the cart turning a little that way. → true if it went.
-  const slidePast = (yaw, step, rollAt, ix) => {
+  const slidePast = (yaw, step, rollAt, ix, why, dt) => {
     const first = Math.abs(ix) > 0.15 ? Math.sign(ix) : (st.slideSide || 1);
+    // (a tree dead ahead: shuffled sideways, a little forward too, clear of it — either side,
+    // the last one tried first so it keeps going round the same way)
+    if (why === 'trunk') {
+      const side = Math.max(Math.abs(step), TRUNK_SIDESTEP * dt);
+      for (const sd of [first, -first]) {
+        for (const fwd of [0.5, 0, -0.3]) {
+          const p = worldXZ(st.x, st.z, yaw, sd * side, step * fwd);
+          if (fits(p.x, p.z, yaw, { ...rollAt, dir: Math.sign(step) }, null)) {
+            Object.assign(st, { x: p.x, z: p.z, yaw, slideSide: sd });
+            return true;
+          }
+        }
+      }
+    }
     for (const a of SLIDE_ANGLES) {
       for (const sd of [first, -first]) {
         const h = yaw + sd * a * Math.sign(step);
@@ -858,7 +873,7 @@ export function createCartRide(ctx) {
       Object.assign(st, { x: nx, z: nz, yaw });
       moved = step;
       if (!st.air) model.spin(step);
-    } else if (!st.air && !lifted && dir !== 0 && (why === 'trunk' || why === 'slope') && slidePast(yaw, step, rollAt, ix)) {
+    } else if (!st.air && !lifted && dir !== 0 && (why === 'trunk' || why === 'slope') && slidePast(yaw, step, rollAt, ix, why, dt)) {
       // (glanced off a tree / found a gentler way up: slid past, steering a little that way)
       moved = Math.abs(step) * SLIDE_KEEP * Math.sign(step);
       model.spin(moved);
