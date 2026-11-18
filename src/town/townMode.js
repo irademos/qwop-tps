@@ -776,6 +776,7 @@ export function createTownMode(ctx) {
       }
       ctx.scene.add(root);
       root.add(T.layout.props.group);
+      ctx.setPropObstacles?.(T.stalls.obstacleBoxes()); // (the market stalls + the wizard's are solid)
       T.addLights(root);
       const P = T.layout.places;
       const nav = T.layout.nav;
@@ -860,6 +861,7 @@ export function createTownMode(ctx) {
     toggleLog(false);
     T.resetBook();
     T.resetLights();
+    ctx.setPropObstacles?.(null);
     ctx.setSunHour?.(null);
     root.parent?.remove(root);
     hud.classList.add('hidden');
