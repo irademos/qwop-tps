@@ -320,6 +320,8 @@ export function installTownLayout(T, ctx) {
     }
     const wizard = { x: wizPos.x, z: wizPos.z, yaw: wizYaw };
     T.stalls.setOutdoor('wizard', { ...wizard, y: groundAt(wizPos.x, wizPos.z) });
+    nav.block(wizPos.x, wizPos.z, 0.55); // (solid, like the market stalls)
+    nav.refresh();
     const hutAt = {
       x: wizPos.x - Math.sin(wizYaw) * WIZARD_HUT_DIST + Math.cos(wizYaw) * 1.5,
       z: wizPos.z - Math.cos(wizYaw) * WIZARD_HUT_DIST - Math.sin(wizYaw) * 1.5,

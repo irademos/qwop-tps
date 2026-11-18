@@ -13,7 +13,7 @@ import { preloadAnimation } from '../models/fluffyCharacter.ts';
 import { createWaterSplash } from '../items/waterSplash.js';
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, registerWallProbe, setTerrainFloor } from '../environment/terrainHeight.js';
-import { setMapObstacles } from '../environment/obstacles.js';
+import { setMapObstacles, setPropObstacles } from '../environment/obstacles.js';
 import { measureTrunk } from '../environment/treeTrunks.js';
 import { registerMapMeshes, raycastMapSegment } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
@@ -2476,6 +2476,28 @@ async function initCore(runtimeContext) {
         _trunkRb
       );
     }
+  }
+  // A mode's solid props (Town's market stalls): the player's obstacles (obstacles.js — boxes /
+  // columns) + a fixed Rapier body of the same shapes for enemies' bodies; null / [] takes them away
+  const _propColliderRbs = new Map(); // key → Rapier body
+  function _setPropColliders(key, list) {
+    setPropObstacles(key, list);
+    const old = _propColliderRbs.get(key);
+    if (old && rapierWorld) removeRigidBodySafely(rapierWorld, old);
+    _propColliderRbs.delete(key);
+    if (!list?.length || !rapierWorld) return;
+    const rb = rapierWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    for (const o of list) {
+      const half = (o.y1 - o.y0) / 2;
+      const desc = o.box ? RAPIER.ColliderDesc.cuboid(o.hx, half, o.hz) : RAPIER.ColliderDesc.cylinder(half, o.r);
+      desc.setTranslation(o.x, o.y0 + half, o.z);
+      if (o.box) {
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), o.yaw ?? 0);
+        desc.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
+      }
+      rapierWorld.createCollider(desc, rb);
+    }
+    _propColliderRbs.set(key, rb);
   }
   // The default map loads alongside the rest of the boot (weapons, physics, the settings panel)
   // and is awaited once the ⚙️ button is up (see `settings-ready`), so the settings button
@@ -11203,6 +11225,7 @@ async function initCore(runtimeContext) {
       }
     },
     teleport: (x, z, yaw) => _teleportPlayer(x, z, yaw),
+    setPropObstacles: (list) => _setPropColliders('town', list),
     // Walk the player (the first day's guide leading the way): (dirX, dirZ) a unit direction,
     // `step` metres this frame — moved by the controls like walking (walls, climbing), turned
     // toward it

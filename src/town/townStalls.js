@@ -39,6 +39,10 @@ export const STALL_SPOTS = {
   counter: { x: 0, z: 1.2 },
 };
 
+// An outdoor stall's solid footprint (market_stall.glb, stall-local metres, its front toward +Z:
+// the counter + posts — the keeper stands just behind it, the customer in front)
+const STALL_FOOTPRINT = { x0: -1.0, x1: 0.88, z0: -0.55, z1: 0.45, h: 2.2 };
+
 // On the counters, in swipe order. counter / along (m along it: left / right = room z, back =
 // room x) / lift (m above its top); hang: floats over it, turning
 // (the weaponsmith's: all on the back counter — the side counters are the selling spots)
@@ -178,6 +182,19 @@ export function createTownStalls(ctx) {
   // they're built), key → { x, y, z, yaw }
   const outdoor = {};
   const setOutdoor = (key, at) => { outdoor[key] = { ...at }; };
+  // The outdoor stalls as solid boxes (obstacles.js setPropObstacles — the player walks round them)
+  const obstacleBoxes = () => Object.values(outdoor).map((at) => {
+    const f = STALL_FOOTPRINT;
+    const lx = (f.x0 + f.x1) / 2;
+    const lz = (f.z0 + f.z1) / 2;
+    const c = Math.cos(at.yaw);
+    const sn = Math.sin(at.yaw);
+    const y = at.y ?? 0;
+    return {
+      box: true, x: at.x + lx * c + lz * sn, z: at.z - lx * sn + lz * c,
+      hx: (f.x1 - f.x0) / 2, hz: (f.z1 - f.z0) / 2, yaw: at.yaw, y0: y - 1, y1: y + f.h,
+    };
+  });
   const fromStall = (at, p) => ({
     x: at.x + Math.sin(at.yaw) * p.z + Math.cos(at.yaw) * p.x,
     z: at.z + Math.cos(at.yaw) * p.z - Math.sin(at.yaw) * p.x,
@@ -756,6 +773,7 @@ export function createTownStalls(ctx) {
     setLabel,
     setAllHidden,
     setOutdoor,
+    obstacleBoxes,
     setActive,
     update,
     focus: focusStall,
