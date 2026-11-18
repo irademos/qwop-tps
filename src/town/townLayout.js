@@ -475,10 +475,7 @@ export function installTownLayout(T, ctx) {
     T.buildFarm(group, places);
     // Fields: rows of crops on dark soil
     const soilMat = new THREE.MeshStandardMaterial({ color: 0x4a3420, roughness: 1, metalness: 0 });
-    const cropMat = new THREE.MeshStandardMaterial({ color: 0x5f9e3a, roughness: 1, metalness: 0 });
     const soilGeo = new THREE.BoxGeometry(3.6, 0.08, 0.5);
-    const cropGeo = new THREE.ConeGeometry(0.1, 0.26, 5);
-    cropGeo.translate(0, 0.13, 0);
     for (const [fieldNo, f] of places.fields.entries()) {
       f.crops = []; // { mesh, x, z, ripe, growAt } — picked by the player (townMode pick)
       for (let r = -1; r <= 1; r++) {
@@ -489,15 +486,12 @@ export function installTownLayout(T, ctx) {
         group.add(soil);
         for (let c = -2; c <= 2; c++) {
           const cx = f.x + c * 0.75;
-          // A leafy tuft with its vegetable lying on the soil by it (vegetables.glb — a kind per
-          // row of each field, picked by the field's spot)
+          // A vegetable lying on the soil (vegetables.glb — a kind per row of each field, picked
+          // by the field's spot)
           const crop = new THREE.Group();
-          const leaves = new THREE.Mesh(cropGeo, cropMat);
-          leaves.castShadow = true;
           const veg = createVeg(fieldNo * 3 + r + 1, VEG_CROP_LENGTH);
-          veg.position.set(0.16, 0, 0.04);
           veg.rotation.y = 0.4 + c * 0.7;
-          crop.add(leaves, veg);
+          crop.add(veg);
           crop.position.set(cx, groundAt(cx, rz) + 0.04, rz);
           crop.rotation.y = c * 1.3 + r;
           group.add(crop);
