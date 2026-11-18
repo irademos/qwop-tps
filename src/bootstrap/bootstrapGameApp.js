@@ -1,5 +1,6 @@
 // app.js
 import '../core/appUpdate.js'; // "new version" banner — first, so it runs even if the game can't boot
+import '../core/installPrompt.js'; // "Install the app" popup on phones not running it installed — early, to catch beforeinstallprompt
 import { setupOfflineCache } from '../core/offlineCache.js';
 import QRCode from 'qrcode';
 import * as THREE from "three";

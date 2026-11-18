@@ -1076,6 +1076,37 @@ body:not(.settings-ready) #settings-button {
   .update-banner-text { flex-basis: 100%; }
 }
 
+/* "Install the app" popup on phones — src/core/installPrompt.js */
+.install-prompt {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translate(-50%, 140%);
+  opacity: 0;
+  z-index: 9650;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(420px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 14px;
+  border-radius: var(--radius-md, 14px);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+  font-family: var(--font-ui);
+  transition: transform 0.35s var(--ease), opacity 0.35s;
+}
+.install-prompt.is-shown { transform: translate(-50%, 0); opacity: 1; }
+.install-prompt-icon { flex: none; width: 48px; height: 48px; border-radius: 12px; }
+.install-prompt-body { flex: 1 1 auto; min-width: 0; }
+.install-prompt-title { font-family: var(--font-display); font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+.install-prompt-text { font-size: 13px; line-height: 1.4; color: var(--text-muted, var(--text)); }
+.install-prompt-btns { display: flex; gap: 8px; margin-top: 10px; }
+.install-prompt [hidden] { display: none !important; }
+.install-prompt-btn { flex: none; padding: 6px 14px; min-height: 0; font-size: 13px; }
+
 #pickup-toast-container {
   position: fixed;
   left: 50%;
@@ -5254,7 +5285,7 @@ body.town-shop-open #action-buttons { visibility: hidden; }
    at the bottom (+ 🛶 Get out by the fishing spot); everything else on the page is hidden but
    the phone QR / calibration popups.
    Touch screens without a gyro get the joystick back while the oar's out (body.sea-steer). */
-body.sea-start > :not(#game-container):not(#sea-hud):not(#update-banner):not(#phone-sword-qr-modal):not(#phone-sword-connect-calib):not(#phone-sword-calib-modal) { display: none !important; }
+body.sea-start > :not(#game-container):not(#sea-hud):not(#update-banner):not(#install-prompt):not(#phone-sword-qr-modal):not(#phone-sword-connect-calib):not(#phone-sword-calib-modal) { display: none !important; }
 body.sea-start.sea-steer > #joystick-container { display: block !important; }
 .sea-hud {
   position: fixed;
