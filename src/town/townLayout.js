@@ -1,7 +1,8 @@
 // Town: the layout, built once from the map — the walkability grid (townNav.js), the shop and the
 // jail (two of the houses) and the homes (the rest; each house with a known door opens into a
 // room — townRooms.js), the campfire, fields (the player can buy them — townFarming.js), the hose's tap, work
-// spots, the patrol loop, the wizard's stall in the woods, the bandit camp — and its props.
+// spots, the patrol loop, the market stalls outside the shop, the wizard's stall in the woods, the
+// bandit camp — and its props.
 
 import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
@@ -179,6 +180,46 @@ export function installTownLayout(T, ctx) {
       homes.push(home);
     }
     if (!homes.length) homes.push({ ...fire, room: null });
+    // The market stalls (townMarket.js): two, one either side of the shop's door, a little out
+    // from the house, facing the road in front of it (the way out of the door) — the stall
+    // itself off the road / trail (its customers stand at the road's edge), clear of the doors
+    const shopDoor = shops.shop.door;
+    const outYaw = shops.shop.exitYaw;
+    const out = { x: Math.sin(outYaw), z: Math.cos(outYaw) };
+    const side = { x: Math.cos(outYaw), z: -Math.sin(outYaw) };
+    const at = (x, z, a, b) => ({ x: x + out.x * a + side.x * b, z: z + out.z * a + side.z * b });
+    const cellOk = (p, offRoadToo) => {
+      const i = nav.indexAt(p.x, p.z);
+      return i >= 0 && nav.walkableIndex(i) && (!offRoadToo || nav.kindAt(i) === 0);
+    };
+    const fits = (c, strict) => {
+      // (its footprint: ±0.8 m across, ±0.5 m front to back; behind it the keeper, in front the customer)
+      for (const [a, b] of [[0, 0], [0.5, 0.8], [0.5, -0.8], [-0.5, 0.8], [-0.5, -0.8]]) if (!cellOk(at(c.x, c.z, a, b), strict)) return false;
+      if (!cellOk(at(c.x, c.z, -0.8, 0)) || !cellOk(at(c.x, c.z, 1.3, 0))) return false;
+      return Object.values(rooms).every((r) => !r.door || dist2(c.x, c.z, r.door.x, r.door.z) > 2.2)
+        && homes.every((h) => dist2(c.x, c.z, h.x, h.z) > 1.5);
+    };
+    const marketStalls = [];
+    for (const sgn of [-1, 1]) {
+      let found = null;
+      for (const strict of [true, false]) {
+        for (let b = 2.6; b <= 7.5 && !found; b += 0.4) {
+          for (let a = 0.4; a <= 3.6 && !found; a += 0.4) {
+            const c = at(shopDoor.x, shopDoor.z, a, b * sgn);
+            if (fits(c, strict)) found = c;
+          }
+        }
+        if (found) break;
+      }
+      if (found) marketStalls.push({ key: `mkt${marketStalls.length}`, x: found.x, z: found.z, yaw: outYaw });
+    }
+    for (const st of marketStalls) {
+      T.stalls.setOutdoor(st.key, { x: st.x, z: st.z, yaw: st.yaw, y: groundAt(st.x, st.z) });
+      st.keeper = T.stalls.spot(st.key, 'merchant');
+      st.customer = T.stalls.spot(st.key, 'customer');
+      nav.block(st.x, st.z, 0.55);
+    }
+    nav.refresh();
 
     // Work spots
     const treeSpots = [];
@@ -291,7 +332,7 @@ export function installTownLayout(T, ctx) {
     // The fishing spot (one for now): the shore spot nearest the middle — the first fisher's too
     const fishSpot = shore[0] ?? null;
     const places = {
-      center: C, market, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
+      center: C, market, marketStalls, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
       homes, treeSpots, fields, tap, shore, fishSpot, patrol, entrance, camp, campFire, strongbox, wizard,
       // the player arrives between the shop and the fire
       spawn: (() => {
@@ -355,6 +396,8 @@ export function installTownLayout(T, ctx) {
     const door = T.rooms.cellDoor();
     const iron = new THREE.MeshStandardMaterial({ color: 0x2f2f35, roughness: 0.6, metalness: 0.3 });
     const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2b, roughness: 1, metalness: 0 });
+    // The market stalls outside the shop (townMarket.js — who's selling sets their sign / goods)
+    for (const st of places.marketStalls) T.stalls.buildMarket(group, { key: st.key, label: 'Free stall' });
     // The wizard's stall (townStalls.js) and his tent behind it
     T.stalls.buildOutdoor(group, { key: 'wizard', label: 'Wizard' });
     const robe = new THREE.MeshStandardMaterial({ color: 0x4b2f7a, roughness: 1, metalness: 0, side: THREE.DoubleSide });

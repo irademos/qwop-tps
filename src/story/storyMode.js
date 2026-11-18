@@ -561,7 +561,6 @@ export function createStoryMode(ctx) {
     introNote: () => {},
     calmNow: () => true,
     stalls: { focused: () => false },
-    marketPanel: { isOpen: () => false },
     jobTalk: { isOpen: () => false },
   };
   // The goods pill (Town's): the catch once there's a rod or a fish, the wood once there's some;

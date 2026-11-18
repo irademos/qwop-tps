@@ -165,7 +165,6 @@ export function createSeaStart(ctx, config) {
     introNote: () => {},
     calmNow: () => true,
     stalls: { focused: () => false },
-    marketPanel: { isOpen: () => false },
     jobTalk: { isOpen: () => false },
   };
   installTownFishing(F, {

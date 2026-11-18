@@ -1,31 +1,36 @@
-// Town mode economy: the goods townsfolk (and the player) make, buy and sell, the market's
-// stock, and prices that follow it — scarce goods cost more, a glut is cheap. The merchant's
-// cash is the merchant townsperson's money (townMode.js), so the market can run dry of money
-// as well as goods. Gear (and seeds) is sold at a fixed price.
+// Town mode economy: the goods townsfolk (and the player) make, buy and sell. Each producer
+// sells their own at a selling spot (townMarket.js — a market stall outside the shop, or a spot
+// along the shop's side counters): the fisher fish (and fishing rods), the farmer veg (and
+// seeds), the woodcutter wood — goods out of what they carry (n.carry), at a set price; the
+// player buys / sells with them by talking, or takes a free spot and sells to whoever comes up.
+// The shop's back counter is the weaponsmith's: the rest of the gear.
 
-// base: price (coins) at the target stock; heal: health a bite gives the player;
+// price: what one costs (coins, set — no haggling); heal: health a bite gives the player;
 // cooked: made at the campfire's pot (townCooking.js — RECIPES) — nobody else makes them, so
-// the market only has what the player sells it (they're left out of shortages and jobs)
+// only the player sells them (from a stall); target: for jobs (townMissions.js — what's short)
 export const GOODS = {
-  wood:  { label: 'Wood', emoji: '🪵', base: 4, target: 10 },
-  fish:  { label: 'Fish', emoji: '🐟', base: 6, target: 8, food: true, heal: 2 },
-  crops: { label: 'Veg',  emoji: '🥕', base: 3, target: 12, food: true, heal: 1 },
-  grilledFish: { label: 'Grilled Fish', emoji: '🍢', base: 11, target: 4, food: true, heal: 4, cooked: true },
-  stew:  { label: 'Stew', emoji: '🍲', base: 9, target: 4, food: true, heal: 3, cooked: true },
+  wood:  { label: 'Wood', emoji: '🪵', price: 4, target: 6 },
+  fish:  { label: 'Fish', emoji: '🐟', price: 6, target: 6, food: true, heal: 2 },
+  crops: { label: 'Veg',  emoji: '🥕', price: 3, target: 8, food: true, heal: 1 },
+  grilledFish: { label: 'Grilled Fish', emoji: '🍢', price: 11, target: 4, food: true, heal: 4, cooked: true },
+  stew:  { label: 'Stew', emoji: '🍲', price: 9, target: 4, food: true, heal: 3, cooked: true },
 };
 export const GOOD_IDS = Object.keys(GOODS);
 export const RAW_IDS = GOOD_IDS.filter((g) => !GOODS[g].cooked);
 export const FOOD_IDS = GOOD_IDS.filter((g) => GOODS[g].food);
+// Who sells what: their own good (made at work — townConfig.js PRODUCE) and the gear of their
+// trade (SHOP_GEAR ids — always in stock: they make their own)
+export const SELLER_GOOD = { fisher: 'fish', farmer: 'crops', woodcutter: 'wood' };
+export const SELLER_GEAR = { fisher: ['rod'], farmer: ['seeds'] };
+// Everything a selling spot can show (townStalls.js)
+export const MARKET_WARES = [...Object.keys(GOODS), 'seeds', 'rod'];
+const BUY_BACK_SHARE = 0.6; // what a seller pays the player for one of their own good, as a share of its price
+export const goodPrice = (g) => GOODS[g].price;
+export const buyBackPrice = (g) => Math.max(1, Math.floor(GOODS[g].price * BUY_BACK_SHARE));
 
-// What the market stocks the first time the town is founded
-const START_STOCK = { wood: 8, fish: 6, crops: 10 };
-const PRICE_MAX = 1.7;     // price multiple when sold out…
-const PRICE_MIN = 0.5;     // …and at twice the target stock (or more)
-const SELL_SHARE = 0.6;    // what the merchant pays, as a share of the price
-
-// The shop's gear (townStalls.js — one shop sells everything: the goods on the back counter, this
-// on the side ones). kind = what ctx.grantItem gets (seeds / lockpick are the town's own:
-// townTrade.js); needs = a weapon that must be owned first
+// The gear (townStalls.js — the weaponsmith's on the shop's back counter, but seeds — the
+// farmers' — and the rod — the fishers' — SELLER_GEAR). kind = what ctx.grantItem gets
+// (seeds / lockpick are the town's own: townTrade.js); needs = a weapon that must be owned first
 export const SHOP_GEAR = [
   { id: 'sword',  kind: 'sword',  label: 'Sword',      emoji: '🗡️', price: 30,  desc: 'Swing it with the phone. Chops trees too.' },
   { id: 'rod',    kind: 'rod',    label: 'Fishing Rod', emoji: '🎣', price: 25,  desc: 'Swing it forward to cast at the fishing spot, pull back to hook, reel it in.' },
@@ -44,40 +49,3 @@ export const WIZARD_WARES = [
   { id: 'wand',   kind: 'wand',   label: 'Magic Wand', emoji: '🪄', price: 150, desc: 'Swipe to cast fire / ice. Runs on mana.' },
   { id: 'broom',  kind: 'broom',  label: 'Flying Broom', emoji: '🧹', price: 200, desc: 'Sit on it and fly — tilt the phone (or the joystick) the way to go.' },
 ];
-
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-// stock: { wood, fish, crops } (from the town's save, or fresh)
-export function createMarket(stock = null) {
-  const s = { ...START_STOCK, ...(stock ?? {}) };
-  GOOD_IDS.forEach((g) => { s[g] = Math.max(0, Math.floor(s[g] || 0)); });
-
-  // What the market asks for one
-  const price = (g) => {
-    const { base, target } = GOODS[g];
-    return Math.max(1, Math.round(base * clamp(PRICE_MAX - (PRICE_MAX - 1) * (s[g] / target), PRICE_MIN, PRICE_MAX)));
-  };
-  // What the merchant pays for one
-  const sellPrice = (g) => Math.max(1, Math.floor(price(g) * SELL_SHARE));
-
-  return {
-    stock: s,
-    price,
-    sellPrice,
-    // One taken off the market (true if there was one)
-    take: (g) => {
-      if (s[g] <= 0) return false;
-      s[g] -= 1;
-      return true;
-    },
-    put: (g, n = 1) => { s[g] += n; },
-    // The cheapest food in stock, or null
-    cheapestFood: () => FOOD_IDS.filter((g) => s[g] > 0).sort((a, b) => price(a) - price(b))[0] ?? null,
-    // The good it's shortest of (relative to its target), when it's short
-    scarcest: () => {
-      const g = [...RAW_IDS].sort((a, b) => s[a] / GOODS[a].target - s[b] / GOODS[b].target)[0];
-      return s[g] < GOODS[g].target * 0.25 ? g : null;
-    },
-    snapshot: () => ({ ...s }),
-  };
-}

@@ -5,7 +5,8 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 
 export const TOWN_NAME = 'Brindlewick';
 
-// hours: [start, end) on the town clock when the role works (end may pass midnight);
+// hours: [start, end) on the town clock when the role works (end may pass midnight); sellHours:
+// when a producer sells what they made at a market stall instead (townMarket.js), stock allowing;
 // hp: sword hits to beat them; brave: chance they fight back instead of running when hit;
 // law: guards / the sheriff (they answer crimes and arrest); unhurt: a sword swing only scares them;
 // outlaw: bandits (live at the camp outside town, raid at night, attack the player on sight —
@@ -13,13 +14,13 @@ export const TOWN_NAME = 'Brindlewick';
 // his stall in the woods) — no town house; gear: what they fight with (createBossFighter) — law gear grows
 // with the stars (townMode fighterGear)
 export const ROLES = {
-  merchant:   { label: 'Merchant',   emoji: '🧺', work: 'market', hours: [7, 20], hp: 3, brave: 0.2 },
+  merchant:   { label: 'Weaponsmith', emoji: '⚒️', work: 'market', hours: [7, 20], hp: 3, brave: 0.2 },
   guard:      { label: 'Guard',      emoji: '🛡️', work: 'patrol', hours: [6, 20], hp: 4, brave: 1, law: true },
   nightGuard: { label: 'Night Watch', emoji: '🏮', work: 'patrol', hours: [19, 7], hp: 4, brave: 1, law: true },
   sheriff:    { label: 'Sheriff',    emoji: '⭐', work: 'office', hours: [7, 21], hp: 6, brave: 1, law: true },
-  woodcutter: { label: 'Woodcutter', emoji: '🪓', work: 'tree',   hours: [7, 17], hp: 3, brave: 0.6 },
-  farmer:     { label: 'Farmer',     emoji: '🌾', work: 'field',  hours: [6, 17], hp: 3, brave: 0.35 },
-  fisher:     { label: 'Fisher',     emoji: '🎣', work: 'shore',  hours: [5, 15], hp: 3, brave: 0.3 },
+  woodcutter: { label: 'Woodcutter', emoji: '🪓', work: 'tree',   hours: [7, 18], sellHours: [12, 18], hp: 3, brave: 0.6 },
+  farmer:     { label: 'Farmer',     emoji: '🌾', work: 'field',  hours: [6, 20], sellHours: [12.5, 20], hp: 3, brave: 0.35 },
+  fisher:     { label: 'Fisher',     emoji: '🎣', work: 'shore',  hours: [5, 14], sellHours: [7, 13.5], hp: 3, brave: 0.3 },
   wizard:     { label: 'Wizard',     emoji: '🧙', work: 'wizard', hours: [8, 21], hp: 4, brave: 0.5, hermit: true },
   townsfolk:  { label: 'Townsfolk',  emoji: '🏠', work: null,     hours: null,    hp: 2, brave: 0.15 },
   kid:        { label: 'Kid',        emoji: '🧒', work: null,     hours: null,    hp: 2, brave: 0, speed: 1.15, unhurt: true },
@@ -100,7 +101,7 @@ export const speciesOf = (n) => {
 const TASK_LINES = {
   work: {
     merchant: [
-      'Wood, fish, veg. I buy it, I sell it, I pretend the difference is "overheads".',
+      'Swords, shields, bows. Food\'s at the stalls outside — I only sell what cuts.',
       'Everything\'s on sale. Not cheaper, mind. Just on sale.',
       'Don\'t lean on the counter. It\'s held together by optimism.',
       'If it\'s not nailed down, it\'s for sale. If it is nailed down, make me an offer.',
@@ -172,7 +173,7 @@ const SPECIES_LINES = {
     work: {
       merchant: [
         'Welcome! Everything\'s locally grown. Some of it is my cousin. Kidding. Mostly.',
-        'Fresh veg! No pumpkins though. I don\'t stock family.',
+        'Blades, bows, bombs! No veg — that\'s the farmers\' stalls. I don\'t stock family.',
         'I\'ve got a good head for business. Hollow, but good.',
         'Prices are seasonal. And it is always my season.',
       ],
@@ -388,22 +389,23 @@ const flavoured = (n, key, fallback, chance = 0.5) => {
 };
 
 // A line for the player talking to `npc` (attitude −1..1: how they feel about the player).
-// market: { scarce: { label, emoji, price } | null, foodOut, merchantGone } (townMode marketTalk)
+// market: { scarce: { label, emoji, price, seller } | null, foodOut, merchantGone, sells } (townActs marketTalk)
 export function talkLine(npc, { playerName = 'friend', taskType = null, market = null } = {}) {
   const fill = (s) => s.replace(/\{name\}/g, playerName);
   if (npc.fear > 0) return flavoured(npc, 'scared', SCARED_LINES);
   if (npc.attitude < -0.35) return fill(flavoured(npc, 'cold', COLD_LINES));
   if (npc.attitude > 0.55 && Math.random() < 0.5) return fill(flavoured(npc, 'friend', FRIEND_LINES));
   // How the market's doing
-  if (npc.role === 'merchant' && market?.scarce && Math.random() < 0.6) {
+  if (market?.scarce && (npc.role === 'merchant' || market.scarce.seller === npc.role) && Math.random() < 0.5) {
     return pick([
-      `${market.scarce.label} is scarce. ${market.scarce.price} coins a piece. I don't make the rules. I do make the prices.`,
-      `Short on ${market.scarce.label.toLowerCase()}. ${market.scarce.price} coins each, and that's me being generous.`,
+      `Nobody's selling ${market.scarce.label.toLowerCase()} right now. Bring some to a stall and you'll sell it quick.`,
+      `${market.scarce.label}'s short in town. Whoever's got some could name their… well, ${market.scarce.price} coins. Prices are prices.`,
     ]);
   }
-  if (npc.needs.hunger > 0.6 && market?.foodOut) return pick(['The market\'s out of food. I\'m eyeing the fence posts.', 'No food at the market. I\'m this close to eating soup made of rumours.']);
-  if (market?.merchantGone && Math.random() < 0.4) return pick(['With the merchant gone, where do we even buy bread? From the bread fairy?', 'No merchant. I tried bartering with a duck. The duck won.']);
-  if (npc.role === 'merchant' && Math.random() < 0.3) return pick(['Bring me wood, fish or veg and I\'ll pay you. Not well. But promptly.', 'Got goods? I\'ve got coins. Let\'s both pretend this is fair.']);
+  if (npc.needs.hunger > 0.6 && market?.foodOut) return pick(['Nobody\'s selling food right now. I\'m eyeing the fence posts.', 'No food at the stalls. I\'m this close to eating soup made of rumours.']);
+  if (market?.merchantGone && Math.random() < 0.4) return pick(['With the weaponsmith gone, where do we even buy a sword? From the sword fairy?', 'No weaponsmith. I tried fencing with a duck. The duck won.']);
+  if (npc.role === 'merchant' && Math.random() < 0.3) return pick(['Got something to sell? Stand behind a free stall out front. Folk will come to you.', 'Fish, veg, wood — that\'s the stalls outside. In here it\'s steel.']);
+  if (market?.sells && Math.random() < 0.25) return pick([`Fresh ${market.sells.toLowerCase()} at my stall. I'll buy yours too, if you've got some.`, `Selling ${market.sells.toLowerCase()}! Buying it too — not as dear, mind.`]);
   if (npc.role === 'kid') return pick(TASK_LINES.kid);
   if (npc.role === 'drifter' && Math.random() < 0.6) return pick(TASK_LINES.drifter);
   if (npc.needs.hunger > 0.75) return flavoured(npc, 'hungry', HUNGRY_LINES, 0.75);

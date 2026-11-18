@@ -1,7 +1,8 @@
 // Town: the first day — a few townsfolk show a newcomer how Brindlewick lives, one small goal at
 // a time, each paying a few coins: say hello to the merchant, go fishing off the end of a dock
 // with a fisher and cook the catch at the campfire, help a farmer with the harvest (picking
-// their veg is allowed then) and sell it, buy a sword from the merchant (for whatever the player
+// their veg is allowed then) and sell it from a market stall (the farmer the first customer —
+// townMarket.js), buy a sword from the merchant (the weaponsmith) (for whatever the player
 // has, if it's short of the price), hear the sheriff out about the bandit camp, and fell a tree
 // with the woodcutter for wood. Shown first in the quest tracker; ❗ over whoever to talk to next,
 // 📍 where the goal is; the button each goal needs glows (the tutorial's ring — introHighlight).
@@ -21,7 +22,7 @@
 import { firstName } from './townPeople.js';
 import * as THREE from 'three';
 import { RUN_SPEED, dist2, heightScale, pickOf } from './townConfig.js';
-import { SHOP_GEAR } from './townEconomy.js';
+import { FOOD_IDS, GOOD_IDS, SHOP_GEAR, goodPrice } from './townEconomy.js';
 
 // The sword's shop price (the merchant lets it go for less on the first day)
 const SWORD_PRICE = SHOP_GEAR.find((g) => g.id === 'sword')?.price ?? 30;
@@ -34,8 +35,8 @@ const SWORD_PRICE = SHOP_GEAR.find((g) => g.id === 'sword')?.price ?? 30;
 // next: what the guide says is next when the same guide carries on (a talk box — debrief)
 const STEPS = [
   {
-    id: 'welcome', guide: 'merchant', title: 'Say hello at the market', talkOnly: true, coins: 3, skippable: true,
-    talk: 'Welcome to Brindlewick, {name}! New in town, and not a coin to your name, by the look of you. Here — a few to start. Folk around here will show you how we live: fishing, farming, the market. Shall I send someone round?',
+    id: 'welcome', guide: 'merchant', title: 'Say hello at the shop', talkOnly: true, coins: 3, skippable: true,
+    talk: 'Welcome to Brindlewick, {name}! New in town, and not a coin to your name, by the look of you. Here — a few to start. I\'m the weaponsmith; food\'s at the stalls outside, sold by whoever made it. Folk around here will show you how we live: fishing, farming, the market. Shall I send someone round?',
     accept: 'Show me around',
     done: '{next} will come and find you — they\'ll show you the ropes.',
   },
@@ -69,26 +70,26 @@ const STEPS = [
     accept: 'Happy to help',
     progress: 'Pick 3 veg from {guide}\'s field',
     done: 'Good hands! That\'s the harvest in.',
-    next: 'Those veg are yours to keep — so let\'s turn them into coin. I\'ll walk you to the shop: go in through the door, up to the merchant\'s counter, and press Sell.',
+    next: 'Those veg are yours to keep — so let\'s turn them into coin. Come to the market stalls outside the shop: stand behind a free one, press Sell here, and folk come to you. I\'ll be your first customer.',
     tips: [
       'Walk in among the crops and press Pick.',
       'It grows back in a while. Buy a field of your own and you can pick it whenever you like.',
     ],
   },
   {
-    id: 'sell', guide: 'farmer', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'market',
-    progress: 'Sell your veg at the shop: in through the door, to the counter, Sell',
-    done: 'There — coins in your pocket! The less the merchant has of something, the more he pays for it.',
+    id: 'sell', guide: 'farmer', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'stall',
+    progress: 'Stand behind a free market stall, press Sell here, then sell to me',
+    done: 'There — coins in your pocket! Fish sells in the morning, veg in the afternoon. Stay at your stall and folk keep coming — you say yes or no to each.',
     tips: [
-      'In through the door, up to the counter at the back, then Sell.',
+      'Walk round behind a free stall — the sign says so — and press Sell here. There are spots inside the shop too, along the side counters.',
       'Cooked food fetches more than raw.',
-      'The merchant\'s only there in the day — no selling at night.',
+      'You can sell to us sellers too: talk to me and press Sell. We pay less than folk at a stall, mind.',
     ],
   },
   {
     // (the merchant, from behind his counter: a sword, at a discount if the player's short)
     id: 'sword', guide: 'merchant', title: 'Buy a sword', buySword: true, talkFrom: 6, coins: 0,
-    talk: 'Pleasure doing business, {name}! Now — you\'ll want a sword. It chops wood, keeps the bandits honest. {price}',
+    talk: 'Coins in your pocket already, {name}! Now — you\'ll want a sword. It chops wood, keeps the bandits honest. {price}',
     accept: 'Buy the sword',
     done: 'Mind where you swing it!',
   },
@@ -132,7 +133,7 @@ const CALL_EVERY_S = 8;     // s between "This way!"s
 const TIP_EVERY_S = [22, 34];
 // What a guide's busy with that they'd drop to show the player round (anything else — a
 // fight, fleeing, the law's work, sleep — comes first)
-const GUIDE_OVER = new Set(['work', 'deliver', 'eat', 'browse', 'social', 'wander', 'chat', 'guide']);
+const GUIDE_OVER = new Set(['work', 'sell', 'buyWood', 'eat', 'browse', 'social', 'wander', 'chat', 'guide']);
 const CALLS = ['This way, {name}!', 'Over here!', 'Keep up, {name}!', 'Come on — it\'s just along here.'];
 const COMING = ['{name}! Hold on a moment!', 'Ah, {name} — there you are!', 'Hey, {name}! A word?'];
 
@@ -426,6 +427,8 @@ export function installTownIntro(T, ctx) {
     }
     // (the shop's counter — over its door while the player's outside)
     if (s.at === 'market') return { icon: '📍', ...T.stalls.spot('shop', 'counter'), h: 1.6 };
+    // (behind a free market stall — townMarket.js)
+    if (s.at === 'stall') { const st = introStall(); return st ? { icon: '📍', ...st.keeper, h: 1.6 } : null; }
     return null;
   };
   // The tracker's first line
@@ -479,6 +482,8 @@ export function installTownIntro(T, ctx) {
     else if (s.at === 'fire') at = P.fire;
     else if (s.at === 'guideWork') at = g.work;
     else if (s.at === 'market') at = P.rooms.shop?.door ?? null;
+    // (in front of the stall the player sells from: the first customer)
+    else if (s.at === 'stall') { const st = introStall(); if (st) { leadAt = { step: i, guideId: g.id, x: st.customer.x, z: st.customer.z, gx: st.x, gz: st.z }; return leadAt; } }
     if (!at) return null;
     const spot = T.randomNear(at.x, at.z, 2.2);
     leadAt = { step: i, guideId: g.id, x: spot.x, z: spot.z, gx: at.x, gz: at.z };
@@ -515,7 +520,7 @@ export function installTownIntro(T, ctx) {
     T.faceToward(n, x, z, dt);
   };
   // (indoors only with the guide in the same room — the merchant behind his counter)
-  const canAutoTalk = (n) => !T.jobTalk.isOpen() && !T.marketPanel.isOpen() && !T.storage.isOpen() && !T.fishing
+  const canAutoTalk = (n) => !T.jobTalk.isOpen() && !T.storage.isOpen() && !T.fishing
     && !T.cooking && (!T.inRoom || (!!n && T.rooms.roomAt(n.x, n.z) === T.inRoom)) && !T.sequence && !T.stalls.focused()
     && !T.lockpick.isOpen();
   const updateGuide = (n, t, dt) => {
@@ -601,7 +606,7 @@ export function installTownIntro(T, ctx) {
   // ── The player walked along (T.intro.autoWalk — on when a goal is taken / 'Lead the way'):
   // behind the guide, along the way they walked, then up to the goal itself; any move of the
   // player's own (joystick / WASD) stops it — 🚶 Walk me there starts it again ──
-  const busy = () => T.jobTalk.isOpen() || T.marketPanel.isOpen() || T.storage.isOpen() || T.fishing || T.cooking
+  const busy = () => T.jobTalk.isOpen() || T.storage.isOpen() || T.fishing || T.cooking
     || T.sequence || T.jail || T.stalls.focused() || T.lockpick.isOpen() || ctx.isPlayerDead() || T.law.stars > 0;
   // Where to walk the player now: { x, z, stop } (null: nowhere / there)
   const walkTarget = () => {
@@ -621,7 +626,12 @@ export function installTownIntro(T, ctx) {
         goal = { x: r.door.x - Math.sin(r.exitYaw) * 0.6, z: r.door.z - Math.cos(r.exitYaw) * 0.6, stop: 0.05 };
       }
     } else if (inRoom) return null;
-    else if (s.at === 'dock' && dock()) {
+    else if (s.at === 'stall') {
+      if (T.stand) return null;
+      const st = introStall();
+      if (!st) return null;
+      goal = { x: st.keeper.x, z: st.keeper.z, stop: 0.3 };
+    } else if (s.at === 'dock' && dock()) {
       // (to the dock's shore end, then out along it to the far end — facing the water)
       const D = dock();
       goal = onDock(D, p) ? { ...D.end, stop: 0.25 } : { x: D.base.x + D.dir.x * 0.4, z: D.base.z + D.dir.z * 0.4, stop: 0.35 };
@@ -719,7 +729,7 @@ export function installTownIntro(T, ctx) {
       }
       case 'cook': return { act: 'cook:' };
       case 'harvest': return { act: 'pick' };
-      case 'sell': return T.marketPanel.isOpen() ? null : { act: T.stalls.focused() ? 'back' : 'sell' };
+      case 'sell': return T.stand ? null : { act: T.stalls.focused() ? 'back' : 'stand' };
       case 'chop': {
         if (held !== 'foamSword') return { gear: 'foamSword', phone: 'sword' };
         return gyro ? null : { act: 'chop' };
@@ -729,8 +739,38 @@ export function installTownIntro(T, ctx) {
   };
   const busyForHighlight = () => T.jobTalk.isOpen() || T.sequence || T.jail || ctx.isPlayerDead();
 
+  // ── The stall the player's shown to (the first free one — a seller may take it meanwhile) ──
+  const introStall = () => {
+    const free = (st) => { const who = T.stallSeller(st.key); return !who || who.player; };
+    if (T.stand) return T.stallByKey(T.stand.key);
+    let st = T.intro.stallKey ? T.stallByKey(T.intro.stallKey) : null;
+    if (!st || !free(st)) {
+      // (outside first: the walk there doesn't go indoors)
+      const all = T.marketSpots();
+      st = all.find((x) => !x.indoor && free(x)) ?? all.find(free) ?? null;
+      T.intro.stallKey = st?.key ?? null;
+    }
+    return st;
+  };
+  // The farmer asks to buy the first thing off the player's stall once they're in front of it
+  // (again a while after a no)
+  let guideAskedAt = -1e9;
+  const guideBuys = () => {
+    const s = step();
+    if (s?.id !== 'sell' || T.intro.phase !== 'do' || T.intro.debrief || !T.stand) return;
+    const g = T.npcById(T.intro.guideId);
+    const st = T.stallByKey(T.stand.key);
+    if (!g?.alive || !st || dist2(g.x, g.z, st.customer.x, st.customer.z) > 6) return;
+    if (T.offerPending(g) || T.simT - guideAskedAt < 20) return;
+    const good = ['crops', ...FOOD_IDS, ...GOOD_IDS].find((x) => T.goods[x] > 0);
+    if (!good) return;
+    guideAskedAt = T.simT;
+    g.money = Math.max(g.money, goodPrice(good));
+    T.askPlayer(g, good);
+  };
   // Upkeep: a guide who's gone (dead, jailed) is replaced; a talk with nobody to give it, skipped
   const updateIntro = () => {
+    guideBuys();
     if (!step()) { if (T.npcs.some((n) => n.guiding)) unguideAll(); return; }
     guideOf();
     noGuide();

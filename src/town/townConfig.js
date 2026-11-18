@@ -92,12 +92,23 @@ export const BAIL = 20;                     // coins
 export const KO_COIN_SHARE = 0.1;           // share of coins lost when knocked out (not wanted)
 
 // ── Economy ──
-// What a stint of work makes: [good, min, max]
-export const PRODUCE = { woodcutter: ['wood', 2, 3], farmer: ['crops', 2, 4], fisher: ['fish', 1, 3] };
-export const MERCHANT_START_CASH = 60;      // coins the merchant starts out with
-export const FIREWOOD_CHANCE = 0.35;        // a townsperson buying food takes some firewood home too
-export const MARKET_HOURS = [7, 20];
-export const TRADE_DIST = 3.4;              // m from the shop's back counter (the wizard's stall) for its buttons (🛒 Shop / 💰 Sell, 🔮 Wizard)
+// What a stint of work makes: [good, min, max] — kept to sell (n.carry, up to CARRY_MAX)
+export const PRODUCE = { woodcutter: ['wood', 2, 3], farmer: ['crops', 2, 4], fisher: ['fish', 2, 4] };
+export const CARRY_MAX = 14;                // goods a seller keeps on hand (no more made past it)
+export const MERCHANT_START_CASH = 60;      // coins the weaponsmith starts out with
+export const SELLER_START_CASH = 25;        // coins a seller starts out with (to buy the player's goods)
+// The market (townMarket.js): selling spots open to anyone who stands at one — two stalls
+// outside the shop (either side of its door) and three along each of its side counters — the
+// sellers in their selling hours (ROLES sellHours — fish in the morning, veg in the afternoon,
+// so there's always some food), the player whenever
+export const STALL_KEEPER_DIST = 0.9;       // m from a stall's keeper spot (behind it) to be the one selling there
+export const STAND_ACT_DIST = 1.6;          // m — Sell here behind a free stall
+export const STAND_LEAVE_DIST = 2.2;        // m walked off it closes the player's stand
+export const STALL_BUY_DIST = 2.6;          // m from a stall's front — Buy from <name>
+export const OFFER_WAIT_S = 18;             // s a customer at the player's spot waits for an answer
+export const DECLINED_S = 90;              // s a customer the player said no to keeps away from the player's spot
+export const WOOD_BUY_CHANCE = 0.25;        // a townsperson's decision in the day: some firewood (once a day)
+export const TRADE_DIST = 3.4;              // m from the shop's back counter (the wizard's stall) for its buttons (🛒 Shop, 🔮 Wizard)
 // The rooms (townRooms.js): two of the town's houses are the shop and the jail (the sheriff's
 // office and a cell), the rest homes; walking in through a door puts you inside its room — the
 // shop's shop.glb, the jail's and the homes' home_interior.glb — each far off the island and
