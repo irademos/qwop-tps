@@ -716,8 +716,8 @@ export function createCartRide(ctx) {
         f.phase = 'right';
         f.t = 0;
         // (where it'll stand: the ground under its wheels there — eased onto while it rights itself)
-        const keep = { y: st.y, pitch: st.pitch, roll: st.roll, settled: st.settled };
-        st.settled = false;
+        const keep = { y: st.y, pitch: st.pitch, roll: st.roll, settled: st.settled, tip: st.tip, rear: st.rear };
+        Object.assign(st, { settled: false, tip: 0, rear: 0 }); // (upright, on all four wheels)
         settle(0);
         f.from = { y: keep.y, pitch: keep.pitch, roll: keep.roll };
         f.to = { y: st.y, pitch: st.pitch, roll: st.roll };
