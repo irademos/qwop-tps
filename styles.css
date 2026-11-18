@@ -4805,6 +4805,8 @@ body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-botto
   font-weight: 800;
   animation: village-act-in 0.2s var(--ease);
 }
+/* (the first day's goal: its button ringed like the tutorial's — townIntro.js introHighlight) */
+.town-act.tutorial-highlight { position: relative; }
 /* Fishing (townFishing.js): a hint (Pull / Reel in) once the player's been getting it wrong, above the acts */
 .town-fishing {
   position: absolute;

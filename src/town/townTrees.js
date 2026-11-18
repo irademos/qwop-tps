@@ -326,6 +326,7 @@ export function installTownTrees(T, ctx) {
         T.gain('wood');
         ctx.playSfx?.('wood');
         T.feedLine(`+1 Wood (${T.goods.wood})`);
+        T.introNote?.('wood'); // (the first day's last goal — townIntro.js)
         if (T.net && T.netMode !== 'off' && T.netMode !== 'joining') T.net.broadcast({ w: 1, op: 'tree', t: String(t.id), a: 'log', k: log.k });
         return true;
       }
@@ -507,5 +508,19 @@ export function installTownTrees(T, ctx) {
     return tip ? tryChop(tip) : false;
   };
 
-  Object.assign(T, { buildTrees, handleTreeNet, resetTrees, tryChop, updateTrees, chopTipNear, chopNear });
+  // ── For the first day (townIntro.js): a standing tree near (x, z), and how one's doing ──
+  const info = (t) => ({ id: String(t.id), x: t.bx, z: t.bz, state: t.state, logs: t.logs.map((l) => ({ x: l.x, z: l.z })) });
+  const standingTreeNear = (x, z) => {
+    let best = null;
+    let bd = Infinity;
+    for (const t of trees) {
+      if (!t.object || t.state !== 'standing' || t.id == null) continue;
+      const d = dist2(t.bx, t.bz, x, z);
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best ? info(best) : null;
+  };
+  const treeInfo = (id) => { const t = byId.get(String(id)); return t ? info(t) : null; };
+
+  Object.assign(T, { buildTrees, handleTreeNet, resetTrees, tryChop, updateTrees, chopTipNear, chopNear, standingTreeNear, treeInfo });
 }

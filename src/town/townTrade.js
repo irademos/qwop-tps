@@ -45,25 +45,31 @@ export function installTownTrade(T, ctx) {
     }
     return null;
   };
-  // Picking someone's veg is stealing — if anyone sees it
+  // A field's veg are its owner's: the player picks only their own field (bought — townFarming.js)
+  // or the farmer's while helping with the harvest on the first day (townIntro.js)
+  const mayPickField = (field) => T.fieldOwner(field) === 'mine' || T.introAllowsPick(field);
+  const mayPick = () => { const f = ripeCropNear(); return !!f && mayPickField(f.field); };
+  let noPickNoteAt = -99;
   const pickCrop = () => {
     const found = ripeCropNear();
     if (!found) return;
-    if (T.bagRoom() <= 0) { T.bagFullNote(); return; }
     const { field, crop } = found;
+    if (!mayPickField(field)) {
+      if (T.simT - noPickNoteAt > 4) {
+        noPickNoteAt = T.simT;
+        const farmer = T.npcs.find((n) => n.alive && n.role === 'farmer' && n.work === field);
+        T.feedLine(T.fieldOwner(field) === 'theirs' ? 'That field\'s another player\'s — not yours to pick.'
+          : `That's ${farmer ? `${firstName(farmer.name)}'s` : 'a farmer\'s'} field — buy a field of your own to pick from.`);
+      }
+      return;
+    }
+    if (T.bagRoom() <= 0) { T.bagFullNote(); return; }
     crop.ripe = false;
     crop.growAt = T.simT + CROP_REGROW_S;
     crop.mesh.visible = false;
     gain('crops');
     T.feedLine(`+1 Veg (${T.goods.crops})`);
-    // (the player's own field — bought, townFarming.js — or helping the farmer with the harvest
-    // on the first day: allowed — townIntro.js)
-    const bought = T.fieldOwner(field);
-    if (bought === 'mine') return;
-    if (bought === 'theirs') { T.crime('theft', null); return; }
-    if (T.introAllowsPick(field)) { T.introNote('pick'); return; }
-    const owner = T.npcs.find((n) => n.alive && n.role === 'farmer' && n.work === field) ?? null;
-    T.crime('theft', owner);
+    if (T.fieldOwner(field) !== 'mine') T.introNote('pick');
   };
   // Trees and crops grow back
   const updateRegrowth = () => {
@@ -534,7 +540,7 @@ export function installTownTrade(T, ctx) {
   Object.assign(T, {
     buyFood, calmNow, closeMarket, deliverGoods, eat, enterRoom, focusStall, gain, getMagicTargets,
     getWeaponTargets, leaveRoom, marketOpen, nearDoor, nearStall, nearestStall, noteStock,
-    openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen,
+    mayPick, openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen,
     updateRegrowth, updateRooms, workingMerchant, workingWizard,
   });
 }

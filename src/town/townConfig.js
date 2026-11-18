@@ -147,6 +147,7 @@ export const HOSE_SPLASH_R = 0.55;          // m round where the water lands: th
 // it forward to cast, wait for a bite, pull it back to hook the fish, then wear it out — pull
 // when it tires, ease off while it runs — and crank the reel to bring it in
 export const FISH_SPOT_RADIUS = 6;          // m — fish from this close to the fishing spot (one for now)
+export const FISH_MIN_DEPTH = 0.3;           // m of water a cast straight out in front must land on (Town on foot — T.castAhead)
 export const FISH_CAST_DIST = [3, 9];       // m — the gentlest cast … the hardest
 export const FISH_CAST_REACH = 10;          // m — the water searched for where the bobber lands
 export const FISH_GESTURE_S = 0.25;         // s — a cast / pull is the rod tip's travel within this

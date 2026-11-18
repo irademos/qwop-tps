@@ -781,11 +781,13 @@ Boost</button>
         : barMode === 'water' ? 'WATER'
         : 'BLOCK';
       // Tutorial: ring the button the game is asking for
-      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, wand: btnWand };
+      // (Town's first day too: the rod / sword it asks for, the interact bar)
+      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, wand: btnWand, rod: btnRod, sword: btnSword };
       Object.entries(highlightTargets).forEach(([name, el]) => {
         el.classList.toggle('tutorial-highlight', st.highlight === name);
       });
-      blockBtn.classList.toggle('tutorial-highlight', st.highlight === 'block' || st.highlight === 'fire');
+      blockBtn.classList.toggle('tutorial-highlight', st.highlight === 'block' || st.highlight === 'fire'
+        || (st.highlight === 'interact' && barMode === 'interact'));
     }
 
     if (!hostPeerId) {

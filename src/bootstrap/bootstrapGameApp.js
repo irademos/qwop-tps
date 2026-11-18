@@ -7852,10 +7852,24 @@ async function initCore(runtimeContext) {
       // (the shield held up from the wand: Block keeps saying Shield until it's let go)
       wandShieldHeld: _wandShieldHold,
       // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')
-      highlight: showdownTutorial?.isActive() ? _tutorialPhoneHighlight : null
+      highlight: showdownTutorial?.isActive() ? _tutorialPhoneHighlight
+        : town?.isActive() ? _townIntroHl?.phone ?? null : null
     };
   };
   let _tutorialPhoneHighlight = null;
+  // Town's first day (townIntro.js): the weapon button / phone button its goal needs, ringed
+  let _townIntroHl = null;
+  const _setTownIntroHighlight = (hl) => {
+    const gear = hl?.gear ?? null;
+    const phone = hl?.phone ?? null;
+    if (playerControls) {
+      for (const b of [playerControls.psWeaponBtn1, playerControls.psWeaponBtn2, playerControls.psWeaponBtn3, playerControls.psWeaponBtn4, playerControls.psWeaponBtn5]) {
+        b?.classList.toggle('tutorial-highlight', !!gear && b.dataset.psWeaponId === gear && b.style.display !== 'none');
+      }
+    }
+    if ((_townIntroHl?.phone ?? null) !== phone) { _townIntroHl = { gear, phone }; _phoneSwordStatusNow?.(); }
+    else _townIntroHl = { gear, phone };
+  };
   // Town fishing: the phone's reel (radians cranked, not yet taken by town.takeReel)
   const _phoneReel = { last: null, pending: 0 };
   // Sends the phone its status now (if it changed) — fishing cues can't wait for the timer
@@ -11319,6 +11333,11 @@ async function initCore(runtimeContext) {
     // A weapon of the town's own, in hand or not (the sheriff asks such a player to stand watch at night)
     hasWeapon: () => { const it = _townLoadout ? _townItems() : null; return !!(it && (it.sword || it.gun || it.wand)); },
     putWeaponsAway: () => _putWeaponsAway(),
+    // What's in hand ('foamSword', 'fishing_rod', 'magic_wand', … or null)
+    heldWeapon: () => _heldWeaponId(),
+    // The first day's goal (townIntro.js): ring the weapon button it needs (gear: its item id) and
+    // the phone's button (phone: 'rod' | 'sword' | 'interact') like the tutorial; null: none
+    setIntroHighlight: (hl) => _setTownIntroHighlight(hl),
     // Fishing (townTrade.js): the rod in hand, its model (the tip casts the line), the reel
     isRodEquipped: () => isRodEquipped(),
     getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),

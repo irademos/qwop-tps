@@ -136,6 +136,7 @@ export function createTownMode(ctx) {
   // The town's state and functions, shared by the townMode*.js modules (each adds its own)
   const T = {};
   T.active = false;
+  T.castAhead = true;         // fishing on foot: a cast goes straight out in front (townFishing.js)
   T.ready = false;            // layout built, townsfolk spawned
   T.enterToken = 0;
   T.layout = null;            // built once (the map doesn't change): nav, places, props
@@ -808,6 +809,7 @@ export function createTownMode(ctx) {
     flushCloud();
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     T.resetCart();
+    ctx.setIntroHighlight?.(null); // (the first day's ringed buttons)
     if (T.netMode === 'host' && T.ready && net.canSave()) net.saveRoomState(worldSnapshot());
     T.lastItems = ctx.endLoadout() ?? T.lastItems;
     T.closeMarket();
@@ -898,7 +900,7 @@ export function createTownMode(ctx) {
     lockpick.update(dt);
     if (jobTalk.isOpen()) {
       const n = T.talking?.npc;
-      if (!n || !n.alive || n.fighter || T.distToPlayer(n) > TALK_RANGE + 1.5 || ctx.isPlayerDead() || T.sequence) jobTalk.close();
+      if (!n || !n.alive || n.fighter || T.distToPlayer(n) > Math.max(TALK_RANGE + 1.5, T.talking.reach ?? 0) || ctx.isPlayerDead() || T.sequence) jobTalk.close();
       else if (n.task?.type === 'talk') n.task.t = 0;
     }
     updateCampfire(T.layout.props.campFire, T.simT + 3);

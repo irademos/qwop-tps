@@ -232,18 +232,27 @@ export function installTownActs(T, ctx) {
         out.push(...T.canoeActs(true));
         out.push(...T.grabActs());
       }
-      if (T.ripeCropNear()) out.push({ key: 'pick', label: 'Pick veg', onClick: T.pickCrop });
+      // (only a field the player may pick: their own, or the farmer's on the first day)
+      if (T.ripeCropNear() && T.mayPick()) out.push({ key: 'pick', label: 'Pick veg', onClick: T.pickCrop });
+      // (no gyro to swing the sword: a Chop button by a tree / log)
+      if (!ctx.hasGyro() && ctx.heldWeapon?.() === 'foamSword' && T.chopTipNear()) out.push({ key: 'chop', label: 'Chop', onClick: T.chopNear });
       out.push(...T.fishingActs(true));
     }
     return out.slice(0, 3);
   };
+  // The first day's goal: the button it needs rings like the tutorial's (townIntro.js)
+  const hlMatch = (hl, a) => !!hl?.act && (hl.act.endsWith(':') ? a.key.startsWith(hl.act) : a.key === hl.act);
   const refreshActs = () => {
     T.acts = computeActs();
-    const key = T.acts.map((a) => `${a.key}|${a.label}`).join(',');
+    const hl = T.introHighlight();
+    const lit = T.acts.findIndex((a) => hlMatch(hl, a));
+    // (the weapon buttons and the phone: its own button, or the interact bar for the first act)
+    ctx.setIntroHighlight?.(hl ? { gear: hl.gear ?? null, phone: hl.phone ?? (lit === 0 ? 'interact' : null) } : null);
+    const key = `${lit}#${T.acts.map((a) => `${a.key}|${a.label}`).join(',')}`;
     if (key === T.actsKey) return;
     T.actsKey = key;
     T.actsEl.replaceChildren(...T.acts.map((a, i) => {
-      const b = el('button', `${i > 0 ? 'ui-btn-secondary' : 'ui-btn'} town-act`, a.label);
+      const b = el('button', `${i > 0 ? 'ui-btn-secondary' : 'ui-btn'} town-act${i === lit ? ' tutorial-highlight' : ''}`, a.label);
       b.type = 'button';
       b.addEventListener('click', () => { if (T.active) a.onClick(); });
       return b;
