@@ -73,7 +73,7 @@ export const glbCharacterConfig = {
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
   treeCreatureUrl: '/models/glb_characters/tree_creature.glb', // Multiplayer roster / Showdown unlock
   mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Classic only
-  frogMomUrl: '/models/glb_characters/frog_mom.glb',       // Story: sitting on Tree Island (src/story/frogMom.js); roster / Showdown + Endless unlock; Town townsfolk
+  frogMomUrl: '/models/glb_characters/frog_mom.glb?v=2',       // Story: sitting on Tree Island (src/story/frogMom.js); roster / Showdown + Endless unlock; Town townsfolk
   oldGuyUrl: '/models/glb_characters/old_guy.glb',         // Old guy: roster / Showdown + Endless unlock; wand caster like the wizard; Town townsfolk
   giantUrl: '/models/glb_characters/giant.glb?v=1',       // Tree Island's giant (src/characters/giant.js); bump ?v= here and in keepTextureUrls
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
@@ -319,6 +319,7 @@ export class GLBCharacter {
     this._armIK = armIK;
     // Which floating hands the IK drives (setArmIKHands); the clip drives the other arm
     this._ikHands = { left: true, right: true };
+    this._ownMixer = null; // the GLB's own clips (e.g. frog mom's 'Eye Move'), looped — setOwnClips
     this.fluffy = hasSkeleton(scene) ? new FluffyCharacter(scene, fluffy) : new StaticRig(scene);
     this.arms = {};
     scene.updateMatrixWorld(true);
@@ -630,6 +631,7 @@ export class GLBCharacter {
   animate(dt) {
     this._updateSpeed(dt);
     this.fluffy.animate(dt);
+    this._ownMixer?.update(dt);
     if (this._action?.started && !this._action.pose && this.fluffy.clipFinished) this._endAction();
     // Bring the rig (and its ancestors) up to date so solveArm() works on this frame's pose
     this.fluffy.rigSpace.updateWorldMatrix(true, true);
@@ -743,8 +745,52 @@ export class GLBCharacter {
     this.fluffy.setFluffy({ enabled: !!enabled });
   }
 
+  /**
+   * Loops the GLB's own clips (ones that move loose props of the model, not the skeleton —
+   * frog mom's 'Eye Move' turns her eye meshes) on a mixer of their own, alongside the body.
+   */
+  setOwnClips(clips) {
+    if (!clips?.length) return;
+    this._ownMixer = new THREE.AnimationMixer(this.scene);
+    for (const clip of clips) {
+      const action = this._ownMixer.clipAction(clip);
+      action.time = Math.random() * clip.duration; // townsfolk don't all blink in step
+      action.play();
+    }
+  }
+
   dispose() {
+    this._ownMixer?.stopAllAction();
     this.fluffy.dispose();
+  }
+}
+
+// Loose meshes beside a skeleton (no skin — frog mom's eyes) sit at the scene's root in the
+// GLB, so they'd stay put while the body moves: hang them off the Head bone through a pivot
+// that keeps their old parent's frame, so their own clips (in that frame) still play as made.
+function attachLooseMeshesToHead(scene) {
+  let head = null;
+  scene.traverse((o) => { if (!head && o.isBone && /head$/i.test(o.name)) head = o; });
+  if (!head) return;
+  // The whole loose branch moves (an eye's node — what its clip turns — and its meshes)
+  const rigged = (o) => { let r = false; o.traverse((c) => { if (c.isBone || c.isSkinnedMesh) r = true; }); return r; };
+  const loose = new Set();
+  scene.traverse((o) => {
+    if (!o.isMesh || o.isSkinnedMesh) return;
+    for (let p = o.parent; p; p = p.parent) if (p.isBone) return; // already on the rig
+    let top = o;
+    while (top.parent && top.parent !== scene && !rigged(top.parent)) top = top.parent;
+    loose.add(top);
+  });
+  scene.updateMatrixWorld(true);
+  const m = new THREE.Matrix4();
+  for (const mesh of loose) {
+    const pivot = new THREE.Object3D();
+    pivot.name = `${mesh.name}_pivot`;
+    m.copy(head.matrixWorld).invert().multiply(mesh.parent.matrixWorld);
+    m.decompose(pivot.position, pivot.quaternion, pivot.scale);
+    head.add(pivot);
+    pivot.add(mesh); // its own position / rotation / scale kept, now in the pivot's frame
   }
 }
 
@@ -768,6 +814,7 @@ export async function createGLBCharacterInstance(opts = {}) {
   scene.traverse((obj) => {
     if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
   });
+  if (gltf.animations?.length && hasSkeleton(scene)) attachLooseMeshesToHead(scene);
 
   // Normalise height from the bind-pose geometry and stand the feet on y = 0
   scene.updateMatrixWorld(true);
@@ -801,6 +848,7 @@ export async function createGLBCharacterInstance(opts = {}) {
     left: new THREE.Vector3(box.min.x, box.min.y + (box.max.y - box.min.y) * 0.45, box.max.z * 0.5),
   };
   const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true, fluffy, palmFallback });
+  character.setOwnClips(gltf.animations);
   container.userData.glbCharacter = character;
   return { container, character };
 }
