@@ -1125,6 +1125,9 @@ export function createTownMode(ctx) {
     // Who's talking to the player in the talk box (their feet — the camera turns to them), or null
     talkFocus: () => {
       if (!T.active || !T.ready || !T.jobTalk.isOpen()) return null;
+      // (a job's line said by someone who isn't a townsperson — the wizard's son: them)
+      const a = T.questTalkFocus();
+      if (a) return _talkFocus.set(a.x, T.groundAt(a.x, a.z), a.z);
       const n = T.talking?.npc;
       if (!n?.alive || n.inside || (T.rooms.roomAt(n.x, n.z) && !T.inRoom)) return null;
       return _talkFocus.set(n.x, T.groundY(n), n.z);

@@ -810,6 +810,8 @@ export function installTownQuests(T, ctx) {
     cartInUse: () => started && !!runner.q()?.cast && Object.keys(runner.q().cast).length > 0,
     // (the sword / wand's camera auto-aim — townMode.js threats)
     questThreats: () => liveFoes().map((f) => f.e.group.position),
+    // (the talk camera: an actor saying the line now)
+    questTalkFocus: () => (talker.isOpen() ? actors.get(talker.speaker()) ?? null : null),
     // (text to speech for someone in a job who isn't a townsperson)
     questVoice: (who) => {
       for (const a of actors.values()) {
