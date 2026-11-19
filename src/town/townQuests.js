@@ -263,7 +263,9 @@ export function installTownQuests(T, ctx) {
   const speakerName = (who, q) => {
     if (who === 'you') return playerName();
     if (actors.has(who)) return actors.get(who).name;
-    const n = q?.cast?.[who] != null ? T.npcById(q.cast[who]) : null;
+    // (the job's own of that role, else whoever the talk's with, else anyone of the role)
+    const n = (q?.cast?.[who] != null ? T.npcById(q.cast[who]) : null)
+      ?? (talkC?.s?.n?.role === who ? talkC.s.n : T.npcs.find((x) => x.alive && x.role === who));
     return n ? firstName(n.name) : who;
   };
 
