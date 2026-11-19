@@ -56,10 +56,14 @@ export function installTownHomes(T, ctx) {
   let sign = null;            // the sign over the player's house's door
   let signText = '';
 
+  // (one panel for every store: the chest at home, the cart's bed — townCart.js — `source` the
+  // one open: { model(), move(id, n), near() })
+  let source = null;
   const storage = createStoragePanel(T.hud, {
-    onMove: (id, n) => moveToChest(id, n),
+    onMove: (id, n) => (source ? source.move(id, n) : moveToChest(id, n)),
     onClose: () => storage.close(),
   });
+  const openStorage = (src) => { source = src; storage.open(src.model()); };
 
   // ── Who lives where ──
   const myKey = () => (T.mp() ? ctx.memberKey() : 'me');
@@ -424,11 +428,12 @@ export function installTownHomes(T, ctx) {
     const p = T.playerPos();
     return !!c && dist2(p.x, p.z, c.x, c.z) < CHEST_ACT_DIST;
   };
+  const chestSource = { kind: 'chest', model: chestModel, move: (id, n) => moveToChest(id, n), near: atChest };
   const openChest = () => {
     const i = homeOfRoom(T.inRoom);
     const h = T.houses[i];
     if (!h || h.k !== myKey()) { T.feedLine(`${h?.n ? `${h.n}'s` : 'Their'} chest is locked tight.`); return; }
-    storage.open(chestModel());
+    openStorage(chestSource);
   };
 
   // ── Buttons ──
@@ -505,7 +510,7 @@ export function installTownHomes(T, ctx) {
       T.feedLine('You walked off — the lock-pick snapped in the lock.');
     }
     if (T.doorPick && !T.lockpick.isOpen()) T.doorPick = null;
-    if (storage.isOpen() && !atChest()) storage.close();
+    if (storage.isOpen() && !(source ?? chestSource).near()) storage.close();
     updateSign();
   };
   // Over the player's house's door: for sale / home
@@ -538,7 +543,7 @@ export function installTownHomes(T, ctx) {
   const applyHouses = (h) => { T.houses = cleanHouses(h); };
 
   Object.assign(T, {
-    applyHouses, bagCount, bagFullNote, bagRoom, bedActs, chestActs, doorAccess, doorActs, freeHome, handleHomesNet, homeKey: myKey, homesSnapshot,
+    applyHouses, openStorage, storageKind: () => (source ?? chestSource).kind, bagCount, bagFullNote, bagRoom, bedActs, chestActs, doorAccess, doorActs, freeHome, handleHomesNet, homeKey: myKey, homesSnapshot,
     lockedNote, myHome, reserveFirst, resetHomes, restoreHomes, settleAfterSpawn, storage, updateHomes,
   });
 }

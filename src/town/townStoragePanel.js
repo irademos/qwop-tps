@@ -1,11 +1,14 @@
-// Town mode: the chest in the player's home — move coins and goods between it and the wallet /
-// bag (both have a limit: WALLET_MAX / BAG_MAX). Pure DOM, in the market panel's look;
-// townHomes.js builds the model and handles the clicks.
+// Town mode: a store of the player's — the chest in their home, the cart's bed (townCart.js) —
+// move coins and goods between it and the wallet / bag (both have a limit: WALLET_MAX /
+// BAG_MAX). Pure DOM, in the market panel's look; townHomes.js builds the chest's model and
+// handles the clicks (T.openStorage — any store: { model(), move(id, n), near() }).
 //
 // open(model) / render(model) / close() / isOpen()
 // model: {
-//   title, wallet, walletMax, bag, bagMax, stored (coins in the chest),
+//   title, wallet, walletMax, bag, bagMax, stored (coins in the store — null: it takes no coins),
 //   goods: [{ id, emoji, label, have, stored }],
+//   subtitle? ('Your chest'), where? ('in the chest'), count? / max? (what's in it / fits — shown
+//   when there's a max), bulk? (Store all / Take all buttons too)
 // }
 // handlers: onMove(id ('coins' | a good), n (> 0 into the chest, < 0 out of it)), onClose()
 
@@ -54,19 +57,29 @@ export function createStoragePanel(parent, handlers) {
     const purse = el('div', 'town-market-purse', `👛 ${model.wallet} / ${model.walletMax} 🪙 · 🎒 ${model.bag} / ${model.bagMax}`);
     const walletRoom = model.walletMax - model.wallet;
     const bagRoom = model.bagMax - model.bag;
+    const where = model.where ?? 'in the chest';
+    const room = model.max != null ? model.max - (model.count ?? 0) : Infinity;
 
     const list = el('div', 'town-market-list');
-    list.append(row('🪙', 'Coins', `in the chest: ${model.stored}`, [
-      button(`Store ${COIN_STEP}`, true, model.wallet > 0, () => handlers.onMove('coins', COIN_STEP)),
-      button(`Take ${COIN_STEP}`, false, model.stored > 0 && walletRoom > 0, () => handlers.onMove('coins', -COIN_STEP)),
-    ]));
-    for (const g of model.goods) {
-      list.append(row(g.emoji, g.label, `carrying ${g.have} · in the chest: ${g.stored}`, [
-        button('Store', true, g.have > 0, () => handlers.onMove(g.id, 1)),
-        button('Take', false, g.stored > 0 && bagRoom > 0, () => handlers.onMove(g.id, -1)),
+    if (model.stored != null) {
+      list.append(row('🪙', 'Coins', `${where}: ${model.stored}`, [
+        button(`Store ${COIN_STEP}`, true, model.wallet > 0, () => handlers.onMove('coins', COIN_STEP)),
+        button(`Take ${COIN_STEP}`, false, model.stored > 0 && walletRoom > 0, () => handlers.onMove('coins', -COIN_STEP)),
       ]));
     }
-    panel.replaceChildren(head, purse, el('div', 'town-market-subtitle', 'Your chest'), list);
+    for (const g of model.goods) {
+      const buttons = [
+        button('Store', true, g.have > 0 && room > 0, () => handlers.onMove(g.id, 1)),
+        button('Take', false, g.stored > 0 && bagRoom > 0, () => handlers.onMove(g.id, -1)),
+      ];
+      if (model.bulk) {
+        buttons.splice(1, 0, button('Store all', true, g.have > 1 && room > 1, () => handlers.onMove(g.id, Infinity)));
+        buttons.push(button('Take all', false, g.stored > 1 && bagRoom > 1, () => handlers.onMove(g.id, -Infinity)));
+      }
+      list.append(row(g.emoji, g.label, `carrying ${g.have} · ${where}: ${g.stored}`, buttons));
+    }
+    const sub = `${model.subtitle ?? 'Your chest'}${model.max != null ? ` · ${model.count ?? 0} / ${model.max}` : ''}`;
+    panel.replaceChildren(head, purse, el('div', 'town-market-subtitle', sub), list);
   };
 
   return {

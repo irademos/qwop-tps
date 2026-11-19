@@ -13,6 +13,7 @@
 // chopTipNear / chopNear chop without a swing (a Chop button when there's no gyro).
 import * as THREE from 'three';
 import { measureTrunk as measureTrunkOf } from '../environment/treeTrunks.js';
+import { WOOD_LOG_GEO, woodLogMaterials } from '../items/woodLog.js';
 import {
   CHOP_REACH, LOG_LENGTH, TREE_FELL_HITS, TREE_GROW_S, TREE_LIE_S, TREE_LOGS, TREE_SINK_S,
   TREE_STUMP_S, dist2,
@@ -27,24 +28,6 @@ const CHIP_POOL = 60;
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
-// Fresh-cut wood: rings on a pale face (the stump's top, the logs' ends)
-const ringsTexture = () => {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  g.fillStyle = '#5e4129';
-  g.fillRect(0, 0, 64, 64);
-  for (let r = 30; r > 0; r -= 3) {
-    g.beginPath();
-    g.arc(32, 32, r, 0, Math.PI * 2);
-    g.fillStyle = r > 27 ? '#6b4a2f' : (r / 3) % 2 ? '#d9b57c' : '#c99f63';
-    g.fill();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-};
-
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownTrees(T, ctx) {
   let group = null;
@@ -57,12 +40,10 @@ export function installTownTrees(T, ctx) {
   let logHitAt = -1;
   let youngNoteAt = -1;
 
-  const barkMat = new THREE.MeshStandardMaterial({ color: 0x5e4129, roughness: 1 });
-  const endMat = new THREE.MeshStandardMaterial({ map: ringsTexture(), roughness: 1 });
   const notchMat = new THREE.MeshStandardMaterial({ color: 0xd9b57c, roughness: 1 });
   const chipMat = new THREE.MeshStandardMaterial({ color: 0xd9b57c, roughness: 1 });
-  const woodMats = [barkMat, endMat, endMat]; // (a cylinder's side, top, bottom)
-  const logGeo = new THREE.CylinderGeometry(1, 1, 1, 10);
+  const woodMats = woodLogMaterials(); // (a cylinder's side, top, bottom — src/items/woodLog.js)
+  const logGeo = WOOD_LOG_GEO;
   const stumpGeo = new THREE.CylinderGeometry(1, 1.15, 1, 12).translate(0, 0.5, 0);
   const notchGeo = new THREE.BoxGeometry(1, 1, 1);
   const chipGeo = new THREE.BoxGeometry(0.07, 0.025, 0.045);

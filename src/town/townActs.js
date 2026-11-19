@@ -137,7 +137,7 @@ export function installTownActs(T, ctx) {
     const out = [];
     if (T.sequence) return out;
     if (T.storage.isOpen()) {
-      out.push({ key: 'closechest', label: 'Close chest', onClick: () => T.storage.close() });
+      out.push({ key: 'closechest', label: T.storageKind?.() === 'cart' ? 'Close the cart' : 'Close chest', onClick: () => T.storage.close() });
       return out;
     }
     if (T.stalls.focused()) {

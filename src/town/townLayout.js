@@ -323,7 +323,7 @@ export function installTownLayout(T, ctx) {
       nav.addStart(x + Math.sin(yaw) * 2, z + Math.cos(yaw) * 2);
       nav.refresh();
       const door = { x: b.x + Math.sin(yaw) * (b.radius + 0.8), z: b.z + Math.cos(yaw) * (b.radius + 0.8) };
-      return { x, z, yaw, hutAt: door, cabin: { x: b.x, z: b.z, radius: b.radius } };
+      return { x, z, yaw, hutAt: door, cabin: { x: b.x, z: b.z, radius: b.radius, object: b.object, id: b.id } };
     }
     // The wizard's stall out in the woods: the open spot with the most trees round it, well away
     // from the houses and the bandit camp — its front to the most open side; his tent behind it

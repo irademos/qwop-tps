@@ -1,10 +1,61 @@
-// Town's quest beats — The cart: brought round / loaded (cart, unload), held (lockCart), a passenger (board / alight), driven somewhere (drive).
+// Town's quest beats — The cart: brought round / loaded (cart, unload), held (lockCart), a passenger (board / alight), driven somewhere (drive),
+// filled with goods from the player's bag (cartGoods — the cart's store, townCart.js) and those goods taken (unloadGoods).
 // Part of townQuests.js' registry (beats/index.js): each beat type's hooks get the runner's
 // context `c` (src/quest/questRunner.js); `W` is Town's quest world (townQuests.js).
 
 export const cartBeats = (W) => {
   const { T, roleNpc, control, stand, fill, placeOf, cartAt, seat, unseat, cartState, firstName, dist2, BOARD_TIMEOUT_S } = W;
+  // (what a beat wants in the cart's store: { good: count } — short: the first good there isn't
+  // enough of, { good, have, need })
+  const shortOf = (need) => {
+    for (const [good, n] of Object.entries(need ?? {})) {
+      const have = T.cartHas?.(good) ?? 0;
+      if (have < n) return { good, have, need: n };
+    }
+    return null;
+  };
+  const GOOD_WORD = { wood: 'wood', fish: 'fish', crops: 'veg' };
   return {
+    // The cart's store filled from the player's bag (by the cart → Cart → Store): done once it
+    // has `count` of `good` (gathered the usual way — chopping, fishing… — and loaded, a bagful
+    // at a time). The cart's 📍 while the player's away from it; Cart ringed by it.
+    cartGoods: {
+      update: (c) => !shortOf({ [c.beat.good]: c.beat.count }),
+      event: (c, kind) => kind === 'cartStore',
+      entry: (c) => {
+        const { beat: b } = c;
+        const have = Math.min(b.count, T.cartHas?.(b.good) ?? 0);
+        const carrying = T.goods?.[b.good] ?? 0;
+        const what = GOOD_WORD[b.good] ?? b.good;
+        const base = `${fill(b.text ?? `Fill the cart with ${what}`, c.q)}: ${have} / ${b.count}`;
+        return carrying > 0 ? `${base} (load the ${carrying} you're carrying)` : base;
+      },
+      marker: (c) => {
+        const cp = cartAt();
+        if (!cp || T.inCart() || T.distToPlayer(cp) < 6 || !(T.goods?.[c.beat.good] > 0)) return null;
+        return { icon: '📍', x: cp.x, z: cp.z, h: 1.6 };
+      },
+      highlight: (c) => {
+        const cp = cartAt();
+        return T.goods?.[c.beat.good] > 0 && cp && T.distToPlayer(cp) < 4 && !T.storage?.isOpen() ? { act: 'cartstore' } : null;
+      },
+      icon: '🪵',
+    },
+    // The goods a job asked for taken out of the cart (short of them: back to `ifShort`'s label)
+    unloadGoods: {
+      start: (c) => {
+        const { beat: b } = c;
+        const short = shortOf({ [b.good]: b.count });
+        if (short) {
+          T.feedLine(`The cart's short — ${short.have} of ${short.need} ${GOOD_WORD[b.good] ?? b.good} in it.`);
+          if (b.ifShort) c.goto(b.ifShort);
+          return !b.ifShort;
+        }
+        T.takeFromCart?.(b.good, b.count);
+        T.feedLine(b.text ? fill(b.text, c.q) : `Unloaded ${b.count} ${GOOD_WORD[b.good] ?? b.good} from the cart.`);
+        return true;
+      },
+    },
     // The cart: brought beside the player (bring), its load (load: 'veg' / null)
     cart: {
       start: (c) => {
@@ -47,6 +98,8 @@ export const cartBeats = (W) => {
         const { beat: b } = c;
         const to = placeOf(b.to);
         if (!to) return false;
+        // (a load it must carry — the wizard's logs: short of it, back to loading)
+        if (b.need && shortOf(b.need)) { if (b.ifShort) c.goto(b.ifShort); return false; }
         if (T.simT > c.s.planAt) { c.s.planAt = T.simT + 0.5; T.driveTo({ x: to.x, z: to.z, r: Math.min(4, b.r * 0.5) }); }
         const cp = cartAt();
         return !!cp && dist2(cp.x, cp.z, to.x, to.z) < b.r && (T.inCart() || T.distToPlayer(cp) < 5);

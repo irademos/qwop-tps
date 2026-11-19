@@ -16,11 +16,18 @@
 // spot while a job's using it (`T.cartInUse`). A job can also hold it where it is (lockCart), knock
 // it over (knockCart — a bomb beside it) and seat a townsperson in its bed (cartSeat — the
 // passenger's place, townQuests.js).
+// Storage: the cart's bed holds goods (T.cartStore — up to CART_MAX, the player's own, saved
+// with their belongings): by the cart (or in it) → Cart opens the store panel (townStoragePanel.js,
+// T.openStorage) to load what's in the bag into it, or take it back — any time, not only for a
+// job. Wood shows as logs stacked at the bed's ends, anything else as a crate of it. A job can
+// ask for a load (the `cartGoods` beat — the wizard's logs) and take it (`unloadGoods`).
 
 import * as THREE from 'three';
 import { createCartRide } from '../items/cart.js';
 import { buildItemMesh } from '../village/villageMode.js';
-import { CART_ACT_DIST, dist2 } from './townConfig.js';
+import { createWoodLog } from '../items/woodLog.js';
+import { GOODS, GOOD_IDS } from './townEconomy.js';
+import { BAG_MAX, CART_ACT_DIST, WALLET_MAX, dist2 } from './townConfig.js';
 
 const PARK_CLEARANCE = 1.1; // m from the cart's middle to a placed thing's bounds
 // Left somewhere (stuck, tipped over…): nobody in it this long and the player away from it and
@@ -29,6 +36,25 @@ const RETURN_S = 60;
 const RETURN_AWAY = 12;     // m the player is from both (so it doesn't vanish / pop up in view)
 const RETURN_MOVED = 3;     // m from its parking spot before it counts as left somewhere
 const BRING_RINGS = [1.75, 2.3, 3, 4, 5.5]; // m from the player the cart's brought round to (bringCart — Get in within CART_ACT_DIST)
+// (the item model a crate of a good shows — villageMode.js buildItemMesh)
+const CRATE_ITEM = { fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'veg' };
+export const CART_MAX = 30;  // goods the cart's bed holds
+const STORE_REACH = CART_ACT_DIST + 1.2; // m from the cart its store panel stays open
+// The logs stacked in the bed (cart-local, across it): a stack at each end, 3 / 2 / 3 a layer
+const LOG_R = 0.062;
+const LOG_LEN = 0.56;
+const BED_Y = 0.27;
+const LOG_SLOTS = (() => {
+  const out = [];
+  for (const z of [0.4, -0.42]) {
+    for (const [layer, xs] of [[0, [-0.13, 0, 0.13]], [1, [-0.065, 0.065]], [2, [-0.13, 0, 0.13]]]) {
+      for (const x of xs) out.push({ x, z: z + (layer % 2 ? 0.01 : 0), y: BED_Y + LOG_R + layer * LOG_R * 1.75 });
+    }
+  }
+  return out;
+})();
+// Wood shown as logs (each slot one, CART_MAX / slots wood a log once there's more than fits)
+const logsShown = (wood) => (wood <= 0 ? 0 : Math.min(LOG_SLOTS.length, Math.max(1, Math.ceil(wood * LOG_SLOTS.length / 16))));
 
 // A load of veg in the bed (cart-local: +Z its pole end; the rider crouches about the middle):
 // a crate at each end heaped with veg
@@ -60,6 +86,9 @@ export function installTownCart(T, ctx) {
   let setupTried = false;
   let idle = 0;               // s nobody's been in it
   let cargo = null;           // the veg in its bed (shown while T.cartLaden())
+  // What's stored in its bed (goods by id) — the player's own
+  T.cartStore = Object.fromEntries(GOOD_IDS.map((g) => [g, 0]));
+  let storeLook = null;       // { group, logs: [mesh], crate, crateGood, sig }
 
   // Its parking spot: round the player's arrival spot, the first pose it fits at — on the town's
   // walkable ground, clear of the map's placed things (lamp posts, trees, fences…)
@@ -107,7 +136,119 @@ export function installTownCart(T, ctx) {
     ride.place(home.x, home.z, home.yaw);
     cargo = makeCargo();
     ride.group.add(cargo);
+    storeLook = makeStoreLook();
+    ride.group.add(storeLook.group);
+    renderStore();
   };
+
+  // ── The cart's store (its bed) ──
+  const storeCount = () => GOOD_IDS.reduce((s, g) => s + T.cartStore[g], 0);
+  const makeStoreLook = () => {
+    const group = new THREE.Group();
+    group.name = 'cart-store';
+    const logs = LOG_SLOTS.map((p, i) => {
+      const m = createWoodLog(LOG_R * (0.92 + (i % 3) * 0.06), LOG_LEN);
+      m.rotation.z = Math.PI / 2; // (across the bed)
+      m.rotation.y = ((i * 7) % 5 - 2) * 0.03;
+      m.position.set(p.x, p.y, p.z);
+      m.visible = false;
+      group.add(m);
+      return m;
+    });
+    return { group, logs, crate: null, crateGood: null, sig: '' };
+  };
+  // (the crate of whatever else is in it: the most stored good, beside the rider)
+  const renderStore = () => {
+    if (!storeLook) return;
+    const sig = GOOD_IDS.map((g) => T.cartStore[g]).join(',') + (laden() ? 'L' : '');
+    if (sig === storeLook.sig) return;
+    storeLook.sig = sig;
+    storeLook.group.visible = !laden();
+    const n = logsShown(T.cartStore.wood);
+    storeLook.logs.forEach((m, i) => { m.visible = i < n; });
+    const other = GOOD_IDS.filter((g) => g !== 'wood' && T.cartStore[g] > 0).sort((a, b) => T.cartStore[b] - T.cartStore[a])[0] ?? null;
+    if (other !== storeLook.crateGood) {
+      if (storeLook.crate) storeLook.crate.removeFromParent();
+      storeLook.crate = null;
+      storeLook.crateGood = other;
+      if (other) {
+        const g = new THREE.Group();
+        const box = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.16, 0.22), new THREE.MeshStandardMaterial({ color: 0x8a6239, roughness: 1 }));
+        box.position.y = BED_Y + 0.08;
+        box.castShadow = true;
+        g.add(box);
+        const item = buildItemMesh(CRATE_ITEM[other] ?? 'veg');
+        item.scale.setScalar(1.3);
+        item.position.y = BED_Y + 0.17;
+        g.add(item);
+        g.position.set(0.2, 0, 0.02);
+        storeLook.group.add(g);
+        storeLook.crate = g;
+      }
+    }
+  };
+  const nearCart = () => {
+    if (!ride || ride.isFlipped()) return false;
+    if (ride.isRiding()) return true;
+    const p = T.playerPos();
+    const c = ride.pose();
+    return dist2(p.x, p.z, c.x, c.z) < STORE_REACH;
+  };
+  const storeModel = () => ({
+    title: 'The cart',
+    subtitle: 'In the cart',
+    where: 'in the cart',
+    wallet: ctx.getCoins(),
+    walletMax: WALLET_MAX,
+    bag: T.bagCount(),
+    bagMax: BAG_MAX,
+    stored: null,
+    count: storeCount(),
+    max: CART_MAX,
+    bulk: true,
+    goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || T.goods[g] > 0 || T.cartStore[g] > 0).map((g) => ({
+      id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, have: T.goods[g], stored: T.cartStore[g],
+    })),
+  });
+  // n > 0: from the bag into the cart; n < 0: out of it into the bag (what fits — ±Infinity: all)
+  const moveToCart = (id, n) => {
+    if (!nearCart()) { T.storage.close(); return; }
+    if (!GOODS[id]) return;
+    const amt = n > 0 ? Math.min(n, T.goods[id], CART_MAX - storeCount()) : -Math.min(-n, T.cartStore[id], T.bagRoom());
+    if (!amt) return;
+    T.goods[id] -= amt;
+    T.cartStore[id] += amt;
+    T.renderGoods();
+    renderStore();
+    ctx.playSfx?.('wood', ctx.getPlayerPosition());
+    T.storage.render(storeModel());
+    T.questNote?.('cartStore', { good: id, count: T.cartStore[id] });
+    T.actsAt = 0;
+    T.save();
+  };
+  const cartSource = { kind: 'cart', model: storeModel, move: moveToCart, near: nearCart };
+  const openCartStore = () => { if (nearCart()) T.openStorage(cartSource); };
+  // (for a job: what's in it, and taken out — what there is of it)
+  const cartHas = (good) => T.cartStore[good] ?? 0;
+  const takeFromCart = (good, n) => {
+    const k = Math.max(0, Math.min(n, T.cartStore[good] ?? 0));
+    if (!k) return 0;
+    T.cartStore[good] -= k;
+    renderStore();
+    T.save();
+    return k;
+  };
+  const restoreCart = (own) => {
+    let room = CART_MAX;
+    GOOD_IDS.forEach((g) => {
+      const n = Math.max(0, Math.min(room, Math.floor(own?.cart?.[g] || 0)));
+      T.cartStore[g] = n;
+      room -= n;
+    });
+    if (storeLook) storeLook.sig = '';
+    renderStore();
+  };
+  const cartSnapshot = () => ({ cart: storeCount() ? { ...T.cartStore } : undefined });
   const laden = () => T.cartLoad?.() === 'veg';
   const inUse = () => laden() || !!T.cartInUse?.();
 
@@ -180,10 +321,11 @@ export function installTownCart(T, ctx) {
       return;
     }
     if (cargo) cargo.visible = laden();
+    renderStore();
     if (!ride.isRiding()) {
       ride.update(dt); // (its dust settling, a flip playing out)
       idle += dt;
-      if (idle > RETURN_S && home && !ride.isFlipped() && !inUse()) {
+      if (idle > RETURN_S * (storeCount() ? 5 : 1) && home && !ride.isFlipped() && !inUse()) {
         const c = ride.pose();
         const p = T.playerPos();
         if (dist2(c.x, c.z, home.x, home.z) > RETURN_MOVED
@@ -211,11 +353,13 @@ export function installTownCart(T, ctx) {
   // ── Acts (townActs.js): Get in by it; in it, Get out ──
   const cartActs = (calm) => {
     if (!ride) return [];
-    if (ride.isRiding()) return [{ key: 'cartout', label: 'Get out of the cart', onClick: () => leave() }];
-    if (!calm || !canBoard()) return [];
+    const store = { key: 'cartstore', label: 'Cart', onClick: openCartStore };
+    if (ride.isRiding()) return [{ key: 'cartout', label: 'Get out of the cart', onClick: () => leave() }, store];
+    if (!calm || ride.isFlipped() || ctx.isPlayerDead()) return [];
     const p = T.playerPos();
     const c = ride.pose();
-    return dist2(p.x, p.z, c.x, c.z) < CART_ACT_DIST ? [{ key: 'cartin', label: 'Get in the cart', onClick: board }] : [];
+    if (dist2(p.x, p.z, c.x, c.z) >= CART_ACT_DIST) return [];
+    return [...(canBoard() ? [{ key: 'cartin', label: 'Get in the cart', onClick: board }] : []), store];
   };
 
   // Leaving Town: out of it, and back at its parking spot for next time
@@ -236,5 +380,5 @@ export function installTownCart(T, ctx) {
   const cartPose = () => (ride ? ride.pose() : null);
   const cartFlipped = () => !!ride?.isFlipped();
 
-  Object.assign(T, { lockCart, knockCart, cartSeat, cartPose, cartFlipped, bringCart, cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
+  Object.assign(T, { cartHas, takeFromCart, restoreCart, cartSnapshot, openCartStore, cartStoreCount: storeCount, lockCart, knockCart, cartSeat, cartPose, cartFlipped, bringCart, cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
 }

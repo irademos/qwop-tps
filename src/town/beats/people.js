@@ -1,9 +1,11 @@
-// Town's quest beats — Someone comes to find the player (seek) and talks (talk).
+// Town's quest beats — Someone comes to find the player (seek — `arrive`: from far off, in by a place) and talks (talk).
 // Part of townQuests.js' registry (beats/index.js): each beat type's hooks get the runner's
 // context `c` (src/quest/questRunner.js); `W` is Town's quest world (townQuests.js).
 
+const ARRIVE_FAR = 60; // m off before `arrive` brings them in by its place
+
 export const peopleBeats = (W) => {
-  const { T, ctx, P, roleNpc, roleGone, canTake, control, release, stand, fill, calm, isNight, npcMark, actors, open, talker, firstName, SNOOZE_S, SEEK_STOP, SEEK_STUCK_S } = W;
+  const { T, ctx, P, placeOf, dist2, roleNpc, roleGone, canTake, control, release, stand, fill, calm, isNight, npcMark, actors, open, talker, firstName, SNOOZE_S, SEEK_STOP, SEEK_STUCK_S } = W;
   return {
     // The giver comes to find the player (❗ over them); talking to them first does too
     seek: {
@@ -19,6 +21,19 @@ export const peopleBeats = (W) => {
         const n = roleNpc(c.q, b.who);
         s.n = n;
         if (!n) return false;
+        // (arrive: someone far off, with no walk to the player — the wizard on his mountain —
+        // comes in by that place instead, the newcomers' way into town: once, out of sight)
+        if (b.arrive && !s.arrived) {
+          s.arrived = true;
+          const at = placeOf(b.arrive);
+          const p = T.playerPos();
+          const far = T.distToPlayer(n);
+          if (at && !n.inside && far > ARRIVE_FAR && dist2(at.x, at.z, p.x, p.z) < far && T.distToPlayer(at) > 20) {
+            n.x = at.x;
+            n.z = at.z;
+            n.path = null;
+          }
+        }
         const off = (isNight() && !b.anyTime) || T.law.stars > 0 || T.jail || ctx.isPlayerDead() || !canTake(n, b.anyTime);
         if (off) { if (n.questing && ['seek', 'wait'].includes(n.qmode?.kind)) release(n); return false; }
         if (!n.questing || !['seek', 'wait'].includes(n.qmode?.kind)) control(n, 'seek');

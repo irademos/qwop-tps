@@ -1,4 +1,4 @@
-// Town's quest beats — People who aren't townsfolk (actors — the wizard's son): walk out (actor), throw a bomb at the cart (bomb), run off (actorLeave).
+// Town's quest beats — People who aren't townsfolk (actors — the wizard's son): walk out (actor), throw a bomb at the cart (bomb), run off (actorLeave); a building torn down / rebuilt (ruin).
 // Part of townQuests.js' registry (beats/index.js): each beat type's hooks get the runner's
 // context `c` (src/quest/questRunner.js); `W` is Town's quest world (townQuests.js).
 
@@ -61,6 +61,16 @@ export const sceneBeats = (W) => {
         }
         if (s.blastAt == null) return s.t > 6; // (lost somewhere: on anyway)
         return T.simT - s.blastAt > BOMB_AFTER_S;
+      },
+    },
+    // A building torn down (on — the bandits' revenge on the wizard's cabin) or built back up
+    // (`when: 'morning'` — the next morning); it happens out of the player's sight (townRuins.js)
+    ruin: {
+      start: (c) => {
+        const { beat: b } = c;
+        if (b.on) T.ruinBuilding?.(b.key);
+        else T.rebuildBuilding?.(b.key, { when: b.when });
+        return true;
       },
     },
     actorLeave: {

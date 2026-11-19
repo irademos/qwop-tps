@@ -120,6 +120,7 @@ import { installTownCanoe } from './townCanoe.js';
 import { installTownCart } from './townCart.js';
 import { installTownDrive } from './townDrive.js';
 import { installTownTrees } from './townTrees.js';
+import { installTownRuins } from './townRuins.js';
 import { installTownBook } from './townBook.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
@@ -451,7 +452,7 @@ export function createTownMode(ctx) {
   };
   // The player's belongings — the same whichever town they're in (their own / a shared one)
   const ownSnapshot = (s) => ({
-    v: 1, at: s.at, goods: s.goods, items: s.items, store: s.store, lockpicks: s.lockpicks, seeds: s.seeds,
+    v: 1, at: s.at, goods: s.goods, items: s.items, store: s.store, lockpicks: s.lockpicks, seeds: s.seeds, cart: s.cart,
   });
   const loadOwn = () => newest(readLocal(ownKey()), T.cloud?.own, _memoryOwn);
   const saveOwn = (s) => {
@@ -495,6 +496,8 @@ export function createTownMode(ctx) {
     items: ctx.getItems() ?? T.lastItems,
     ...T.homesSnapshot(),
     ...T.farmSnapshot(),
+    ...T.cartSnapshot(),
+    ...T.ruinsSnapshot(),
   });
   // Shared town: the world (the host keeps it in the room — townNet.js) and the player's own
   // things (saved per room on this device)
@@ -515,6 +518,7 @@ export function createTownMode(ctx) {
     raidNight: T.raidNight,
     gangSize: T.gangSize,
     gangDay: T.gangDay,
+    ...T.ruinsSnapshot(),
     at: Date.now(),
   });
   const personalSnapshot = () => ({
@@ -532,6 +536,7 @@ export function createTownMode(ctx) {
     nightKills: { ...T.nightKills },
     ...T.homesSnapshot(),
     ...T.farmSnapshot(),
+    ...T.cartSnapshot(),
   });
   const personalKey = () => {
     const k = ctx.profileKey();
@@ -673,6 +678,10 @@ export function createTownMode(ctx) {
     T.restoreFarm(state, own);
     // (the last raid night, the bandits the player beat last night — townBandits.js)
     T.restoreBandits(state, own);
+    // (a building the bandits tore down — the wizard's cabin: townRuins.js)
+    T.restoreRuins(state);
+    // (what's in the cart's bed — the player's own: townCart.js)
+    T.restoreCart(own);
     T.nextId = state?.nextId ?? 1;
     if (state) {
       clock.day = state.day ?? 1;
@@ -777,7 +786,7 @@ export function createTownMode(ctx) {
       }
       ctx.scene.add(root);
       root.add(T.layout.props.group);
-      ctx.setPropObstacles?.(T.stalls.obstacleBoxes()); // (the market stalls + the wizard's are solid)
+      T.refreshObstacles(); // (the market stalls + the wizard's are solid, and a ruin's heap — townRuins.js)
       T.addLights(root);
       const P = T.layout.places;
       const nav = T.layout.nav;
@@ -813,6 +822,7 @@ export function createTownMode(ctx) {
     T.resetHomes();
     T.resetFarm();
     T.resetTrees();
+    T.resetRuins();
     jobTalk.close();
     lockpick.stop();
     ctx.cancelCarry();
@@ -919,6 +929,7 @@ export function createTownMode(ctx) {
     T.updateCooking(dt);
     T.updateFarm(dt);
     T.updateTrees(dt);
+    T.updateRuins();
     if (T.simT > T.growAt) { T.growAt = T.simT + 1; T.updateRegrowth(); }
     T.updateMarket();
     for (const g of T.gossip) if (T.simT - g.at > 240) g.fresh = false;
@@ -995,6 +1006,7 @@ export function createTownMode(ctx) {
   installTownGrab(T, ctx);
   installTownFarming(T, ctx);
   installTownTrees(T, ctx);
+  installTownRuins(T, ctx);
   installTownCanoe(T, ctx);
   installTownCart(T, ctx);
   installTownDrive(T, ctx);
