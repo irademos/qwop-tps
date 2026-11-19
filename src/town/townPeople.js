@@ -70,7 +70,7 @@ const FIRST_NAMES = [
   'Cora', 'Dunstan', 'Elsie', 'Fitz', 'Greta', 'Hamish', 'Iona', 'Jory', 'Lark', 'Marigold',
 ];
 const TITLE_FOR_ROLE = { guard: 'Guard', nightGuard: 'Watchman', sheriff: 'Sheriff', banditBoss: 'Chief' };
-const BANDIT_NAMES = ['Grub', 'Snag', 'Rotfang', 'Mudge', 'Scab', 'Knuckles', 'Slink', 'Bogwart', 'Gristle', 'Twitch'];
+export const BANDIT_NAMES = ['Grub', 'Snag', 'Rotfang', 'Mudge', 'Scab', 'Knuckles', 'Slink', 'Bogwart', 'Gristle', 'Twitch'];
 export const randomName = (role, taken = new Set()) => {
   const names = role === 'bandit' || role === 'banditBoss' ? BANDIT_NAMES : FIRST_NAMES;
   const free = names.filter((n) => !taken.has(n));

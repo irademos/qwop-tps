@@ -1,5 +1,5 @@
 // Town: missions (townJobs.js) — the jobs townsfolk hand out (none round town for now: the
-// townsfolk's work comes in order, one job after another — townIntro.js; the sheriff's thanks
+// townsfolk's work comes in order, one job after another — townQuests.js; the sheriff's thanks
 // after a night's fighting — townBandits.js — is the one kind left), progress, markers
 // (❗ / 📍 / ❓) and the job talk.
 
@@ -18,7 +18,7 @@ export function installTownMissions(T, ctx) {
   const rewardText = (r) => [r.coins ? `${r.coins}` : null, r.attitude ? 'goodwill' : null, r.item ? `a ${r.item}` : null].filter(Boolean).join(' · ') || 'Their thanks';
   const makeJob = (spec) => ({ id: T.nextJobId++, status: 'open', reward: { coins: 0 }, data: {}, ...spec });
   // New jobs handed out round town: none for now — the townsfolk's work comes in order, one job
-  // after another (townIntro.js); the sheriff's thanks after a night's fighting is townBandits.js'.
+  // after another (townQuests.js); the sheriff's thanks after a night's fighting is townBandits.js'.
   // (the hook stays for jobs to come — T.jobs.push(T.makeJob({ kind, giverId, title, desc,
   // reward, data: { target } })), T.markDone(j) once its work's done; one per townsperson)
   const offerJobs = () => {};
@@ -33,7 +33,7 @@ export function installTownMissions(T, ctx) {
     startJob(j);
     if (giver) T.say(giver, 'Thank you! Come back when it\'s done.', { big: true });
     T.feedLine(`Job taken: ${j.title}`);
-    T.introNote('job');
+    T.questNote('job');
   };
   const dropJob = (j) => {
     T.jobs = T.jobs.filter((x) => x !== j);
@@ -94,9 +94,9 @@ export function installTownMissions(T, ctx) {
   // Per-tick job upkeep: postings, the tracker
   const updateJobs = () => {
     if (T.simT > T.jobsAt) { T.jobsAt = T.simT + JOB_REFRESH_S; offerJobs(); }
-    // (the townsfolk's work in order on top — townIntro.js)
-    const intro = T.introEntry();
-    T.tracker.render([...(intro ? [intro] : []), ...takenJobs().map((j) => ({ title: j.title, progress: jobProgress(j), icon: j.status === 'done' ? '❓' : '📍' }))]);
+    // (the first day's goal / the job going on, on top — townQuests.js)
+    const quest = T.questEntry();
+    T.tracker.render([...(quest ? [quest] : []), ...takenJobs().map((j) => ({ title: j.title, progress: jobProgress(j), icon: j.status === 'done' ? '❓' : '📍' }))]);
   };
   const jobProgress = (j) => {
     const who = (id) => (npcById(id) ? firstName(npcById(id).name) : '?');
@@ -118,11 +118,11 @@ export function installTownMissions(T, ctx) {
     return { icon: j.status === 'done' ? '❓' : '❗', x: giver.x, z: giver.z, h: 1.7 * heightScale(giver.url) + 0.5 };
   };
   // (the town book's map: the same marks — { icon, x, z })
-  const jobMarks = () => [...T.jobs.map(markerFor), T.introTarget()].filter(Boolean);
+  const jobMarks = () => [...T.jobs.map(markerFor), T.questMarker()].filter(Boolean);
   const updateMarkers = () => {
     const live = new Set();
     const marks = T.jobs.map((j) => [j.id, markerFor(j)]);
-    marks.push(['intro', T.introTarget()]);
+    marks.push(['quest', T.questMarker()]);
     for (const [id, t] of marks) {
       if (!t) continue;
       const key = `${id}:${t.icon}`;

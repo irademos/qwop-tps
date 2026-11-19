@@ -64,6 +64,7 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
     const pos = bomb.mesh.position.clone();
     spawnBombExplosion(scene, pos);
     blastEnemiesAt(pos, (bomb.getBlastTargets ?? getBlastTargets)?.());
+    bomb.onExplode?.(pos);
     disposeBombMesh(bomb.mesh);
     bombs.splice(bombs.indexOf(bomb), 1);
   };
@@ -91,7 +92,8 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
     /**
      * Lobs a bomb from `origin` so it lands on `target` (both world space).
      * `opts.getBlastTargets` overrides who this bomb's blast can hit (Multiplayer battles);
-     * `opts.speed` its horizontal speed (default: playerBombSpeed — the aim arc's).
+     * `opts.speed` its horizontal speed (default: playerBombSpeed — the aim arc's);
+     * `opts.onExplode(pos)` is called where it goes off (a Town job's bomb knocking the cart over).
      */
     throw(origin, target, opts = {}) {
       const mesh = createBombMesh(gltf);
@@ -102,7 +104,8 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
         mesh,
         vel: computeBombLobVelocity(origin, target, new THREE.Vector3(), opts.speed ?? playerBombSpeed(origin, target)),
         spawnTime: Date.now(),
-        getBlastTargets: opts.getBlastTargets ?? null
+        getBlastTargets: opts.getBlastTargets ?? null,
+        onExplode: opts.onExplode ?? null,
       });
       if (held && !opts.keepHeld) held.visible = false;
     },

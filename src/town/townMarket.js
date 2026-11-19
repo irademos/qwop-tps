@@ -228,7 +228,7 @@ export function installTownMarket(T, ctx) {
       ctx.playSfx?.('coin');
       T.feedLine(`Sold ${GOODS[o.g].emoji} ${GOODS[o.g].label.toLowerCase()} to ${firstName(n.name)}. +${o.price} coins`);
       T.remember(n, 'customer');
-      T.introNote('sell');
+      T.questNote('sell');
       if (!o.remote && T.mine(n)) { n.money = Math.max(0, n.money - o.price); bought(n, o.t?.type); }
       T.say(n, pickOf(['Thank you!', 'Lovely, thanks.', 'Just what I wanted.']));
       if (!GOOD_IDS.some((x) => T.goods[x] > 0)) T.feedLine('You\'ve sold out.');
@@ -289,7 +289,7 @@ export function installTownMarket(T, ctx) {
     ctx.addCoins(price);
     ctx.playSfx?.('coin');
     T.remember(n, 'customer');
-    T.introNote('sell');
+    T.questNote('sell');
     T.feedLine(`Sold ${GOODS[g].emoji} ${GOODS[g].label.toLowerCase()} to ${firstName(n.name)}. +${price} coins`);
     return true;
   };

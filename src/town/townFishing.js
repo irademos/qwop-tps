@@ -382,7 +382,7 @@ export function installTownFishing(T, ctx) {
           ctx.playSfx?.('splash');
           const got = T.gain('fish', n);
           say(`Caught ${fish.size.label}! ${got > 1 ? `+${got} fish` : '+1 fish'} (${T.goods.fish})${got < n ? ' — no room in your bag for the other' : ''}`);
-          T.introNote('fish');
+          T.questNote('fish');
         }
       }
     }

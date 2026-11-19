@@ -70,8 +70,8 @@ export function installTownActs(T, ctx) {
       n.task.t = 0;
     }
     T.talking = { npc: n };
-    // (the first day: whoever's showing the player around — townIntro.js)
-    if (T.introTalk(n)) return;
+    // (the first day / a job going on with them — townQuests.js)
+    if (T.questTalk(n)) return;
     const job = T.jobOf(n);
     if (job && n.attitude >= GRUDGE_ATTITUDE) { T.openJobTalk(n, job); return; }
     chat(n, smallTalk(n));
@@ -214,11 +214,11 @@ export function installTownActs(T, ctx) {
     if (n) {
       // (❗ a job to give, ❓ a reward waiting — as the marker over them)
       const j = T.jobOf(n);
-      const icon = T.isIntroGuide(n) ? '❗' : j && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : null;
+      const icon = T.isQuestGiver(n) ? '❗' : j && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : null;
       out.push({ key: `talk:${n.id}`, label: icon ? `${icon} ${firstName(n.name)}` : `Talk to ${firstName(n.name)}`, onClick: () => talkTo(n) });
     }
-    // (the first day: walk the player to the goal again — townIntro.js)
-    if (calm) out.push(...T.introActs());
+    // (the first day / a job: walk the player to the goal again — townQuests.js / townGuide.js)
+    if (calm) out.push(...T.questActs());
     if (calm) {
       out.push(...T.cookActs());
       if (!T.inCart()) {
@@ -234,11 +234,11 @@ export function installTownActs(T, ctx) {
     }
     return out.slice(0, 3);
   };
-  // The first day's goal: the button it needs rings like the tutorial's (townIntro.js)
+  // The first day's goal: the button it needs rings like the tutorial's (townQuests.js — goalHighlight)
   const hlMatch = (hl, a) => !!hl?.act && (hl.act.endsWith(':') ? a.key.startsWith(hl.act) : a.key === hl.act);
   const refreshActs = () => {
     T.acts = computeActs();
-    const hl = T.introHighlight();
+    const hl = T.questHighlight();
     const lit = T.acts.findIndex((a) => hlMatch(hl, a));
     // (the weapon buttons and the phone: its own button, or the interact bar for the first act)
     ctx.setIntroHighlight?.(hl ? { gear: hl.gear ?? null, phone: hl.phone ?? (lit === 0 ? 'interact' : null) } : null);

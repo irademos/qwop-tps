@@ -326,7 +326,7 @@ export function installTownTrees(T, ctx) {
         T.gain('wood');
         ctx.playSfx?.('wood');
         T.feedLine(`+1 Wood (${T.goods.wood})`);
-        T.introNote?.('wood'); // (the first day's last goal — townIntro.js)
+        T.questNote?.('wood'); // (the first day's last goal — quests/firstDay.js)
         if (T.net && T.netMode !== 'off' && T.netMode !== 'joining') T.net.broadcast({ w: 1, op: 'tree', t: String(t.id), a: 'log', k: log.k });
         return true;
       }
@@ -508,7 +508,7 @@ export function installTownTrees(T, ctx) {
     return tip ? tryChop(tip) : false;
   };
 
-  // ── For the first day (townIntro.js): a standing tree near (x, z), and how one's doing ──
+  // ── For the first day (quests/firstDay.js — townGuide.js): a standing tree near (x, z), and how one's doing ──
   const info = (t) => ({ id: String(t.id), x: t.bx, z: t.bz, state: t.state, logs: t.logs.map((l) => ({ x: l.x, z: l.z })) });
   const standingTreeNear = (x, z) => {
     let best = null;

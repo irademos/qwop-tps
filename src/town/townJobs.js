@@ -1,5 +1,5 @@
 // Town mode missions: the job talk box and the quest tracker (the jobs themselves —
-// townMissions.js; the townsfolk's work in order, one job after another — townIntro.js).
+// townMissions.js; the townsfolk's work in order, one job after another — townQuests.js).
 // Data + DOM only.
 //
 // A job: { id, kind, title, desc, giverId, reward: { coins, attitude, item?, town? },

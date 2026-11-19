@@ -162,7 +162,7 @@ export function createSeaStart(ctx, config) {
       catchEl.classList.toggle('hidden', !F.goods.fish);
       return got;
     },
-    introNote: () => {},
+    questNote: () => {},
     calmNow: () => true,
     stalls: { focused: () => false },
     jobTalk: { isOpen: () => false },
