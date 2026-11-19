@@ -117,6 +117,7 @@ export const JOBS = [
       { do: 'bomb', from: 'son', at: 'cart' },
       { do: 'actorLeave', id: 'son', to: 'camp', shout: 'Lads! Get them!' },
       { do: 'ambush', count: 5, from: 'camp', allies: ['wizard'], onAlly: 2, text: 'Fight off Rowan\'s friends' },
+      { do: 'lockCart', on: false },
       { do: 'seek', who: 'wizard', anyTime: true },
       {
         do: 'talk', who: 'wizard', reach: 8,

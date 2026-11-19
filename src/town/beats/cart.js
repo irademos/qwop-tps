@@ -93,7 +93,8 @@ export const cartBeats = (W) => {
     },
     // Glowing arrows to a place; done once the cart's within r of it (with the player in it or by it)
     drive: {
-      start: (c) => { c.s.planAt = 0; },
+      // (a cart a job held where it was is let go: it has to roll to get anywhere)
+      start: (c) => { c.s.planAt = 0; T.lockCart?.(false); cartState.locked = false; },
       update: (c) => {
         const { beat: b } = c;
         const to = placeOf(b.to);
