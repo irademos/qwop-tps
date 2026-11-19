@@ -38,11 +38,11 @@ import { findStoryLayout, SEAT_RADIUS, SEAT_TOP } from './storyLayout.js';
 import { fitSeatStone, makeSeatStone, makeLeaningRod, makeCanoeDamage, makeNote, pulseGlint, removeProp } from './storyProps.js';
 import {
   CHAPTER, STEPS, stepAtLeast, WOOD_NEEDED, CROW, TREE, VOICES, TALKS, NOTES, ACTS, BANNERS,
-  FIX_CANOE_THEN, quest,
+  FIX_CANOE_THEN, QUEST,
 } from './chapter1.js';
 import { createJobTalk, createQuestTracker } from '../town/townJobs.js';
 import { createTalkRunner } from '../quest/talk.js';
-import { runActions } from '../quest/actions.js';
+import { createQuestRunner } from '../quest/questRunner.js';
 import { createSpeech } from '../audio/speech.js';
 
 export const STORY_SAVE_VERSION = 2;
@@ -174,7 +174,8 @@ export function createStoryMode(ctx) {
     ctx.save(S);
     saveAt = simT + SAVE_EVERY_S;
   };
-  const setStep = (step) => { S.step = step; renderGoods(); save(); };
+  // (a step = a beat of the chapter's quest — the runner moves on, onChange keeps S.step)
+  const setStep = (step) => { runner.act([`goto:${step}`]); };
   const onHidden = () => { if (document.visibilityState === 'hidden') save(); };
 
   // ── HUD: Town's (townMode.js) — the top chip, the feed, the acts, the goods pill, the quest
@@ -245,12 +246,12 @@ export function createStoryMode(ctx) {
     talker.say(def);
     refreshActs();
   };
-  // A character's talk: theirs for the step now (or `key`)
-  const runTalk = (who, key = S.step) => {
-    const def = TALKS[who]?.[key];
-    if (!def) return;
+  // A character's talk: theirs for the step now (the beat's `talks`) or `key`'s
+  const runTalk = (who, key = null) => {
     if (who === 'crow') crow.lookAt(ctx.getPlayerModel().position);
-    say(typeof def === 'function' ? def(view()) : def);
+    if (!key) { runner.talkTo(who); return; }
+    const def = TALKS[who]?.[key];
+    if (def) say(typeof def === 'function' ? def(view()) : def);
   };
   const talkAdvance = () => { talkBox.pressFirst(); };
   let cawAt = 0;
@@ -281,14 +282,37 @@ export function createStoryMode(ctx) {
       actAt = 0;
     },
   };
-  // (the shared action runner — src/quest/actions.js — with the chapter's kinds and ACTIONS)
+  // ── The chapter's quest (QUEST in chapter1.js), on the shared quest runner — as Town's first
+  // day and jobs: its beats are the steps; talking to the Crow / the tree is the beat's `talks`;
+  // a talk's `then` runs as the runner's actions (its own 'goto:<step>'…, and the chapter's) ──
+  const runner = createQuestRunner({
+    quests: [QUEST],
+    beats: {},
+    world: {
+      time: () => simT,
+      view: () => view(),
+      openTalk: (def) => say(def),
+      feed: (text) => note(text),
+      actions: () => ({
+        step: (arg) => setStep(arg), // (old data)
+        note: (arg) => note(NOTES[arg]),
+        talk: (who, key) => runTalk(who, key),
+        ...ACTIONS,
+      }),
+    },
+    onChange: () => {
+      S.step = runner.label() ?? S.step;
+      renderGoods();
+      save();
+    },
+  });
+  // (at the save's step — begun at once, so its talks are there before the first frame)
+  const startQuest = () => {
+    runner.start({ id: QUEST.id, bi: Math.max(0, STEPS.indexOf(S.step)) });
+    runner.update(0);
+  };
   function run(actions) {
-    runActions(actions, {
-      step: (arg) => setStep(arg),
-      note: (arg) => note(NOTES[arg]),
-      talk: (who, key) => runTalk(who, key),
-      ...ACTIONS,
-    }, { warn: '[story]' });
+    runner.act(actions ?? []);
     actAt = 0;
   }
 
@@ -559,7 +583,8 @@ export function createStoryMode(ctx) {
     woodEl.textContent = `🪵 ${F.goods.wood}`;
     woodEl.classList.toggle('hidden', !F.goods.wood);
     goodsEl.classList.toggle('hidden', !F.goods.fish && !S.hasRod && !F.goods.wood);
-    tracker.render(quest(view()));
+    const e = runner.entry();
+    tracker.render(e ? [e] : []);
   };
   installTownFishing(F, {
     playSfx: (kind, at) => ctx.playSfx?.(kind, at),
@@ -708,11 +733,11 @@ export function createStoryMode(ctx) {
       // (the nearest of what's in reach — the canoe's: its rod and mending it / getting in)
       const near = [];
       const within = (x, z, r) => { const d = dist2(p.x, p.z, x, z); return d < r ? d : null; };
-      if (crow.isLanded() && stepAtLeast(S.step, 'crow')) {
+      if (crow.isLanded() && runner.hasTalk('crow')) {
         const d = within(crow.position().x, crow.position().z, TALK_DIST);
         if (d != null) near.push({ d, key: 'crow', label: ACTS.crow, run: () => runTalk('crow') });
       }
-      if (tree.isPlaced() && stepAtLeast(S.step, 'tree')) {
+      if (tree.isPlaced() && runner.hasTalk('tree')) {
         const d = within(tree.position().x, tree.position().z, TREE_TALK_DIST);
         if (d != null) near.push({ d, key: 'tree', label: ACTS.tree, run: () => runTalk('tree') });
       }
@@ -1101,6 +1126,7 @@ export function createStoryMode(ctx) {
   };
   const restart = () => {
     S = fresh();
+    startQuest();
     F.goods.fish = 0;
     F.goods.wood = 0;
     renderGoods();
@@ -1163,6 +1189,7 @@ export function createStoryMode(ctx) {
       return;
     }
     S = migrate(saved) ?? fresh();
+    startQuest();
     ready = true;
     placeWorld();
     placeSeat();
@@ -1220,6 +1247,7 @@ export function createStoryMode(ctx) {
     if (!active || !L) return;
     dt = Math.min(dt, 0.1);
     simT += dt;
+    runner.update(dt);
     crow.update(dt);
     eyeFish.update(dt);
     // (the sacred tree wakes to talk, then goes still again)

@@ -24,8 +24,25 @@
 //       across its beats, cleared on a restart), world, next(), goto(label), fail(text),
 //       later(seconds) — back to the quest's first beat after a while, done(), runActions(list) }
 //
+// Any beat can also carry:
+//   talks: { <who>: talk | (view) => talk } — what talking to them says while it's the beat
+//          (open-ended: talk to someone whenever — Story's Crow, a townsperson's say on a job);
+//          `who` is world.talkKey(x) of whoever's talked to, the talk opened by world.openTalk(def, c, x)
+//   entry: text | (view, c) => text — the tracker's line when its type has no entry hook
+// The built-in `wait` beat does nothing itself: it's done when `until` holds (world.check(until, c))
+// or when a talk / action moves on — 'goto:<label>', 'next'… (a Story step is a `wait` with talks).
+// Actions (a talk's `then`, c.runActions): the runner's own 'next' / 'goto:<label>' / 'done' /
+// 'later[:s]' / 'fail', and the world's (world.actions(c) → { kind: (arg, arg2) => … });
+// runActions returns true if the quest moved on.
+//
 // The runner's own state (saved): { id, bi } while a quest runs, { after: id } once the last
 // one's done (a quest added later after it comes next) — snapshot() / start(saved).
+
+import { runActions as runActionList } from './actions.js';
+
+const CORE_BEATS = {
+  wait: { update: (c) => (c.beat.until ? !!c.world.check?.(c.beat.until, c) : false) },
+};
 
 export function createQuestRunner({ quests, beats, world, onChange = () => {} }) {
   let cur = null;          // { qi, bi, s, q, started, waitUntil }
@@ -35,7 +52,7 @@ export function createQuestRunner({ quests, beats, world, onChange = () => {} })
 
   const quest = () => (cur ? quests[cur.qi] : null);
   const beat = () => (cur ? quest().beats[cur.bi] ?? null : null);
-  const type = (b) => beats[b?.do] ?? null;
+  const type = (b) => beats[b?.do] ?? CORE_BEATS[b?.do] ?? null;
   const ctxFor = () => {
     const c = {
       beat: beat(), quest: quest(), s: cur.s, q: cur.q, world,
@@ -44,9 +61,25 @@ export function createQuestRunner({ quests, beats, world, onChange = () => {} })
       fail: (text) => fail(text),
       later: (s) => restart({ waitS: s, keepScratch: true }),
       done: () => advance(quest().beats.length),
-      runActions: (list) => world.runActions(list, c),
+      runActions: (list) => act(list, c),
     };
     return c;
+  };
+  // A list of actions in the beat's context (c); true if the quest moved on
+  const act = (list, c = cur ? ctxFor() : null) => {
+    if (!c) return false;
+    let moved = false;
+    const token = cur;
+    const bi = cur?.bi;
+    runActionList(list, {
+      next: () => { moved = true; c.next(); },
+      goto: (label) => { moved = true; c.goto(label); },
+      done: () => { moved = true; c.done(); },
+      later: (sec) => { moved = true; c.later(Number(sec) || world.laterS || 90); },
+      fail: (text) => { moved = true; c.fail(text); },
+      ...(world.actions?.(c) ?? {}),
+    }, { warn: '[quest]' });
+    return moved || cur !== token || cur?.bi !== bi;
   };
   const endBeat = () => {
     if (!cur?.started) return;
@@ -117,9 +150,16 @@ export function createQuestRunner({ quests, beats, world, onChange = () => {} })
   };
 
   // What the current beat says, for the game's HUD / buttons (null when there's no quest going)
-  const ask = (hook, ...args) => {
-    if (!cur || !cur.started || time() < cur.waitUntil) return undefined;
-    return type(beat())?.[hook]?.(ctxFor(), ...args);
+  const live = () => !!cur && cur.started && time() >= cur.waitUntil;
+  const ask = (hook, ...args) => (live() ? type(beat())?.[hook]?.(ctxFor(), ...args) : undefined);
+  // The beat's own talk for `who` (its `talks`), resolved
+  const talkFor = (who) => {
+    if (!live()) return null;
+    const talks = beat().talks;
+    if (!talks) return null;
+    const def = talks[world.talkKey ? world.talkKey(who) : who];
+    if (!def) return null;
+    return typeof def === 'function' ? def(world.view?.(ctxFor()), ctxFor()) : def;
   };
 
   return {
@@ -153,11 +193,27 @@ export function createQuestRunner({ quests, beats, world, onChange = () => {} })
     quest,
     beat,
     q: () => cur?.q ?? null,
-    entry: () => ask('entry'),
+    entry: () => {
+      const e = ask('entry');
+      if (e != null || !live()) return e;
+      const b = beat();
+      return typeof b.entry === 'function' ? b.entry(world.view?.(ctxFor()), ctxFor()) : b.entry ?? null;
+    },
     marker: () => ask('marker'),
     acts: () => ask('acts') ?? [],
     highlight: () => ask('highlight') ?? null,
-    talkTo: (who) => !!ask('talkTo', who),
+    // Talking to `who`: the beat type's own (a seek's giver, a guide's tips…), else its `talks`
+    talkTo: (who) => {
+      if (ask('talkTo', who)) return true;
+      const def = talkFor(who);
+      if (!def) return false;
+      world.openTalk(def, ctxFor(), who);
+      return true;
+    },
+    hasTalk: (who) => !!talkFor(who),
+    // (actions in the current beat's context — a talk's `then`; true if the quest moved on)
+    act: (list) => act(list),
+    label: () => beat()?.label ?? null,
     npc: (n, dt) => !!ask('npc', n, dt),
     event: (kind, data) => !!ask('event', kind, data),
     fail,

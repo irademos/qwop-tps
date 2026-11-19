@@ -23,6 +23,9 @@
 //   ambush  { count, from, allies, onAlly, text } — that many bandits come at the player; allies
 //           (roles) fight beside them; done once they're all down, failed if an ally or the player goes down
 //   pay     { from, coins, memory } — the reward
+//   wait    { until? } — the runner's own: nothing happens till a talk / action moves on
+// Any beat: talks: { <role>: talk } — what that townsperson says if talked to while it's the beat
+// (open-ended — talk to someone whenever); entry: the tracker's line.
 //   unload  {}                  — the cart's load handed over
 //   release { who, linger? }    — the townsperson back to their day (linger: s round where they are first)
 // Places (`to` / `from`): 'wizard' (his stall up the mountain), 'camp' (the bandit camp), 'town'
@@ -44,7 +47,11 @@ export const JOBS = [
         choices: [{ label: 'I\'ll take it up' }, { label: 'Later', then: ['later'] }],
       },
       { do: 'cart', label: 'do', bring: true, load: 'veg', checkpoint: true },
-      { do: 'drive', to: 'wizard', r: 9, text: 'Drive the cart up the mountain to the wizard\'s cabin' },
+      {
+        do: 'drive', to: 'wizard', r: 9, text: 'Drive the cart up the mountain to the wizard\'s cabin',
+        // (talk to the farmer meanwhile — open-ended: any beat can carry `talks`)
+        talks: { farmer: { lines: [['farmer', 'Still here, {name}? The wizard\'s cabin is up the mountain — follow the arrows, and mind the steep bits. He pays well!']] } },
+      },
     ],
   },
   {

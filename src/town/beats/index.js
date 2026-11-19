@@ -1,0 +1,12 @@
+// Town's quest beats, by kind — one registry for the quest runner (townQuests.js). A new kind of
+// beat: a function here or a file of its own, given Town's quest world W.
+import { peopleBeats } from './people.js';
+import { goalBeats } from './goal.js';
+import { cartBeats } from './cart.js';
+import { sceneBeats } from './scene.js';
+import { ambushBeats } from './ambush.js';
+import { rewardsBeats } from './rewards.js';
+
+export const townBeats = (W) => ({
+  ...peopleBeats(W), ...goalBeats(W), ...cartBeats(W), ...sceneBeats(W), ...ambushBeats(W), ...rewardsBeats(W),
+});

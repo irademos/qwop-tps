@@ -13,20 +13,21 @@
 //           player a sword: chop down trees for wood (Town's chopping — townTrees.js)
 //   done  → the canoe mended → "To be continued…"
 //
-// Talks: talks[who][key] is { lines, choices?, then? } or a function of the state view
+// The chapter is a quest (QUEST — run by the shared quest runner, src/quest/questRunner.js, as
+// Town's first day and jobs are): its beats are the steps, each a `wait` with what talking to
+// someone says while it's the step (`talks`) and the tracker's line (`entry`); a talk moves the
+// story on with 'goto:<step>'. Open-ended: talk to whoever, whenever.
+// Talks: TALKS[who][key] is { lines, choices?, then? } or a function of the state view
 // (storyMode.js `view`: { step, fish, wood, hasRod, hasSword, canoeFixed }) returning one.
 //   lines   — [who, text] pairs, one at a time (Go on between them)
 //   choices — the last line's buttons: { label, then }; none → Okay
-//   then    — actions run when it ends (or on a choice): 'step:<step>' 'note:<key>'
+//   then    — actions run when it ends (or on a choice): 'goto:<step>' 'note:<key>'
 //             'talk:<who>' (that one's talk for the step now) / 'talk:<who>:<key>' and the engine's own (ACTIONS in
 //             storyMode.js): 'giveFlute' 'takeFish' 'putFluteAway' 'giveSword' 'endChapter'
 // Speakers: VOICES (text to speech — Town's, speech.js).
 
 export const CHAPTER = { id: 1, title: 'Washed Up', place: 'Tree Island', island: 'treeIsland' };
 
-// The steps, in order (the save's `step`)
-export const STEPS = ['intro', 'crow', 'fish', 'tree', 'wood', 'done'];
-export const stepAtLeast = (step, than) => STEPS.indexOf(step) >= STEPS.indexOf(than);
 
 export const WOOD_NEEDED = 3;   // to mend the canoe (a felled tree's logs: one wood each)
 
@@ -58,7 +59,7 @@ export const TALKS = {
         [CROW, "Bring me a fish. Then we'll talk."],
         [CROW, "There's an old fishing rod leaning in that canoe off the beach. The canoe's holed through, mind — but you can fish from the shore."],
       ],
-      then: ['putFluteAway', 'step:fish', 'note:findRod'],
+      then: ['putFluteAway', 'goto:fish', 'note:findRod'],
     },
     fish: (v) => (v.fish > 0
       ? {
@@ -68,7 +69,7 @@ export const TALKS = {
           [CROW, "There's a sacred tree somewhere on this island. Old — older than me, even. It can help you."],
           [CROW, "Head straight up the beach, into the trees. And look closely. It doesn't like to be found."],
         ],
-        then: ['takeFish', 'step:tree', 'note:findTree'],
+        then: ['takeFish', 'goto:tree', 'note:findTree'],
       }
       : {
         lines: [
@@ -97,7 +98,7 @@ export const TALKS = {
         [TREE, 'Fell a tree or two with it and split the logs. Three pieces of wood will mend that canoe.'],
         [TREE, 'Not me, mind. Nor my friends here.'],
       ],
-      choices: [{ label: 'Thank you', then: ['giveSword', 'step:wood', 'note:gotSword'] }],
+      choices: [{ label: 'Thank you', then: ['giveSword', 'goto:wood', 'note:gotSword'] }],
     },
     wood: (v) => ({
       lines: v.wood >= WOOD_NEEDED
@@ -137,26 +138,38 @@ export const ACTS = {
 };
 
 // Mending the canoe (the act, with the wood): what happens
-export const FIX_CANOE_THEN = ['note:canoeFixed', 'step:done', 'endChapter'];
+export const FIX_CANOE_THEN = ['note:canoeFixed', 'goto:done', 'endChapter'];
 
 export const BANNERS = {
   gameOver: ['GAME OVER', 'The Crow flew off with your flute.'],
   end: ['To be continued…', `Chapter ${CHAPTER.id} — ${CHAPTER.title}`],
 };
 
-// The quest tracker (Town's, top right): what's being done now
-export const quest = (v) => {
-  const out = [];
-  if (v.step === 'fish') {
-    out.push(v.fish > 0
-      ? { icon: '❓', title: 'A fish for the Crow', progress: 'Take it to the Crow' }
-      : { icon: '📍', title: 'A fish for the Crow', progress: v.hasRod ? 'Catch a fish' : 'Get the rod from the canoe' });
-  } else if (v.step === 'tree') {
-    out.push({ icon: '📍', title: 'The sacred tree', progress: 'Up the beach, into the trees' });
-  } else if (v.step === 'wood') {
-    out.push(v.wood >= WOOD_NEEDED
-      ? { icon: '📍', title: 'Mend the canoe', progress: 'Take the wood to the canoe' }
-      : { icon: '📍', title: 'Mend the canoe', progress: `Chop a tree for wood (${v.wood}/${WOOD_NEEDED})` });
-  }
-  return out;
+// The chapter: its steps, in order (the save's `step` is the beat's label). intro = the cut
+// scene (the engine moves on to crow when the Crow lands); entry = the quest tracker's line.
+export const QUEST = {
+  id: `chapter${CHAPTER.id}`, title: CHAPTER.title,
+  beats: [
+    { do: 'wait', label: 'intro', checkpoint: true },
+    { do: 'wait', label: 'crow', checkpoint: true, talks: { crow: TALKS.crow.crow } },
+    {
+      do: 'wait', label: 'fish', checkpoint: true, talks: { crow: TALKS.crow.fish },
+      entry: (v) => (v.fish > 0
+        ? { icon: '❓', title: 'A fish for the Crow', progress: 'Take it to the Crow' }
+        : { icon: '📍', title: 'A fish for the Crow', progress: v.hasRod ? 'Catch a fish' : 'Get the rod from the canoe' }),
+    },
+    {
+      do: 'wait', label: 'tree', checkpoint: true, talks: { crow: TALKS.crow.tree, tree: TALKS.tree.tree },
+      entry: { icon: '📍', title: 'The sacred tree', progress: 'Up the beach, into the trees' },
+    },
+    {
+      do: 'wait', label: 'wood', checkpoint: true, talks: { crow: TALKS.crow.wood, tree: TALKS.tree.wood },
+      entry: (v) => (v.wood >= WOOD_NEEDED
+        ? { icon: '📍', title: 'Mend the canoe', progress: 'Take the wood to the canoe' }
+        : { icon: '📍', title: 'Mend the canoe', progress: `Chop a tree for wood (${v.wood}/${WOOD_NEEDED})` }),
+    },
+    { do: 'wait', label: 'done', checkpoint: true, talks: { crow: TALKS.crow.done, tree: TALKS.tree.done } },
+  ],
 };
+export const STEPS = QUEST.beats.map((b) => b.label);
+export const stepAtLeast = (step, than) => STEPS.indexOf(step) >= STEPS.indexOf(than);

@@ -3,9 +3,11 @@
 // one list, in order). This file is Town's side of it:
 //   - the WORLD the beats act in: places, the townspeople a job has taken over (its "cast"),
 //     people who aren't townsfolk (actors — the wizard's son), the bandits of an ambush (foes)
-//   - the BEATS (BEATS below): seek, talk, goal, unless, banner, cart, board, alight, drive,
-//     lockCart, actor, bomb, actorLeave, ambush, pay, unload, release — each a small piece any job
-//     can use (a guide leading the way to a goal, the player walked along: townGuide.js)
+//   - the BEATS (src/town/beats/ — people: seek, talk; goal: goal, unless, banner; cart: cart,
+//     unload, lockCart, board, alight, drive; scene: actor, bomb, actorLeave; ambush; rewards: pay,
+//     release) — each a small piece any job can use, given this file's world W (a guide leading
+//     the way to a goal, the player walked along: townGuide.js); plus the runner's own `wait` and,
+//     on any beat, `talks` (talk to someone whenever — openTalk) and `entry`
 //   - the hooks Town calls: tracker line (questEntry), marker (questMarker), acts, the button to
 //     ring (questHighlight), talking to someone (questTalk), a cast member's frame (updateQuestNpc —
 //     the 'quest' task, townReactions.js), saves (questSnapshot / startQuests)
@@ -20,7 +22,7 @@
 import * as THREE from 'three';
 import { createQuestRunner } from '../quest/questRunner.js';
 import { createTalkRunner } from '../quest/talk.js';
-import { runActions } from '../quest/actions.js';
+import { townBeats } from './beats/index.js';
 import { JOBS } from './quests/jobs.js';
 import { FIRST_DAY, OLD_STEP_IDS } from './quests/firstDay.js';
 import { installTownGuide, newLead } from './townGuide.js';
@@ -215,11 +217,11 @@ export function installTownQuests(T, ctx) {
   };
 
   // ── Foes: bandits of an ambush (stage fighters — ctx.spawnFighter — not townsfolk) ──
-  let foes = [];              // { e, paid }
-  const liveFoes = () => foes.filter((f) => !f.e.isDead);
+  const foes = { list: [] };   // list: { e, paid }
+  const liveFoes = () => foes.list.filter((f) => !f.e.isDead);
   const clearFoes = () => {
-    for (const f of foes) if (!f.e.isDead) ctx.removeFighter(f.e);
-    foes = [];
+    for (const f of foes.list) if (!f.e.isDead) ctx.removeFighter(f.e);
+    foes.list = [];
   };
 
   // ── Places ──
@@ -270,370 +272,11 @@ export function installTownQuests(T, ctx) {
   const isNight = () => { const h = T.hour(); return h >= 21 || h < 6.5; };
   const npcMark = (n, icon = '❗') => (n && !n.inside ? { icon, x: n.x, z: n.z, h: 1.7 * heightScale(n.url) + 0.5 } : null);
 
-  // ── The beats ──
-  const BEATS = {
-    // The giver comes to find the player (❗ over them); talking to them first does too
-    seek: {
-      start: (c) => { c.s.since = T.simT; c.s.best = Infinity; c.s.bestAt = T.simT; },
-      update: (c) => {
-        const { beat: b, s } = c;
-        // (nobody of the role left in town — dead, not replaced yet: on without them)
-        if (b.ifGone && roleGone(b.who)) {
-          if (b.ifGone === 'done') c.done();
-          else c.runActions([b.ifGone]);
-          return false;
-        }
-        const n = roleNpc(c.q, b.who);
-        s.n = n;
-        if (!n) return false;
-        const off = (isNight() && !b.anyTime) || T.law.stars > 0 || T.jail || ctx.isPlayerDead() || !canTake(n, b.anyTime);
-        if (off) { if (n.questing && ['seek', 'wait'].includes(n.qmode?.kind)) release(n); return false; }
-        if (!n.questing || !['seek', 'wait'].includes(n.qmode?.kind)) control(n, 'seek');
-        // (the player indoors and they aren't: met at the door outside)
-        const pRoom = T.rooms.roomAt(T.playerPos().x, T.playerPos().z);
-        const sameRoom = !pRoom || pRoom === T.rooms.roomAt(n.x, n.z);
-        n.qmode.meet = sameRoom ? null : P().rooms[pRoom]?.door ?? null;
-        const d = T.distToPlayer(n);
-        // (no walk from their place to the player — the wizard's mountain: they wait there)
-        if (d < s.best - 0.3) { s.best = d; s.bestAt = T.simT; }
-        else if (n.qmode.kind === 'seek' && T.simT - s.bestAt > SEEK_STUCK_S && d > 12) control(n, 'wait');
-        const reach = Math.max(SEEK_STOP + 0.6, sameRoom && pRoom ? b.talkFrom ?? 0 : 0);
-        return sameRoom && d < reach && !!n.body && calm();
-      },
-      talkTo: (c, n) => (n === c.s.n ? (c.next(), true) : false),
-      entry: (c) => {
-        const n = c.s.n;
-        if (!n) return 'Look around town';
-        const who = `${firstName(n.name)} the ${n.def.label.toLowerCase()}`;
-        if (n.inside && !n.questing) return `${who} is home — back in the morning`;
-        if (isNight() && !c.beat.anyTime) return `${who} will come and find you in the morning`;
-        if (n.qmode?.kind === 'wait') return `Go and see ${who}`;
-        return n.questing && T.distToPlayer(n) > 6 ? `${who} is coming to find you` : `Talk to ${who}`;
-      },
-      marker: (c) => npcMark(c.s.n),
-      icon: '❗',
-    },
-    // Do something n times (T.questNote(kind)); the guide leads the way to it (townGuide.js)
-    goal: {
-      start: (c) => {
-        c.s.count = 0;
-        c.s.L = newLead(c.beat.at, c.q.autoWalk ?? false);
-      },
-      update: (c, dt) => {
-        const { beat: b, s } = c;
-        const g = b.guide ? roleNpc(c.q, b.guide) : null;
-        s.g = g;
-        // (leading while they can — not by night, nor while the player's wanted, nor busy)
-        const lead = !!g && b.lead !== false && !isNight() && !T.law.stars && !T.jail && !ctx.isPlayerDead() && canTake(g) && T.guide.leading(s.L, g);
-        if (lead && (!g.questing || g.qmode?.kind !== 'lead')) control(g, 'lead');
-        else if (!lead && g?.questing && g.qmode?.kind === 'lead') release(g);
-        T.guide.walkFrame(s.L, g, dt);
-        if (b.guideBuys) guideBuys(c, g);
-        return s.count >= (b.n ?? 1);
-      },
-      event: (c, kind) => {
-        if (kind !== c.beat.kind) return false;
-        c.s.count += 1;
-        return true;
-      },
-      npc: (c, n, dt) => (n === c.s.g && n.qmode?.kind === 'lead' ? T.guide.leadFrame(n, c.s.L, dt, { tips: c.beat.tips, fill: (t) => fill(t, c.q) }) : false),
-      // (talking to the guide on the way: a tip)
-      talkTo: (c, n) => (n === c.s.g ? (tipTalk(c, n), true) : false),
-      entry: (c) => {
-        const { beat: b, s } = c;
-        let progress = fill(b.progress ?? c.quest.title, c.q);
-        if ((b.n ?? 1) > 1) progress += ` (${s.count} / ${b.n})`;
-        if (s.g?.qmode?.kind === 'lead' && !s.L.frame?.arrived && T.distToPlayer(s.g) > T.guide.LEAD_WAIT) progress += ` — follow ${firstName(s.g.name)}`;
-        return progress;
-      },
-      marker: (c) => T.guide.marker(c.s.L, c.s.g),
-      acts: (c) => T.guide.acts(c.s.L, c.s.g),
-      highlight: (c) => goalHighlight(c.beat.kind),
-    },
-    // The quest's skipped if the player has it already
-    unless: {
-      start: (c) => {
-        if (c.beat.has && ctx.getItems()?.[c.beat.has]) { c.done(); return false; }
-        return true;
-      },
-    },
-    banner: {
-      start: (c) => {
-        ctx.showBanner(c.beat.title, c.beat.sub ?? '', 2800);
-        if (c.beat.feed) T.feedLine(fill(c.beat.feed, c.q));
-        return true;
-      },
-    },
-    // A talk (lines, the last ending in choices) — its `who` stands facing the player meanwhile
-    talk: {
-      start: (c) => {
-        const { beat: b, s } = c;
-        const n = actors.has(b.who) ? null : roleNpc(c.q, b.who);
-        if (!actors.has(b.who) && !n) return false; // (try again in update)
-        s.n = n;
-        open(c);
-        return false;
-      },
-      update: (c) => {
-        const { beat: b, s } = c;
-        if (!s.opened) { s.n = roleNpc(c.q, b.who); if (s.n || actors.has(b.who)) open(c); return false; }
-        if (s.actions) return flow(c, s.actions);
-        if (talker.isOpen()) return false;
-        // (closed without a choice — walked off)
-        const leave = b.onLeave ?? (b.choices?.some((x) => x.then?.includes('later')) ? 'later' : 'reopen');
-        if (leave === 'next') return true;
-        if (leave === 'later') { c.later(SNOOZE_S); return false; }
-        if (s.n && T.distToPlayer(s.n) < (b.reach ?? 3) && calm()) open(c);
-        return false;
-      },
-      end: (c) => { if (talker.isOpen() && c.s.opened && !c.s.actions) talker.close(); },
-      npc: (c, n, dt) => {
-        if (n !== c.s.n) return false;
-        if (n.seat || n.qmode?.kind === 'knocked') return false;
-        stand(n, T.playerPos().x, T.playerPos().z, dt);
-        return true;
-      },
-      entry: (c) => (c.beat.text ? fill(c.beat.text, c.q) : c.s.n ? `Talk to ${firstName(c.s.n.name)}` : null),
-    },
-    // The cart: brought beside the player (bring), its load (load: 'veg' / null)
-    cart: {
-      start: (c) => {
-        const { beat: b } = c;
-        if ('load' in b) cartLoad = b.load ?? null;
-        if (b.bring && !T.bringCart?.()) T.feedLine('The cart\'s by the market — get in it there.');
-        return true;
-      },
-    },
-    unload: { start: () => { if (cartLoad) T.feedLine('The cart\'s load is handed over.'); cartLoad = null; return true; } },
-    lockCart: { start: (c) => { T.lockCart?.(!!c.beat.on); cartLocked = !!c.beat.on; return true; } },
-    // A townsperson climbs into the back of the cart (carried along, crouched in its bed)
-    board: {
-      start: (c) => { if (!cartAt()) T.bringCart?.(); c.s.t = 0; },
-      update: (c, dt) => {
-        const n = roleNpc(c.q, c.beat.who);
-        c.s.n = n;
-        if (!n) return false;
-        if (n.qmode?.kind === 'seated') { c.q.failOnDown = true; return true; }
-        if (T.cartFlipped?.() || !cartAt()) return false;
-        c.s.t += dt;
-        if (n.qmode?.kind !== 'board') control(n, 'board');
-        if (c.s.t > BOARD_TIMEOUT_S) seat(n);
-        return false;
-      },
-      entry: (c) => (T.cartFlipped?.() ? 'Wait for the cart to right itself' : c.s.n ? `${firstName(c.s.n.name)} is climbing into the cart` : null),
-    },
-    alight: {
-      start: (c) => {
-        const n = roleNpc(c.q, c.beat.who);
-        if (n) { unseat(n); control(n, 'stand'); }
-        c.q.failOnDown = false;
-        return true;
-      },
-    },
-    // Glowing arrows to a place; done once the cart's within r of it (with the player in it or by it)
-    drive: {
-      start: (c) => { c.s.planAt = 0; },
-      update: (c) => {
-        const { beat: b } = c;
-        const to = placeOf(b.to);
-        if (!to) return false;
-        if (T.simT > c.s.planAt) { c.s.planAt = T.simT + 0.5; T.driveTo({ x: to.x, z: to.z, r: Math.min(4, b.r * 0.5) }); }
-        const cp = cartAt();
-        return !!cp && dist2(cp.x, cp.z, to.x, to.z) < b.r && (T.inCart() || T.distToPlayer(cp) < 5);
-      },
-      end: () => T.driveTo(null),
-      entry: (c) => {
-        const cp = cartAt();
-        if (!T.inCart()) return cp && T.distToPlayer(cp) > 6 ? 'Back to the cart' : 'Get in the cart';
-        return fill(c.beat.text, c.q);
-      },
-      marker: (c) => {
-        const cp = !T.inCart() ? cartAt() : null;
-        if (cp && T.distToPlayer(cp) > 6) return { icon: '📍', x: cp.x, z: cp.z, h: 1.6 };
-        const to = placeOf(c.beat.to);
-        return to ? { icon: '📍', x: to.x, z: to.z, h: 2.6 } : null;
-      },
-      highlight: () => (T.inCart() ? null : { act: 'cartin' }),
-    },
-    // Someone who isn't a townsperson walks out to meet the cart
-    actor: {
-      start: (c) => {
-        const { beat: b } = c;
-        const from = placeOf(b.from);
-        const to = placeOf(b.to);
-        const dx = from.x - to.x;
-        const dz = from.z - to.z;
-        const d = Math.hypot(dx, dz) || 1;
-        const a = spawnActor(b, { x: from.x + 1.5, z: from.z + 1.5 });
-        a.to = { x: to.x + (dx / d) * b.gap, z: to.z + (dz / d) * b.gap };
-        a.face = to;
-        c.s.a = a;
-      },
-      update: (c) => {
-        const a = c.s.a;
-        if (!actors.has(a.id)) return true;
-        if (a.arrived) { a.to = null; return true; }
-        if (a.t > ACTOR_TIMEOUT_S) { a.x = a.to.x; a.z = a.to.z; a.arrived = true; }
-        return false;
-      },
-      entry: (c) => c.beat.text ?? null,
-    },
-    // An actor throws a bomb at the cart: it's knocked over, everyone in it thrown out
-    bomb: {
-      start: (c) => { c.s.t = 0; },
-      update: (c, dt) => {
-        const { beat: b, s } = c;
-        const a = actors.get(b.from);
-        const cp = cartAt();
-        s.t += dt;
-        if (!s.thrown) {
-          if (!a || !cp) return true;
-          a.face = cp;
-          if (!s.wound) { s.wound = true; a.inst?.character.playAction(glbCharacterConfig.throwClip); }
-          if (s.t < BOMB_THROW_AT_S) return false;
-          s.thrown = true;
-          const yaw = Math.atan2(cp.x - a.x, cp.z - a.z);
-          const from = new THREE.Vector3(a.x + Math.sin(yaw) * 0.4, T.groundAt(a.x, a.z) + 1.4, a.z + Math.cos(yaw) * 0.4);
-          // (just short of it, on his side: it goes over away from him)
-          const to = new THREE.Vector3(cp.x - Math.sin(yaw) * 0.9, T.groundAt(cp.x, cp.z), cp.z - Math.cos(yaw) * 0.9);
-          ctx.throwBomb?.(from, to, (at) => {
-            s.blastAt = T.simT;
-            T.knockCart?.({ x: at.x, z: at.z });
-            // (standing beside it: thrown too)
-            if (!T.inCart() && T.distToPlayer({ x: at.x, z: at.z }) < 3.5) {
-              const p = T.playerPos();
-              const d = Math.hypot(p.x - at.x, p.z - at.z) || 1;
-              ctx.throwPlayer?.({ x: (p.x - at.x) / d, z: (p.z - at.z) / d });
-            }
-          });
-          if (!ctx.throwBomb) { s.blastAt = T.simT; T.knockCart?.({ x: to.x, z: to.z }); }
-          return false;
-        }
-        if (s.blastAt == null) return s.t > 6; // (lost somewhere: on anyway)
-        return T.simT - s.blastAt > BOMB_AFTER_S;
-      },
-    },
-    actorLeave: {
-      start: (c) => {
-        const a = actors.get(c.beat.id);
-        if (!a) return true;
-        if (c.beat.shout) actorSay(a, c.beat.shout);
-        a.to = placeOf(c.beat.to);
-        a.face = null;
-        a.speed = ACTOR_RUN;
-        a.arrived = false;
-        a.leaving = true;
-        return true;
-      },
-    },
-    // Bandits come at the player; the job's allies fight beside them
-    ambush: {
-      start: (c) => {
-        const { beat: b, q } = c;
-        clearFoes();
-        const p = T.playerPos();
-        const from = placeOf(b.from) ?? p;
-        const base = Math.atan2(from.x - p.x, from.z - p.z);
-        const allies = (b.allies ?? []).map((r) => roleNpc(q, r)).filter(Boolean);
-        q.allyHp = Object.fromEntries(allies.map((n) => [n.id, ALLY_HP]));
-        for (const n of allies) {
-          if (n.qmode?.kind === 'seated') unseat(n);
-          if (n.qmode?.kind !== 'knocked') control(n, 'fight');
-          else n.qmode.after = 'fight';
-        }
-        const url = glbCharacterConfig.frogManUrl;
-        const used = new Set();
-        for (let i = 0; i < b.count; i++) {
-          const a = base + (i - (b.count - 1) / 2) * 0.32;
-          const r = FOE_SPAWN_DIST[0] + Math.random() * (FOE_SPAWN_DIST[1] - FOE_SPAWN_DIST[0]);
-          let x = p.x + Math.sin(a) * r;
-          let z = p.z + Math.cos(a) * r;
-          const cell = T.layout.nav.nearestWalkable(x, z);
-          if (cell >= 0 && dist2(T.layout.nav.cellX(cell), T.layout.nav.cellZ(cell), x, z) < 4) { x = T.layout.nav.cellX(cell); z = T.layout.nav.cellZ(cell); }
-          const ally = i < (b.onAlly ?? 0) ? allies[i % Math.max(1, allies.length)] ?? null : null;
-          let name = pickOf(BANDIT_NAMES);
-          for (let k = 0; k < 5 && used.has(name); k++) name = pickOf(BANDIT_NAMES);
-          used.add(name);
-          const e = ctx.spawnFighter({
-            x, z, yaw: Math.atan2(p.x - x, p.z - z), url, hearts: FOE_HEARTS, swingChance: 0.32,
-            gear: ally ? null : FOE_GEAR[i % FOE_GEAR.length], name,
-          });
-          if (!e) continue;
-          e._questFoe = true;
-          // (the ones going for an ally: at them while they're up)
-          if (ally) {
-            e.questTarget = () => {
-              if (!ally.alive || !ally.body || (q.allyHp[ally.id] ?? 0) <= 0 || ally.qmode?.kind === 'knocked') return null;
-              return {
-                model: ally.body.container,
-                onHit: (_m, dir) => { hitAlly(c, ally, dir); return 'hit'; },
-              };
-            };
-          }
-          foes.push({ e, paid: false });
-        }
-        c.s.total = foes.length;
-        ctx.playSfx?.('unsheath');
-      },
-      update: (c) => {
-        if (ctx.isPlayerDead()) { c.fail(fill('You went down — {wizard} limps back up the mountain. {wizard.He}\'ll ask again.', c.q)); return false; }
-        for (const f of foes) {
-          if (f.e.isDead && !f.paid) {
-            f.paid = true;
-            const at = f.e.group.position.clone();
-            at.y += 0.3;
-            ctx.dropCoins(at, FOE_COINS);
-          }
-        }
-        return foes.length > 0 && !liveFoes().length;
-      },
-      end: (c) => {
-        // (the allies: back to standing by)
-        for (const id of Object.keys(c.q.allyHp ?? {})) {
-          const n = T.npcById(+id);
-          if (n?.questing && n.qmode?.kind === 'fight') control(n, 'stand');
-        }
-      },
-      entry: (c) => `${fill(c.beat.text, c.q)} (${c.s.total - liveFoes().length} / ${c.s.total})`,
-      icon: '⚔️',
-    },
-    pay: {
-      start: (c) => {
-        const { beat: b, q } = c;
-        const n = roleNpc(q, b.from);
-        if (b.coins > 0) { ctx.addCoins(b.coins); ctx.playSfx?.('coin'); }
-        if (n) {
-          n.attitude = Math.min(1, n.attitude + 0.15);
-          if (b.memory) T.remember(n, 'intro', { what: b.memory });
-        }
-        // (their done line: said aloud near them, else in the feed)
-        if (b.say) {
-          const line = fill(b.say, q);
-          if (n?.body && T.distToPlayer(n) < GUIDE_REACH) T.say(n, line, { big: true });
-          else T.feedLine(`${n ? `${firstName(n.name)}: ` : ''}${line}`);
-        }
-        T.feedLine(`${c.quest.title} — done${b.coins ? ` · +${b.coins} coins` : ''}`);
-        return true;
-      },
-    },
-    release: {
-      start: (c) => {
-        const n = roleNpc(c.q, c.beat.who);
-        if (!n) return true;
-        unseat(n);
-        if (c.beat.linger) {
-          control(n, { kind: 'linger', until: T.simT + c.beat.linger, ax: n.x, az: n.z });
-          sendHome(n);
-        } else release(n);
-        // (kept out of the job's cleanup)
-        if (c.q.cast) delete c.q.cast[c.beat.who];
-        return true;
-      },
-    },
-  };
+  // (the beats: src/town/beats/ — one registry, beats/index.js — given the world W, below)
 
   // ── Talk: the shared talk (src/quest/talk.js) over Town's talk box ──
-  let talkC = null;            // the run context of the talk beat it's for
+  let talkC = null;            // the run context of the talk it's for
+  let talkEnd = null;          // what its ending does with its actions
   const talker = createTalkRunner({
     box: T.jobTalk,
     name: (who) => speakerName(who, talkC?.q),
@@ -643,45 +286,45 @@ export function installTownQuests(T, ctx) {
       const a = actors.get(who);
       if (a) { const n = talkC?.s.n; a.face = n ? { x: n.x, z: n.z } : T.playerPos(); }
     },
-    run: (actions) => { if (talkC) talkC.s.actions = actions ?? []; },
+    run: (actions) => { const end = talkEnd; talkEnd = null; end?.(actions ?? []); },
   });
+  // A talk beat's talk: its ending's actions handled in its update (on, unless they moved it)
   const open = (c) => {
     const { beat: b, s } = c;
     s.opened = true;
     talkC = c;
+    talkEnd = (actions) => { c.s.actions = actions; };
     T.talking = s.n ? { npc: s.n, reach: b.reach } : null;
     talker.say({ lines: b.lines, choices: b.choices, reward: b.reward, then: b.then });
   };
-  // What a talk's ending does: 'later' / 'fail' / 'goto:<label>' / 'done', else on to the next beat
-  const flow = (c, actions) => {
-    let moved = false;
-    runActions(actions, {
-      next: () => { moved = true; c.next(); },
-      later: (s) => { moved = true; c.later(Number(s) || SNOOZE_S); },
-      fail: () => { moved = true; c.fail(); },
-      goto: (label) => { moved = true; c.goto(label); },
-      done: () => { moved = true; c.done(); },
-      note: (t) => T.feedLine(fill(t, c.q)),
-      // (the talk's townsperson hands something over — unless the player has one)
-      give: (item) => {
-        if (ctx.getItems()?.[item] || !ctx.grantItem(item)) return;
-        const n = c.s.n;
-        T.feedLine(`${n ? firstName(n.name) : 'Someone'} gave you a ${item === 'rod' ? 'fishing rod' : item}.`);
-      },
-      // (walked to the next goal by its guide — or not)
-      walk: (v) => { c.q.autoWalk = v !== 'off'; },
-      buySword: () => buySword(c.s.n),
-      // (the first day skipped: a rod and a sword to get going with, then the jobs)
-      skipDay: () => {
-        moved = true;
-        const given = ['rod', 'sword'].filter((id) => !ctx.getItems()?.[id] && ctx.grantItem(id));
-        T.feedLine(`Skipped the first day.${given.length ? ` Here — ${given.map((id) => (id === 'rod' ? 'a fishing rod' : 'a sword')).join(' and ')} to get you going.` : ''}`);
-        runner.jump(JOBS[0].id, null, JOBS[0].waitS ?? 0);
-        T.save();
-      },
-    }, { warn: '[Town job]' });
-    return !moved;
+  // A beat's open talk (its `talks` — talk to someone whenever while it's the beat): the
+  // ending's actions in that beat (it stays the beat unless they move it on)
+  const openTalk = (def, c, n) => {
+    talkC = { q: c.q, s: { n } };
+    talkEnd = (actions) => { runner.act(actions); };
+    T.talking = { npc: n, reach: def.reach };
+    talker.say(def);
   };
+  // Town's own talk actions (besides the runner's next / goto / done / later / fail)
+  const actionsFor = (c) => ({
+    note: (t) => T.feedLine(fill(t, c.q)),
+    // (the talk's townsperson hands something over — unless the player has one)
+    give: (item) => {
+      if (ctx.getItems()?.[item] || !ctx.grantItem(item)) return;
+      const n = c.s.n;
+      T.feedLine(`${n ? firstName(n.name) : 'Someone'} gave you a ${item === 'rod' ? 'fishing rod' : item}.`);
+    },
+    // (walked to the next goal by its guide — or not)
+    walk: (v) => { c.q.autoWalk = v !== 'off'; },
+    buySword: () => buySword(c.s.n),
+    // (the first day skipped: a rod and a sword to get going with, then the jobs)
+    skipDay: () => {
+      const given = ['rod', 'sword'].filter((id) => !ctx.getItems()?.[id] && ctx.grantItem(id));
+      T.feedLine(`Skipped the first day.${given.length ? ` Here — ${given.map((id) => (id === 'rod' ? 'a fishing rod' : 'a sword')).join(' and ')} to get you going.` : ''}`);
+      runner.jump(JOBS[0].id, null, JOBS[0].waitS ?? 0);
+      T.save();
+    },
+  });
   const buySword = (n) => {
     if (ctx.getItems()?.sword) return;
     const price = swordPrice();
@@ -888,12 +531,15 @@ export function installTownQuests(T, ctx) {
   };
 
   // ── The world the runner works in ──
-  let cartLoad = null;         // what a job's put in the cart's bed ('veg' / null)
-  let cartLocked = false;
+  const cartState = { load: null, locked: false }; // what a job's put in the cart's bed ('veg' / null); held
   const world = {
     time: () => T.simT,
     feed: (text) => T.feedLine(text),
-    runActions: (list, c) => flow(c, list),
+    laterS: SNOOZE_S,
+    actions: actionsFor,
+    // (talking to a townsperson: their role is the key of a beat's `talks`)
+    talkKey: (n) => n?.role ?? n,
+    openTalk,
     // (a quest restarting / dropped: everything it set going put away)
     questReset: (_quest, q) => cleanup(q),
     questEnded: (_quest, q) => { cleanup(q); T.save(); },
@@ -901,10 +547,11 @@ export function installTownQuests(T, ctx) {
   const cleanup = (q) => {
     if (talker.isOpen()) talker.close();
     talkC = null;
+    talkEnd = null;
     T.driveTo(null);
     clearActors();
     clearFoes();
-    if (cartLocked) { T.lockCart?.(false); cartLocked = false; }
+    if (cartState.locked) { T.lockCart?.(false); cartState.locked = false; }
     for (const id of Object.values(q?.cast ?? {})) {
       const n = T.npcById(id);
       if (!n?.questing) continue;
@@ -916,6 +563,15 @@ export function installTownQuests(T, ctx) {
     }
     if (q) { q.cast = {}; q.failOnDown = false; }
   };
+  // ── Town's quest world for the beats (src/town/beats/) ──
+  const W = {
+    T, ctx, P, THREE, roleNpc, roleGone, canTake, control, release, go, stand, fill, calm, isNight, npcMark, placeOf, cartAt,
+    actors, spawnActor, actorSay, foes, liveFoes, clearFoes, seat, unseat, hitAlly, sendHome, open, talker, tipTalk,
+    guideBuys, goalHighlight, cartState, newLead, glbCharacterConfig, BANDIT_NAMES, firstName, pickOf, dist2,
+    SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
+    BOMB_THROW_AT_S, BOMB_AFTER_S, FOE_HEARTS, FOE_SPAWN_DIST, FOE_GEAR, FOE_COINS,
+  };
+  const BEATS = townBeats(W);
   const runner = createQuestRunner({ quests: QUESTS, beats: BEATS, world, onChange: () => { T.actsAt = 0; } });
   let started = false;
 
@@ -944,7 +600,7 @@ export function installTownQuests(T, ctx) {
   // was — `{ id | step, phase }` / `{ after }` / null (from before the jobs: its first day done);
   // nothing at all — a new town: the first day from the start)
   const startQuests = (saved, legacyIntro) => {
-    cartLoad = null;
+    cartState.load = null;
     started = true;
     if (saved !== undefined && saved !== null) { runner.start(saved); return; }
     const li = legacyIntro;
@@ -961,7 +617,7 @@ export function installTownQuests(T, ctx) {
     started = false;
     homeBound.clear();
     for (const n of T.npcs) if (n.questing) release(n);
-    cartLoad = null;
+    cartState.load = null;
   };
 
   Object.assign(T, {
@@ -987,7 +643,7 @@ export function installTownQuests(T, ctx) {
     isQuestGiver: (n) => started && runner.beat()?.do === 'seek' && !runner.waiting() && runner.q()?.cast?.[runner.beat().who] === n.id,
     // (a quiet job, once it's under way — the wizard aboard: the camp leaves the player be)
     questQuiet: () => started && !!runner.quest()?.quiet && !runner.waiting() && !!runner.q()?.failOnDown,
-    cartLoad: () => cartLoad,
+    cartLoad: () => cartState.load,
     cartInUse: () => started && !!runner.q()?.cast && Object.keys(runner.q().cast).length > 0,
     // (the sword / wand's camera auto-aim — townMode.js threats)
     questThreats: () => liveFoes().map((f) => f.e.group.position),
@@ -1001,6 +657,6 @@ export function installTownQuests(T, ctx) {
       return null;
     },
     quests: runner, // (dev console: town.debug().T.quests.jump('wizardSon'))
-    questDebug: () => ({ foes, actors, cartLoad, started }),
+    questDebug: () => ({ foes: foes.list, actors, cartLoad: cartState.load, started }),
   });
 }
