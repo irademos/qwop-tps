@@ -214,6 +214,14 @@ export function createQuestRunner({ quests, beats, world, onChange = () => {} })
     // (actions in the current beat's context — a talk's `then`; true if the quest moved on)
     act: (list) => act(list),
     label: () => beat()?.label ?? null,
+    bi: () => cur?.bi ?? -1,
+    // (the whole list done at once — skipping it, e.g. Town's first day)
+    finish: () => {
+      if (cur) { endBeat(); world.questReset?.(quest(), cur.q); }
+      cur = null;
+      after = quests.length ? quests[quests.length - 1].id : null;
+      onChange();
+    },
     npc: (n, dt) => !!ask('npc', n, dt),
     event: (kind, data) => !!ask('event', kind, data),
     fail,

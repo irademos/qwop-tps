@@ -118,11 +118,11 @@ export function installTownMissions(T, ctx) {
     return { icon: j.status === 'done' ? '❓' : '❗', x: giver.x, z: giver.z, h: 1.7 * heightScale(giver.url) + 0.5 };
   };
   // (the town book's map: the same marks — { icon, x, z })
-  const jobMarks = () => [...T.jobs.map(markerFor), T.questMarker()].filter(Boolean);
+  const jobMarks = () => [...T.jobs.map(markerFor), ...T.questMarkers()].filter(Boolean);
   const updateMarkers = () => {
     const live = new Set();
     const marks = T.jobs.map((j) => [j.id, markerFor(j)]);
-    marks.push(['quest', T.questMarker()]);
+    T.questMarkers().forEach((m, i) => marks.push([`quest${i}`, m]));
     for (const [id, t] of marks) {
       if (!t) continue;
       const key = `${id}:${t.icon}`;

@@ -1,6 +1,12 @@
 // Town: the first day and the jobs after it, run by the shared quest runner
-// (src/quest/questRunner.js) from their data (src/town/quests/firstDay.js, then quests/jobs.js —
-// one list, in order). This file is Town's side of it:
+// (src/quest/questRunner.js) from their data (src/town/quests/firstDay.js, then the branches of
+// quests/jobs.js). Each branch is a list of quests in order with a runner of its own; the first
+// day is a branch too and the others open once it's done or skipped (or a branch's `from` says).
+// The branches run side by side but one job at a time: while one's under way (past its giver's
+// first talk — `engaged`) the rest wait; otherwise the branches whose giver is waiting to come up
+// queue (`order`) and one at a time has the turn (`turn` — its seek beat may set off: W.mayApproach),
+// a giver near the player first; nobody comes up while the player's in a fight, out on the water,
+// off the island or far off. Talking to any waiting giver (❗) starts theirs. This file is Town's side of it:
 //   - the WORLD the beats act in: places, the townspeople a job has taken over (its "cast"),
 //     people who aren't townsfolk (actors — the wizard's son), the bandits of an ambush (foes)
 //   - the BEATS (src/town/beats/ — people: seek, talk; goal: goal, unless, banner; cart: cart,
@@ -8,7 +14,7 @@
 //     release) — each a small piece any job can use, given this file's world W (a guide leading
 //     the way to a goal, the player walked along: townGuide.js); plus the runner's own `wait` and,
 //     on any beat, `talks` (talk to someone whenever — openTalk) and `entry`
-//   - the hooks Town calls: tracker line (questEntry), marker (questMarker), acts, the button to
+//   - the hooks Town calls: tracker line (questEntry), markers (questMarkers), acts, the button to
 //     ring (questHighlight), talking to someone (questTalk), a cast member's frame (updateQuestNpc —
 //     the 'quest' task, townReactions.js), saves (questSnapshot / startQuests)
 //
@@ -23,13 +29,13 @@ import * as THREE from 'three';
 import { createQuestRunner } from '../quest/questRunner.js';
 import { createTalkRunner } from '../quest/talk.js';
 import { townBeats } from './beats/index.js';
-import { JOBS } from './quests/jobs.js';
+import { BRANCHES } from './quests/jobs.js';
 import { FIRST_DAY, OLD_STEP_IDS } from './quests/firstDay.js';
 import { installTownGuide, newLead } from './townGuide.js';
 import { FOOD_IDS, GOOD_IDS, SHOP_GEAR, goodPrice } from './townEconomy.js';
 import { BANDIT_NAMES, firstName } from './townPeople.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
-import { RUN_SPEED, WALK_SPEED, dist2, heightScale, pickOf } from './townConfig.js';
+import { RUN_SPEED, WALK_SPEED, dist2, heightScale, inHours, pickOf } from './townConfig.js';
 
 const SEEK_STOP = 2.0;        // m from the player a giver stops to talk
 const SEEK_STUCK_S = 6;       // s getting no closer (no walk from their place to the player): they wait there
@@ -65,8 +71,14 @@ const WORDS = {
   dad: ['dad', 'mum'], father: ['father', 'mother'], he: ['he', 'she'], him: ['him', 'her'], his: ['his', 'her'],
   man: ['man', 'woman'], sir: ['sir', 'madam'],
 };
-// Everything in order: the first day's goals, then the jobs
-const QUESTS = [...FIRST_DAY, ...JOBS];
+// When a giver may come and find the player (the branches' queue — see `updateBranches`)
+const SEEK_NEAR = 40;         // m — a waiting giver this close goes before the queue's first
+const SEEK_FAR = 200;         // m — no further off than this (another island, far out at sea)
+const HOME_RADIUS = 165;      // m from the island town's middle: past it the player's off the island
+const ATTACK_DIST = 25;       // m — a fighter after the player this close: nobody comes up meanwhile
+// The first day is a branch of its own, before all the others (quests/firstDay.js)
+const FIRST_BRANCH = { id: 'firstDay', title: 'First day', jobs: FIRST_DAY };
+const ALL_QUESTS = [FIRST_BRANCH, ...BRANCHES].flatMap((b) => b.jobs);
 
 export function installTownQuests(T, ctx) {
   const P = () => T.layout.places;
@@ -305,7 +317,7 @@ export function installTownQuests(T, ctx) {
   // ending's actions in that beat (it stays the beat unless they move it on)
   const openTalk = (def, c, n) => {
     talkC = { q: c.q, s: { n } };
-    talkEnd = (actions) => { runner.act(actions); };
+    talkEnd = (actions) => { c.world.branch.runner.act(actions); };
     T.talking = { npc: n, reach: def.reach };
     talker.say(def);
   };
@@ -325,7 +337,7 @@ export function installTownQuests(T, ctx) {
     skipDay: () => {
       const given = ['rod', 'sword'].filter((id) => !ctx.getItems()?.[id] && ctx.grantItem(id));
       T.feedLine(`Skipped the first day.${given.length ? ` Here — ${given.map((id) => (id === 'rod' ? 'a fishing rod' : 'a sword')).join(' and ')} to get you going.` : ''}`);
-      runner.jump(JOBS[0].id, null, JOBS[0].waitS ?? 0);
+      first.runner.finish();
       T.save();
     },
   });
@@ -439,7 +451,7 @@ export function installTownQuests(T, ctx) {
   // ── A cast member's frame (the 'quest' task) ──
   const updateQuestNpc = (n, t, dt) => {
     if (!n.questing) { T.decide(n); return true; }
-    if (runner.npc(n, dt)) return true;
+    if (branches.some((br) => br.started && br.runner.npc(n, dt))) return true;
     const m = n.qmode ?? { kind: 'stand', t: 0 };
     m.t = (m.t ?? 0) + dt;
     const p = T.playerPos();
@@ -544,18 +556,20 @@ export function installTownQuests(T, ctx) {
     // (talking to a townsperson: their role is the key of a beat's `talks`)
     talkKey: (n) => n?.role ?? n,
     openTalk,
-    // (a quest restarting / dropped: everything it set going put away)
-    questReset: (_quest, q) => cleanup(q),
-    questEnded: (_quest, q) => { cleanup(q); T.save(); },
+    // (a quest restarting / dropped: everything it set going put away — per branch, below)
   };
-  const cleanup = (q) => {
-    if (talker.isOpen()) talker.close();
-    talkC = null;
-    talkEnd = null;
-    T.driveTo(null);
-    clearActors();
-    clearFoes();
-    if (cartState.locked) { T.lockCart?.(false); cartState.locked = false; }
+  // (global: the job was under way — its talk, arrows, actors, foes, the cart; a giver who
+  // never got past coming up has nothing of that, and another job may be using them)
+  const cleanup = (q, global = true) => {
+    if (global) {
+      if (talker.isOpen()) talker.close();
+      talkC = null;
+      talkEnd = null;
+      T.driveTo(null);
+      clearActors();
+      clearFoes();
+      if (cartState.locked) { T.lockCart?.(false); cartState.locked = false; }
+    }
     for (const id of Object.values(q?.cast ?? {})) {
       const n = T.npcById(id);
       if (!n?.questing) continue;
@@ -572,11 +586,117 @@ export function installTownQuests(T, ctx) {
     T, ctx, P, THREE, roleNpc, roleGone, canTake, control, release, go, stand, fill, calm, isNight, npcMark, placeOf, cartAt,
     actors, spawnActor, actorSay, foes, liveFoes, clearFoes, seat, unseat, hitAlly, sendHome, open, talker, tipTalk,
     guideBuys, goalHighlight, cartState, newLead, glbCharacterConfig, BANDIT_NAMES, firstName, pickOf, dist2,
-    SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
+    mayApproach, make: (what, on) => makers[what]?.(on), SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
     BOMB_THROW_AT_S, BOMB_AFTER_S, FOE_HEARTS, FOE_SPAWN_DIST, FOE_GEAR, FOE_COINS,
   };
   const BEATS = townBeats(W);
-  const runner = createQuestRunner({ quests: QUESTS, beats: BEATS, world, onChange: () => { T.actsAt = 0; } });
+
+  // ── The branches: one runner each ──
+  const firstSeek = (quest) => quest?.beats.findIndex((b) => b.do === 'seek') ?? -1;
+  const branches = [FIRST_BRANCH, ...BRANCHES].map((def) => {
+    const br = { id: def.id, def, quests: def.jobs, started: false, saved: null, runner: null, world: null };
+    // (its quest's giver hasn't got past coming up: nothing of it is out in the world yet)
+    br.world = {
+      ...world,
+      branch: br,
+      questReset: (_quest, q) => cleanup(q, !pending(br)),
+      questEnded: (_quest, q) => { cleanup(q, !pending(br)); T.save(); },
+    };
+    br.runner = createQuestRunner({ quests: br.quests, beats: BEATS, world: br.world, onChange: () => { T.actsAt = 0; } });
+    return br;
+  });
+  const first = branches[0];
+  const branchOf = (id) => branches.find((b) => b.id === id) ?? branches.find((b) => b.quests.some((x) => x.id === id)) ?? null;
+  const live = (br) => br.started && br.runner.running() && !br.runner.waiting();
+  // (waiting for its giver to come up — the quest's first seek beat, or before it)
+  const pending = (br) => {
+    const k = firstSeek(br.runner.quest());
+    return k >= 0 && br.runner.bi() <= k;
+  };
+  const engaged = (br) => live(br) && !pending(br);
+  // A branch's saved state (running or not yet) → is quest id done?
+  const stateOf = (br) => (br.started ? br.runner.snapshot() : br.saved);
+  const questDone = (id) => {
+    const br = branchOf(id);
+    if (!br) return false;
+    const st = stateOf(br);
+    const at = (x) => br.quests.findIndex((q) => q.id === x);
+    if (br.id === id) return !!st?.after && at(st.after) === br.quests.length - 1;
+    if (st?.after) return at(st.after) >= at(id);
+    if (st?.id) return at(st.id) > at(id);
+    return false;
+  };
+  const opened = (br) => {
+    if (br === first) return true;
+    if (!questDone(first.id)) return false;
+    const from = br.def.from ?? {};
+    if (from.day && (T.clock?.day ?? 1) < from.day) return false;
+    if (from.after && !questDone(from.after)) return false;
+    return true;
+  };
+
+  // ── Who may come up to the player now ──
+  const order = [];            // branch ids waiting for their giver to come up, in the order they came
+  let turn = null;             // the one whose giver may set off now
+  const giverOf = (br) => {
+    const quest = br.runner.quest();
+    const b = quest?.beats[firstSeek(quest)];
+    return b ? roleNpc(br.runner.q(), b.who) : null;
+  };
+  const underAttack = () => liveFoes().length > 0
+    || T.npcs.some((n) => n.alive && n.fighter && !n.fighter.isDead && !n.campStandoff && T.distToPlayer(n) < ATTACK_DIST);
+  // (why nobody may come up now — null: they may)
+  const busyReason = () => {
+    const p = T.playerPos();
+    if (T.inCanoe?.() || ctx.getControls?.()?.isSwimming) return 'water';
+    if (Math.hypot(p.x, p.z) > HOME_RADIUS) return 'away';
+    if (underAttack()) return 'fight';
+    return null;
+  };
+  const approachable = (br) => {
+    const hours = br.def.from?.hours;
+    if (hours && !inHours(T.hour(), hours)) return false;
+    const n = giverOf(br);
+    const b = br.runner.beat();
+    return !!n && (!!b?.arrive || T.distToPlayer(n) < SEEK_FAR);
+  };
+  const updateBranches = () => {
+    for (const br of branches) {
+      if (br.started || !opened(br)) continue;
+      br.started = true;
+      br.runner.start(br.saved);
+      br.saved = null;
+    }
+    for (const br of branches) {
+      const k = order.indexOf(br.id);
+      if (live(br) && pending(br)) { if (k < 0) order.push(br.id); }
+      else if (!live(br) && k >= 0) order.splice(k, 1);
+    }
+    if (branches.some(engaged) || busyReason()) { turn = null; return; }
+    const cands = order.map(branchOf).filter((br) => br && live(br) && pending(br) && approachable(br));
+    if (cands.includes(turn)) return;
+    turn = cands.find((br) => { const n = giverOf(br); return n && T.distToPlayer(n) < SEEK_NEAR; }) ?? cands[0] ?? null;
+  };
+  // (the seek beat: may this branch's giver come up to the player now?)
+  function mayApproach(c) {
+    const br = c.world.branch;
+    return !br || engaged(br) || turn === br;
+  }
+  // What a `build` beat makes, once it's done (and back on a save: flags)
+  const flags = {};
+  const makers = {
+    canoe: (on) => { flags.canoe = on; T.setCanoeBuilt?.(on); },
+  };
+  const applyFlags = () => { T.setCanoeBuilt?.(!!flags.canoe); };
+
+  // The branch shown on the tracker / asked for its buttons first: the job under way, else the
+  // one whose giver's coming
+  const focus = () => branches.find(engaged) ?? turn ?? null;
+  // Every live branch, the focus first
+  const liveList = () => {
+    const f = focus();
+    return [...(f ? [f] : []), ...branches.filter((b) => b !== f && live(b))];
+  };
   let started = false;
 
   // ── Hooks for the rest of Town ──
@@ -584,44 +704,93 @@ export function installTownQuests(T, ctx) {
     updateActors(dt);
     updateHomeBound();
     if (!started) return;
-    const q = runner.q();
-    if (q?.failOnDown && ctx.isPlayerDead()) {
-      runner.fail(fill('You went down — {wizard} limps back home. {wizard.He}\'ll ask again.', q));
-      return;
+    updateBranches();
+    for (const br of branches) {
+      if (!br.started) continue;
+      const q = br.runner.q();
+      if (q?.failOnDown && ctx.isPlayerDead()) {
+        br.runner.fail(fill('You went down — {wizard} limps back home. {wizard.He}\'ll ask again.', q));
+        continue;
+      }
+      br.runner.update(dt);
     }
-    runner.update(dt);
   };
+  const BUSY_TEXT = { water: 'once you\'re back on land', away: 'once you\'re back in Brindlewick' };
   const questEntry = () => {
-    const quest = runner.quest();
-    if (!quest || runner.waiting()) return null;
-    const b = runner.beat();
-    const progress = runner.entry() ?? fill(quest.title, runner.q());
+    const br = focus();
+    if (!br) {
+      // (someone waiting to come up, but the player's out on the water / away)
+      const why = busyReason();
+      const w = order.map(branchOf).find((b) => b && live(b) && pending(b));
+      const n = w && BUSY_TEXT[why] ? giverOf(w) : null;
+      if (!n) return null;
+      return { title: `${w.runner.quest().tag ?? 'Job'}: ${w.runner.quest().title}`, progress: `${firstName(n.name)} wants a word — ${BUSY_TEXT[why]}`, icon: '❗' };
+    }
+    const quest = br.runner.quest();
+    const b = br.runner.beat();
+    const progress = br.runner.entry() ?? fill(quest.title, br.runner.q());
     return { title: `${quest.tag ?? 'Job'}: ${quest.title}`, progress, icon: BEATS[b?.do]?.icon ?? '📍' };
   };
   // A quest's 'do' beat (its goal — an old save's step in its 'do' phase picks up there)
-  const doBeat = (id) => Math.max(0, QUESTS.find((x) => x.id === id)?.beats.findIndex((b) => b.label === 'do') ?? 0);
-  // (saved: the runner's state; none: an old save's first day — the step machine townIntro.js
-  // was — `{ id | step, phase }` / `{ after }` / null (from before the jobs: its first day done);
-  // nothing at all — a new town: the first day from the start)
+  const doBeat = (id) => Math.max(0, ALL_QUESTS.find((x) => x.id === id)?.beats.findIndex((b) => b.label === 'do') ?? 0);
+  const FIRST_DONE = { after: FIRST_DAY[FIRST_DAY.length - 1].id };
+  // (saved: { v: 2, b: { <branch>: runner state }, flags }; an older save — one runner over the
+  // first day then the wizard's jobs: { id, bi } / { after } — goes to the branch holding that
+  // quest, the first day done if it's past it; none: an old save's first day — the step machine
+  // townIntro.js was — `{ id | step, phase }` / `{ after }` / null (from before the jobs: its first
+  // day done); nothing at all — a new town: the first day from the start)
   const startQuests = (saved, legacyIntro) => {
     cartState.load = null;
     started = true;
-    if (saved !== undefined && saved !== null) { runner.start(saved); return; }
-    const li = legacyIntro;
-    if (li === undefined) { runner.start(null); return; }
-    if (li === null) { runner.start({ after: FIRST_DAY[FIRST_DAY.length - 1].id }); return; }
-    if (li.after) { runner.start({ after: li.after }); return; }
-    const id = li.id ?? OLD_STEP_IDS[li.step];
-    if (!QUESTS.some((x) => x.id === id)) { runner.start(null); return; }
-    runner.start({ id, bi: li.phase === 'do' ? doBeat(id) : 0 });
+    order.length = 0;
+    turn = null;
+    for (const k of Object.keys(flags)) delete flags[k];
+    for (const br of branches) { br.started = false; br.saved = null; br.runner.stop(); }
+    const put = (st) => {
+      const id = st?.id ?? st?.after;
+      const br = id ? branchOf(id) : null;
+      if (!br) return;
+      br.saved = st;
+      if (br !== first) first.saved = FIRST_DONE;
+    };
+    if (saved?.v === 2) {
+      for (const br of branches) br.saved = saved.b?.[br.id] ?? null;
+      Object.assign(flags, saved.flags ?? {});
+    } else if (saved !== undefined && saved !== null) put(saved);
+    else if (legacyIntro === null) first.saved = FIRST_DONE;
+    else if (legacyIntro) {
+      const li = legacyIntro;
+      if (li.after) put({ after: li.after });
+      else {
+        const id = li.id ?? OLD_STEP_IDS[li.step];
+        if (ALL_QUESTS.some((x) => x.id === id)) put({ id, bi: li.phase === 'do' ? doBeat(id) : 0 });
+      }
+    }
+    applyFlags();
+    updateBranches();
+  };
+  const questSnapshot = () => {
+    if (!started) return undefined;
+    const b = {};
+    for (const br of branches) b[br.id] = stateOf(br) ?? null;
+    return { v: 2, b, flags: { ...flags } };
   };
   const resetQuests = () => {
-    cleanup(runner.q());
-    runner.stop();
+    for (const br of branches) { if (br.started) cleanup(br.runner.q()); br.runner.stop(); br.started = false; }
+    order.length = 0;
+    turn = null;
     started = false;
     homeBound.clear();
     for (const n of T.npcs) if (n.questing) release(n);
     cartState.load = null;
+  };
+  // (dev console: on to a quest by id — in whichever branch has it; a job skips the first day)
+  const jump = (id, label = null, waitS = 0) => {
+    const br = branchOf(id);
+    if (!br || !started) return false;
+    if (br !== first && !questDone(first.id)) { if (!first.started) { first.started = true; first.runner.start(FIRST_DONE); } else first.runner.finish(); }
+    if (!br.started) { br.started = true; br.runner.start(null); br.saved = null; }
+    return br.runner.jump(id, label, waitS);
   };
 
   Object.assign(T, {
@@ -630,25 +799,34 @@ export function installTownQuests(T, ctx) {
     startQuests,
     resetQuests,
     // (something counted toward a goal — 'fish' / 'cook' / 'pick' / 'sell' / 'wood' / 'job')
-    questNote: (kind, data) => started && runner.event(kind, data),
+    questNote: (kind, data) => started && liveList().some((br) => br.runner.event(kind, data)),
     // (picking a field is no theft while helping its farmer with the harvest)
-    questAllowsPick: (field) => {
-      const b = started ? runner.beat() : null;
-      if (b?.do !== 'goal' || !b.allowPick || runner.waiting()) return false;
-      const g = b.guide ? T.npcById(runner.q()?.cast?.[b.guide]) : null;
+    questAllowsPick: (field) => started && liveList().some((br) => {
+      const b = br.runner.beat();
+      if (b?.do !== 'goal' || !b.allowPick) return false;
+      const g = b.guide ? T.npcById(br.runner.q()?.cast?.[b.guide]) : null;
       return !g || g.work === field;
-    },
-    questSnapshot: () => (started ? runner.snapshot() : undefined),
+    }),
+    questSnapshot,
     questEntry,
-    questMarker: () => (started ? runner.marker() ?? null : null),
-    questActs: () => (started ? runner.acts() : []),
-    questHighlight: () => (started ? runner.highlight() : null),
-    questTalk: (n) => started && runner.talkTo(n),
-    isQuestGiver: (n) => started && runner.beat()?.do === 'seek' && !runner.waiting() && runner.q()?.cast?.[runner.beat().who] === n.id,
+    // (❗ over every giver waiting to come up, the 📍 of the job under way)
+    questMarkers: () => (started ? liveList().map((br) => br.runner.marker()).filter(Boolean) : []),
+    questActs: () => (started ? focus()?.runner.acts() ?? [] : []),
+    questHighlight: () => (started ? focus()?.runner.highlight() ?? null : null),
+    // (talking to someone: the job under way's; with none, any waiting giver's — the player picks)
+    questTalk: (n) => {
+      if (!started) return false;
+      const busy = branches.find(engaged);
+      if (busy) return busy.runner.talkTo(n);
+      return liveList().some((br) => br.runner.talkTo(n));
+    },
+    isQuestGiver: (n) => started && !branches.some(engaged)
+      && liveList().some((br) => br.runner.beat()?.do === 'seek' && br.runner.q()?.cast?.[br.runner.beat().who] === n.id),
     // (a quiet job, once it's under way — the wizard aboard: the camp leaves the player be)
-    questQuiet: () => started && !!runner.quest()?.quiet && !runner.waiting() && !!runner.q()?.failOnDown,
+    questQuiet: () => started && branches.some((br) => engaged(br) && !!br.runner.quest()?.quiet && !!br.runner.q()?.failOnDown),
+    questDone: (id) => started && questDone(id),
     cartLoad: () => cartState.load,
-    cartInUse: () => started && !!runner.q()?.cast && Object.keys(runner.q().cast).length > 0,
+    cartInUse: () => started && branches.some((br) => engaged(br) && !!br.runner.q()?.cast && Object.keys(br.runner.q().cast).length > 0),
     // (the sword / wand's camera auto-aim — townMode.js threats)
     questThreats: () => liveFoes().map((f) => f.e.group.position),
     // (the talk camera: an actor saying the line now)
@@ -660,7 +838,8 @@ export function installTownQuests(T, ctx) {
       }
       return null;
     },
-    quests: runner, // (dev console: town.debug().T.quests.jump('wizardSon'))
-    questDebug: () => ({ foes: foes.list, actors, cartLoad: cartState.load, started }),
+    // (dev console: town.debug().T.quests.jump('wizardSon') / .jump('canoe', 'do'))
+    quests: { jump, branches, order: () => [...order], turn: () => turn?.id ?? null, busyReason },
+    questDebug: () => ({ foes: foes.list, actors, cartLoad: cartState.load, started, turn: turn?.id ?? null, order: [...order], flags: { ...flags }, branches: branches.map((b) => ({ id: b.id, started: b.started, state: stateOf(b), live: live(b), pending: b.started && pending(b), engaged: engaged(b) })) }),
   });
 }
