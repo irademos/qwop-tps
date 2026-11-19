@@ -343,7 +343,7 @@ export function installTownQuests(T, ctx) {
         const { beat: b, s } = c;
         let progress = fill(b.progress ?? c.quest.title, c.q);
         if ((b.n ?? 1) > 1) progress += ` (${s.count} / ${b.n})`;
-        if (s.g?.qmode?.kind === 'lead' && T.distToPlayer(s.g) > T.guide.LEAD_WAIT) progress += ` — follow ${firstName(s.g.name)}`;
+        if (s.g?.qmode?.kind === 'lead' && !s.L.frame?.arrived && T.distToPlayer(s.g) > T.guide.LEAD_WAIT) progress += ` — follow ${firstName(s.g.name)}`;
         return progress;
       },
       marker: (c) => T.guide.marker(c.s.L, c.s.g),
