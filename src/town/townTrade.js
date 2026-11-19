@@ -64,8 +64,8 @@ export function installTownTrade(T, ctx) {
     return null;
   };
   // A field's veg are its owner's: the player picks only their own field (bought — townFarming.js)
-  // or the farmer's while helping with the harvest on the first day (townIntro.js)
-  const mayPickField = (field) => T.fieldOwner(field) === 'mine' || T.introAllowsPick(field);
+  // or the farmer's while helping with the harvest on the first day (quests/firstDay.js)
+  const mayPickField = (field) => T.fieldOwner(field) === 'mine' || T.questAllowsPick(field);
   const mayPick = () => { const f = ripeCropNear(); return !!f && mayPickField(f.field); };
   let noPickNoteAt = -99;
   const pickCrop = () => {
@@ -87,7 +87,7 @@ export function installTownTrade(T, ctx) {
     crop.mesh.visible = false;
     gain('crops');
     T.feedLine(`+1 Veg (${T.goods.crops})`);
-    if (T.fieldOwner(field) !== 'mine') T.introNote('pick');
+    if (T.fieldOwner(field) !== 'mine') T.questNote('pick');
   };
   // Trees and crops grow back
   const updateRegrowth = () => {

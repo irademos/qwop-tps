@@ -536,7 +536,7 @@ export function installTownBandits(T, ctx) {
   };
   // The sheriff comes over: a reward waiting (once each)
   const seekPlayer = (sheriff) => {
-    if (T.law.stars > 0 || T.inRoom || T.jail || ctx.isPlayerDead() || sheriff.inside || sheriff.guiding || sheriff.following) return;
+    if (T.law.stars > 0 || T.inRoom || T.jail || ctx.isPlayerDead() || sheriff.inside || sheriff.questing || sheriff.following) return;
     if (['seek', 'talk', 'respond', 'search', 'arrest', 'brawl', 'guide'].includes(sheriff.task?.type)) return;
     const j = T.jobs.find((x) => x.giverId === sheriff.id && x.data.soughtFor !== x.status
       && x.status === 'done' && x.kind === 'nightThanks');

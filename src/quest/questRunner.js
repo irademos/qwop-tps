@@ -16,7 +16,7 @@
 //   entry(c)        → the quest tracker's progress text (null: the quest's default)
 //   marker(c)       → { icon, x, z, h } (❗ / 📍 over something) or null
 //   acts(c)         → [{ key, label, onClick }] buttons it offers
-//   highlight(c)    → the button to ring (Town's introHighlight shape) or null
+//   highlight(c)    → the button to ring (Town's: { gear, phone, act }) or null
 //   talkTo(c, who)  → true: talking to `who` is this beat's (it opened its own talk)
 //   npc(c, n, dt)   → true: this beat runs townsperson n's frame
 //   event(c, kind, data) → true: it counted (a goal's 'fish' / 'deliver'…)
@@ -162,13 +162,13 @@ export function createQuestRunner({ quests, beats, world, onChange = () => {} })
     event: (kind, data) => !!ask('event', kind, data),
     fail,
     recentlyFailed: (s) => time() - failedAt < s,
-    // (dev console: jump to a quest / a beat label)
-    jump: (id, label = null) => {
+    // (on to a quest by id — skipping ahead, the dev console — at a beat label, after a while)
+    jump: (id, label = null, waitS = 0) => {
       const qi = quests.findIndex((x) => x.id === id);
       if (qi < 0) return false;
       endBeat();
       if (cur) world.questReset?.(quest(), cur.q);
-      begin(qi);
+      begin(qi, { waitS });
       if (label) { const i = quests[qi].beats.findIndex((b) => b.label === label); if (i >= 0) cur.bi = i; }
       onChange();
       return true;

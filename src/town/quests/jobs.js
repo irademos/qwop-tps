@@ -43,7 +43,7 @@ export const JOBS = [
         lines: [['farmer', 'Ah, {name} — just the one I wanted. The wizard who lives up the mountain has sent down for veg, and my knees won\'t take me up that slope any more. I\'ve loaded the cart for him — it\'s right here beside you. Get in, and follow the arrows up the mountain to his cabin. He pays well, the old sorcerer.']],
         choices: [{ label: 'I\'ll take it up' }, { label: 'Later', then: ['later'] }],
       },
-      { do: 'cart', bring: true, load: 'veg', checkpoint: true },
+      { do: 'cart', label: 'do', bring: true, load: 'veg', checkpoint: true },
       { do: 'drive', to: 'wizard', r: 9, text: 'Drive the cart up the mountain to the wizard\'s cabin' },
     ],
   },

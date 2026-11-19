@@ -546,7 +546,7 @@ export function createStoryMode(ctx) {
       if (got > 0) save();
       return got;
     },
-    introNote: () => {},
+    questNote: () => {},
     calmNow: () => true,
     stalls: { focused: () => false },
     jobTalk: { isOpen: () => false },

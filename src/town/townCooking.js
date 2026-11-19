@@ -123,7 +123,7 @@ export function installTownCooking(T, ctx) {
     T.renderGoods();
     const G = GOODS[r.id];
     T.feedLine(`${G.label}! Heals +${G.heal} health — and sells for more than it's made of.`);
-    T.introNote('cook', { good: r.id });
+    T.questNote('cook', { good: r.id });
   };
   // The fire's buttons: what can be cooked with what the player carries
   const cookActs = () => {

@@ -219,9 +219,7 @@ export function installTownFolk(T, ctx) {
         return;
       }
     }
-    // (showing the player round on their first day — townIntro.js)
-    if (n.guiding) { setTask(n, { type: 'guide', dur: Infinity }); return; }
-    // (in a job of the player's — townQuests.js runs their frame)
+    // (showing the player round on their first day / in a job of theirs — townQuests.js runs their frame)
     if (n.questing) { setTask(n, { type: 'quest', dur: Infinity }); return; }
     // (a claim's over: back to the host's town)
     if (T.netMode === 'client') { release(n); return; }

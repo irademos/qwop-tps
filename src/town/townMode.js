@@ -41,7 +41,7 @@
 //
 // Missions (townJobs.js / townMissions.js): a ❗ over whoever has a job; talk to them to take it,
 // and back to them (❓) for the reward once it's done. The townsfolk's work comes in order, one
-// job after another — the first day's goals, then the jobs after (townIntro.js) — and the
+// job after another — the first day's goals, then the jobs after (townQuests.js — quests/firstDay.js, quests/jobs.js) — and the
 // sheriff pays for bandits beaten in the night (townBandits.js); nothing else is handed out
 // round town for now. Shown in the quest tracker with 📍 markers in the world.
 //
@@ -111,7 +111,6 @@ import { installTownActs } from './townActs.js';
 import { installTownWire } from './townWire.js';
 import { installTownCooking } from './townCooking.js';
 import { installTownMemory, moodOf } from './townMemory.js';
-import { installTownIntro } from './townIntro.js';
 import { installTownQuests } from './townQuests.js';
 import { installTownHomes } from './townHomes.js';
 import { installTownLights } from './townLights.js';
@@ -172,8 +171,6 @@ export function createTownMode(ctx) {
   const goods = Object.fromEntries(GOOD_IDS.map((g) => [g, 0])); // what the player carries
   T.fishing = null;           // while the player's line is out (townFishing.js)
   T.cooking = null;           // { recipe, left, x, z } while something's on the fire (townCooking.js)
-  T.intro = null;             // the first day's goals, then the jobs in order (townIntro.js), null once all done…
-  T.introAfter = null;        // …and then the last one's id
   T.jobs = [];                // posted + taken jobs (townJobs.js)
   T.nextJobId = 1;
   T.jobsAt = 0;               // next time new jobs go out
@@ -482,7 +479,6 @@ export function createTownMode(ctx) {
       vendetta: !!n.vendetta, following: !!n.following,
       mem: n.mem?.length ? n.mem : undefined,
     })),
-    intro: T.introSnapshot(),
     quests: T.questSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
@@ -530,7 +526,6 @@ export function createTownMode(ctx) {
     vend: Object.fromEntries(T.npcs.filter((n) => n.alive && n.vendetta).map((n) => [n.id, n.vendettaFor || 'friend'])),
     follow: T.npcs.filter((n) => n.alive && n.following && !n.escort).map((n) => n.id),
     mem: Object.fromEntries(T.npcs.filter((n) => n.alive && n.mem?.length).map((n) => [n.id, n.mem])),
-    intro: T.introSnapshot(),
     quests: T.questSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
@@ -715,8 +710,8 @@ export function createTownMode(ctx) {
     for (const n of T.npcs) n.memBias = T.memBiasOf(n);
     T.restoreJobs(own);
     // (no save of the player's own yet: the first day starts — a save's null: it's done)
-    T.startIntro(own ? own.intro : undefined);
-    // (then the jobs after it — townQuests.js; an old save's jobs were townIntro.js steps)
+    // (the first day, then the jobs — townQuests.js; an old save's `intro` was the first day's own
+    // step machine: picked up from there)
     T.startQuests(own?.quests, own ? own.intro : undefined);
     // Start mid-day: everyone already at whatever they'd be doing
     T.isNight = null;
@@ -919,7 +914,6 @@ export function createTownMode(ctx) {
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);
     T.updateFishing(dt);
     T.updateCanoe(dt);
-    T.updateIntroWalk(dt);
     T.updateQuests(dt);
     T.updateDrive(dt);
     T.updateCooking(dt);
@@ -929,7 +923,7 @@ export function createTownMode(ctx) {
     T.updateMarket();
     for (const g of T.gossip) if (T.simT - g.at > 240) g.fresh = false;
     if (T.isHost()) updateArrivals();
-    if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateNightRaid(); T.updateIntro(); T.updateJobs(); T.updateReputation(); }
+    if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateNightRaid(); T.updateJobs(); T.updateReputation(); }
     T.updateMarkers();
     renderWallet();
     if (T.simT > T.lodAt) { T.lodAt = T.simT + 0.4; T.updateLod(); }
@@ -995,7 +989,6 @@ export function createTownMode(ctx) {
   installTownWire(T, ctx);
   installTownCooking(T, ctx);
   installTownMemory(T, ctx);
-  installTownIntro(T, ctx);
   installTownQuests(T, ctx);
   installTownHomes(T, ctx);
   installTownLights(T, ctx);

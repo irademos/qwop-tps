@@ -1,17 +1,17 @@
-// Town: the jobs after the first day, run by the shared quest runner (src/quest/questRunner.js)
-// from their data (src/town/quests/jobs.js). This file is Town's side of it:
+// Town: the first day and the jobs after it, run by the shared quest runner
+// (src/quest/questRunner.js) from their data (src/town/quests/firstDay.js, then quests/jobs.js —
+// one list, in order). This file is Town's side of it:
 //   - the WORLD the beats act in: places, the townspeople a job has taken over (its "cast"),
 //     people who aren't townsfolk (actors — the wizard's son), the bandits of an ambush (foes)
-//   - the BEATS (BEATS below): seek, talk, cart, board, alight, drive, lockCart, actor, bomb,
-//     actorLeave, ambush, pay, unload, release — each a small piece any job can use
+//   - the BEATS (BEATS below): seek, talk, goal, unless, banner, cart, board, alight, drive,
+//     lockCart, actor, bomb, actorLeave, ambush, pay, unload, release — each a small piece any job
+//     can use (a guide leading the way to a goal, the player walked along: townGuide.js)
 //   - the hooks Town calls: tracker line (questEntry), marker (questMarker), acts, the button to
 //     ring (questHighlight), talking to someone (questTalk), a cast member's frame (updateQuestNpc —
 //     the 'quest' task, townReactions.js), saves (questSnapshot / startQuests)
-// The first day (townIntro.js) still runs on its own; when it's done, the jobs start here
-// (T.firstDayDone). Moving the first day onto beats too is the next step (see CLAUDE.md).
 //
 // A townsperson in a job (`n.questing`) does what their mode says (`n.qmode`): seek (walk up to
-// the player), stand, follow, board (climb into the cart) → seated (crouched in its bed, carried
+// the player), lead (show the way to a goal — townGuide.js), stand, follow, board (climb into the cart) → seated (crouched in its bed, carried
 // along — n.seat, townFolk.js syncBody), knocked (thrown down a moment), fight (an ally: wand
 // blasts at the job's foes — ctx.castAllySpell), linger (strolling round after the job). Their
 // health in a fight is the job's (ALLY_HP); bandits of an ambush can go for them
@@ -22,6 +22,9 @@ import { createQuestRunner } from '../quest/questRunner.js';
 import { createTalkRunner } from '../quest/talk.js';
 import { runActions } from '../quest/actions.js';
 import { JOBS } from './quests/jobs.js';
+import { FIRST_DAY, OLD_STEP_IDS } from './quests/firstDay.js';
+import { installTownGuide, newLead } from './townGuide.js';
+import { FOOD_IDS, GOOD_IDS, SHOP_GEAR, goodPrice } from './townEconomy.js';
 import { BANDIT_NAMES, firstName } from './townPeople.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { RUN_SPEED, WALK_SPEED, dist2, heightScale, pickOf } from './townConfig.js';
@@ -48,33 +51,52 @@ const ACTOR_GONE_DIST = 32;   // m from the player a leaving actor is taken away
 const ACTOR_TIMEOUT_S = 25;
 const BOMB_THROW_AT_S = 0.55; // s into the throw the bomb leaves the hand
 const BOMB_AFTER_S = 1.8;     // s after the blast before the next beat
-const LINGER_HOME_DIST = 30;
+const LINGER_HOME_DIST = 30;  // m the player is away before a lingering townsperson goes home
+const GUIDE_REACH = 22;       // m — a guide this close says their done line aloud (else the feed does)
+// What someone's busy with that they'd drop to come and find the player (anything else — a fight,
+// fleeing, the law's work, sleep — comes first)
+const GUIDE_OVER = new Set(['work', 'sell', 'buyWood', 'eat', 'browse', 'social', 'wander', 'chat', 'guide', 'quest', 'talk']);
+// The sword's shop price (the first day's merchant lets it go for less)
+const SWORD_PRICE = SHOP_GEAR.find((g) => g.id === 'sword')?.price ?? 30;
 // A townsperson's words in a job's lines ({wizard.dad}…): [his, hers]
 const WORDS = {
   dad: ['dad', 'mum'], father: ['father', 'mother'], he: ['he', 'she'], him: ['him', 'her'], his: ['his', 'her'],
   man: ['man', 'woman'], sir: ['sir', 'madam'],
-};  // m the player is away before a lingering townsperson goes home
+};
+// Everything in order: the first day's goals, then the jobs
+const QUESTS = [...FIRST_DAY, ...JOBS];
 
 export function installTownQuests(T, ctx) {
   const P = () => T.layout.places;
   const playerName = () => ctx.getPlayerName();
+  installTownGuide(T, ctx);
 
   // ── The cast: townspeople a job has taken over ──
+  // (who of a role a job has: the one it already took, else the last one of the role a job had —
+  // the same fisher shows the player fishing then cooking — else the nearest)
+  const lastCast = {};
+  const usable = (x) => x?.alive && !x.fighter && !x.def.outlaw && x.jailedUntil <= T.simT;
   const roleNpc = (q, role) => {
     const keep = q?.cast?.[role] != null ? T.npcById(q.cast[role]) : null;
     if (keep?.alive) return keep;
     const p = T.playerPos();
-    const n = T.npcs.filter((x) => x.alive && x.role === role && !x.fighter && !x.def.outlaw && x.jailedUntil <= T.simT)
-      .sort((a, b) => dist2(a.x, a.z, p.x, p.z) - dist2(b.x, b.z, p.x, p.z))[0] ?? null;
-    if (n && q) (q.cast ??= {})[role] = n.id;
+    const last = lastCast[role] != null ? T.npcById(lastCast[role]) : null;
+    const n = usable(last) && last.role === role ? last
+      : T.npcs.filter((x) => usable(x) && x.role === role)
+        .sort((a, b) => dist2(a.x, a.z, p.x, p.z) - dist2(b.x, b.z, p.x, p.z))[0] ?? null;
+    if (n && q) { (q.cast ??= {})[role] = n.id; lastCast[role] = n.id; }
     return n;
   };
+  const roleGone = (role) => !T.npcs.some((x) => x.alive && x.role === role);
+  // Free to come and find the player (or carry on with them): not busy with something that matters
+  const canTake = (n, anyTime = false) => usable(n) && !n.following && !n.lost && !n.netFight && !(n.fear > 0)
+    && (n.questing || !n.task || GUIDE_OVER.has(n.task.type) || (anyTime && n.task.type === 'sleep'))
+    && (!n.inside || n.questing || (anyTime && n.task?.type === 'sleep'));
   const control = (n, mode) => {
     if (!n?.alive || n.fighter) return false;
     if (!n.questing) {
       if (!T.take(n)) return false;
       n.questing = true;
-      n.guiding = false;
       n.following = false;
     }
     n.inside = false;
@@ -215,8 +237,18 @@ export function installTownQuests(T, ctx) {
   // ── Text ──
   // {name}: the player's; {<role>}: that townsperson's first name; {<role>.dad} / .father / .he /
   // .him / .his / .man: the word for them (Dad or Mum…), capitalised as written ({wizard.He})
+  // (the sword the first day's merchant sells: the shop's price, or all the player has if that's less)
+  const swordPrice = () => Math.min(SWORD_PRICE, Math.max(0, Math.floor(ctx.getCoins())));
+  const priceLine = () => {
+    const c = Math.max(0, Math.floor(ctx.getCoins()));
+    return c >= SWORD_PRICE ? `${SWORD_PRICE} coins, and worth every one.`
+      : c > 0 ? `It's ${SWORD_PRICE} coins… you've ${c}? Go on then — ${c} will do. Don't tell anyone.`
+        : `It's ${SWORD_PRICE} coins… and your pockets are empty. Oh, take it. Pay me back in custom.`;
+  };
   const fill = (text, q) => String(text ?? '').replace(/\{(\w+)(?:\.(\w+))?\}/g, (_, k, w) => {
     if (k === 'name') return playerName();
+    if (k === 'price') return priceLine();
+    if (k === 'swordPrice') return String(swordPrice());
     const n = q?.cast?.[k] != null ? T.npcById(q.cast[k]) : T.npcs.find((x) => x.alive && x.role === k);
     if (w) {
       const pair = WORDS[w.toLowerCase()];
@@ -245,30 +277,92 @@ export function installTownQuests(T, ctx) {
       start: (c) => { c.s.since = T.simT; c.s.best = Infinity; c.s.bestAt = T.simT; },
       update: (c) => {
         const { beat: b, s } = c;
+        // (nobody of the role left in town — dead, not replaced yet: on without them)
+        if (b.ifGone && roleGone(b.who)) {
+          if (b.ifGone === 'done') c.done();
+          else c.runActions([b.ifGone]);
+          return false;
+        }
         const n = roleNpc(c.q, b.who);
         s.n = n;
         if (!n) return false;
-        if (isNight() && !b.anyTime) { if (n.questing) release(n); return false; }
-        if (T.law.stars > 0 || T.inRoom) { if (n.questing && n.qmode?.kind === 'seek') control(n, 'stand'); return false; }
+        const off = (isNight() && !b.anyTime) || T.law.stars > 0 || T.jail || ctx.isPlayerDead() || !canTake(n, b.anyTime);
+        if (off) { if (n.questing && ['seek', 'wait'].includes(n.qmode?.kind)) release(n); return false; }
         if (!n.questing || !['seek', 'wait'].includes(n.qmode?.kind)) control(n, 'seek');
+        // (the player indoors and they aren't: met at the door outside)
+        const pRoom = T.rooms.roomAt(T.playerPos().x, T.playerPos().z);
+        const sameRoom = !pRoom || pRoom === T.rooms.roomAt(n.x, n.z);
+        n.qmode.meet = sameRoom ? null : P().rooms[pRoom]?.door ?? null;
         const d = T.distToPlayer(n);
         // (no walk from their place to the player — the wizard's mountain: they wait there)
         if (d < s.best - 0.3) { s.best = d; s.bestAt = T.simT; }
         else if (n.qmode.kind === 'seek' && T.simT - s.bestAt > SEEK_STUCK_S && d > 12) control(n, 'wait');
-        const reach = Math.max(SEEK_STOP + 0.6, b.talkFrom ?? 0);
-        return d < reach && !!n.body && calm();
+        const reach = Math.max(SEEK_STOP + 0.6, sameRoom && pRoom ? b.talkFrom ?? 0 : 0);
+        return sameRoom && d < reach && !!n.body && calm();
       },
       talkTo: (c, n) => (n === c.s.n ? (c.next(), true) : false),
       entry: (c) => {
         const n = c.s.n;
         if (!n) return 'Look around town';
         const who = `${firstName(n.name)} the ${n.def.label.toLowerCase()}`;
+        if (n.inside && !n.questing) return `${who} is home — back in the morning`;
         if (isNight() && !c.beat.anyTime) return `${who} will come and find you in the morning`;
         if (n.qmode?.kind === 'wait') return `Go and see ${who}`;
-        return T.distToPlayer(n) > 6 ? `${who} is coming to find you` : `Talk to ${who}`;
+        return n.questing && T.distToPlayer(n) > 6 ? `${who} is coming to find you` : `Talk to ${who}`;
       },
       marker: (c) => npcMark(c.s.n),
       icon: '❗',
+    },
+    // Do something n times (T.questNote(kind)); the guide leads the way to it (townGuide.js)
+    goal: {
+      start: (c) => {
+        c.s.count = 0;
+        c.s.L = newLead(c.beat.at, c.q.autoWalk ?? false);
+      },
+      update: (c, dt) => {
+        const { beat: b, s } = c;
+        const g = b.guide ? roleNpc(c.q, b.guide) : null;
+        s.g = g;
+        // (leading while they can — not by night, nor while the player's wanted, nor busy)
+        const lead = !!g && b.lead !== false && !isNight() && !T.law.stars && !T.jail && !ctx.isPlayerDead() && canTake(g) && T.guide.leading(s.L, g);
+        if (lead && (!g.questing || g.qmode?.kind !== 'lead')) control(g, 'lead');
+        else if (!lead && g?.questing && g.qmode?.kind === 'lead') release(g);
+        T.guide.walkFrame(s.L, g, dt);
+        if (b.guideBuys) guideBuys(c, g);
+        return s.count >= (b.n ?? 1);
+      },
+      event: (c, kind) => {
+        if (kind !== c.beat.kind) return false;
+        c.s.count += 1;
+        return true;
+      },
+      npc: (c, n, dt) => (n === c.s.g && n.qmode?.kind === 'lead' ? T.guide.leadFrame(n, c.s.L, dt, { tips: c.beat.tips, fill: (t) => fill(t, c.q) }) : false),
+      // (talking to the guide on the way: a tip)
+      talkTo: (c, n) => (n === c.s.g ? (tipTalk(c, n), true) : false),
+      entry: (c) => {
+        const { beat: b, s } = c;
+        let progress = fill(b.progress ?? c.quest.title, c.q);
+        if ((b.n ?? 1) > 1) progress += ` (${s.count} / ${b.n})`;
+        if (s.g?.qmode?.kind === 'lead' && T.distToPlayer(s.g) > T.guide.LEAD_WAIT) progress += ` — follow ${firstName(s.g.name)}`;
+        return progress;
+      },
+      marker: (c) => T.guide.marker(c.s.L, c.s.g),
+      acts: (c) => T.guide.acts(c.s.L, c.s.g),
+      highlight: (c) => goalHighlight(c.beat.kind),
+    },
+    // The quest's skipped if the player has it already
+    unless: {
+      start: (c) => {
+        if (c.beat.has && ctx.getItems()?.[c.beat.has]) { c.done(); return false; }
+        return true;
+      },
+    },
+    banner: {
+      start: (c) => {
+        ctx.showBanner(c.beat.title, c.beat.sub ?? '', 2800);
+        if (c.beat.feed) T.feedLine(fill(c.beat.feed, c.q));
+        return true;
+      },
     },
     // A talk (lines, the last ending in choices) — its `who` stands facing the player meanwhile
     talk: {
@@ -512,6 +606,12 @@ export function installTownQuests(T, ctx) {
           n.attitude = Math.min(1, n.attitude + 0.15);
           if (b.memory) T.remember(n, 'intro', { what: b.memory });
         }
+        // (their done line: said aloud near them, else in the feed)
+        if (b.say) {
+          const line = fill(b.say, q);
+          if (n?.body && T.distToPlayer(n) < GUIDE_REACH) T.say(n, line, { big: true });
+          else T.feedLine(`${n ? `${firstName(n.name)}: ` : ''}${line}`);
+        }
         T.feedLine(`${c.quest.title} — done${b.coins ? ` · +${b.coins} coins` : ''}`);
         return true;
       },
@@ -562,8 +662,80 @@ export function installTownQuests(T, ctx) {
       goto: (label) => { moved = true; c.goto(label); },
       done: () => { moved = true; c.done(); },
       note: (t) => T.feedLine(fill(t, c.q)),
+      // (the talk's townsperson hands something over — unless the player has one)
+      give: (item) => {
+        if (ctx.getItems()?.[item] || !ctx.grantItem(item)) return;
+        const n = c.s.n;
+        T.feedLine(`${n ? firstName(n.name) : 'Someone'} gave you a ${item === 'rod' ? 'fishing rod' : item}.`);
+      },
+      // (walked to the next goal by its guide — or not)
+      walk: (v) => { c.q.autoWalk = v !== 'off'; },
+      buySword: () => buySword(c.s.n),
+      // (the first day skipped: a rod and a sword to get going with, then the jobs)
+      skipDay: () => {
+        moved = true;
+        const given = ['rod', 'sword'].filter((id) => !ctx.getItems()?.[id] && ctx.grantItem(id));
+        T.feedLine(`Skipped the first day.${given.length ? ` Here — ${given.map((id) => (id === 'rod' ? 'a fishing rod' : 'a sword')).join(' and ')} to get you going.` : ''}`);
+        runner.jump(JOBS[0].id, null, JOBS[0].waitS ?? 0);
+        T.save();
+      },
     }, { warn: '[Town job]' });
     return !moved;
+  };
+  const buySword = (n) => {
+    if (ctx.getItems()?.sword) return;
+    const price = swordPrice();
+    if (!ctx.grantItem('sword')) return;
+    if (price > 0) { ctx.addCoins(-price); if (n) T.npcMoney(n, price); }
+    ctx.playSfx?.('buy');
+    T.feedLine(`Bought: Sword${price < SWORD_PRICE && n ? ` (${price} coins — ${firstName(n.name)} let it go cheap)` : ''}`);
+  };
+  // Talking to a guide on the way to a goal: a tip (another, and another)
+  const tipTalk = (c, n) => {
+    const { beat: b } = c;
+    const tips = b.tips ?? [];
+    const show = (k) => {
+      const choices = [{ label: n.qmode?.kind === 'lead' ? 'Lead on' : 'Thanks', primary: true }];
+      if (tips.length > 1) choices.push({ label: 'Another tip', act: true, onClick: () => { if (n.alive) show(k + 1); } });
+      T.jobTalk.open({
+        who: firstName(n.name),
+        text: tips.length ? fill(tips[k % tips.length], c.q) : fill(b.progress ?? c.quest.title, c.q),
+        reward: fill(b.progress ?? c.quest.title, c.q), choices,
+      });
+    };
+    show(c.s.tipI ?? 0);
+    c.s.tipI = (c.s.tipI ?? 0) + 1;
+  };
+  // The guide buys the first thing off the player's stall once in front of it (again a while after a no)
+  const guideBuys = (c, g) => {
+    if (!T.stand || !g?.alive) return;
+    const st = T.stallByKey(T.stand.key);
+    if (!st || dist2(g.x, g.z, st.customer.x, st.customer.z) > 6) return;
+    if (T.offerPending(g) || T.simT - (c.s.askedAt ?? -1e9) < 20) return;
+    const good = ['crops', ...FOOD_IDS, ...GOOD_IDS].find((x) => T.goods[x] > 0);
+    if (!good) return;
+    c.s.askedAt = T.simT;
+    g.money = Math.max(g.money, goodPrice(good));
+    T.askPlayer(g, good);
+  };
+  // The button a goal needs right now, ringed like the tutorial's (townActs.js refreshActs)
+  const goalHighlight = (kind) => {
+    if (T.jobTalk.isOpen() || T.sequence || T.jail || ctx.isPlayerDead()) return null;
+    const held = ctx.heldWeapon?.() ?? null;
+    const gyro = ctx.hasGyro();
+    switch (kind) {
+      case 'fish':
+        if (T.fishing) return gyro ? null : { act: 'fishpull' };
+        if (held !== 'fishing_rod') return { gear: 'fishing_rod', phone: 'rod' };
+        return gyro ? null : { act: 'fishcast' };
+      case 'cook': return { act: 'cook:' };
+      case 'pick': return { act: 'pick' };
+      case 'sell': return T.stand ? null : { act: T.stalls.focused() ? 'back' : 'stand' };
+      case 'wood':
+        if (held !== 'foamSword') return { gear: 'foamSword', phone: 'sword' };
+        return gyro ? null : { act: 'chop' };
+      default: return null;
+    }
   };
 
   // ── Seats: a passenger in the cart's bed ──
@@ -626,8 +798,10 @@ export function installTownQuests(T, ctx) {
     const p = T.playerPos();
     switch (m.kind) {
       case 'seek': {
-        const d = T.distToPlayer(n);
-        if (d > SEEK_STOP) go(n, p.x, p.z, dt, d > 12);
+        // (the player indoors, they outside: to the door)
+        const to = m.meet ?? p;
+        const d = dist2(n.x, n.z, to.x, to.z);
+        if (d > SEEK_STOP) go(n, to.x, to.z, dt, d > 12);
         else stand(n, p.x, p.z, dt);
         if (d < 9 && !m.called && n.body) { m.called = true; T.say(n, pickOf([`${playerName()}! A moment?`, `Ah, ${playerName()} — there you are!`, 'Hold on a moment!'])); }
         return true;
@@ -742,7 +916,7 @@ export function installTownQuests(T, ctx) {
     }
     if (q) { q.cast = {}; q.failOnDown = false; }
   };
-  const runner = createQuestRunner({ quests: JOBS, beats: BEATS, world, onChange: () => { T.actsAt = 0; } });
+  const runner = createQuestRunner({ quests: QUESTS, beats: BEATS, world, onChange: () => { T.actsAt = 0; } });
   let started = false;
 
   // ── Hooks for the rest of Town ──
@@ -762,25 +936,24 @@ export function installTownQuests(T, ctx) {
     if (!quest || runner.waiting()) return null;
     const b = runner.beat();
     const progress = runner.entry() ?? fill(quest.title, runner.q());
-    return { title: `Job: ${quest.title}`, progress, icon: BEATS[b?.do]?.icon ?? '📍' };
+    return { title: `${quest.tag ?? 'Job'}: ${quest.title}`, progress, icon: BEATS[b?.do]?.icon ?? '📍' };
   };
-  // (saved: the runner's state; an old save's townIntro step for the jobs that used to be there)
+  // A quest's 'do' beat (its goal — an old save's step in its 'do' phase picks up there)
+  const doBeat = (id) => Math.max(0, QUESTS.find((x) => x.id === id)?.beats.findIndex((b) => b.label === 'do') ?? 0);
+  // (saved: the runner's state; none: an old save's first day — the step machine townIntro.js
+  // was — `{ id | step, phase }` / `{ after }` / null (from before the jobs: its first day done);
+  // nothing at all — a new town: the first day from the start)
   const startQuests = (saved, legacyIntro) => {
-    started = false;
     cartLoad = null;
-    if (saved !== undefined && saved !== null) { runner.start(saved); started = true; return; }
-    const li = legacyIntro;
-    if (li?.id === 'veg') { runner.start({ id: 'veg', bi: li.phase === 'do' ? 2 : 0 }); started = true; return; }
-    if (li?.id === 'wizardPay') { runner.start({ id: 'wizardPay', bi: 0 }); started = true; return; }
-    if (li?.after === 'wizardPay') { runner.start({ after: 'wizardPay' }); started = true; return; }
-    // (the first day done — a save's null or `after` its last step: the jobs start)
-    if (!T.intro) { runner.start(null); started = true; }
-  };
-  const firstDayDone = () => {
-    if (started) return;
-    runner.start(null);
     started = true;
-    T.save();
+    if (saved !== undefined && saved !== null) { runner.start(saved); return; }
+    const li = legacyIntro;
+    if (li === undefined) { runner.start(null); return; }
+    if (li === null) { runner.start({ after: FIRST_DAY[FIRST_DAY.length - 1].id }); return; }
+    if (li.after) { runner.start({ after: li.after }); return; }
+    const id = li.id ?? OLD_STEP_IDS[li.step];
+    if (!QUESTS.some((x) => x.id === id)) { runner.start(null); return; }
+    runner.start({ id, bi: li.phase === 'do' ? doBeat(id) : 0 });
   };
   const resetQuests = () => {
     cleanup(runner.q());
@@ -795,8 +968,16 @@ export function installTownQuests(T, ctx) {
     updateQuests: update,
     updateQuestNpc,
     startQuests,
-    firstDayDone,
     resetQuests,
+    // (something counted toward a goal — 'fish' / 'cook' / 'pick' / 'sell' / 'wood' / 'job')
+    questNote: (kind, data) => started && runner.event(kind, data),
+    // (picking a field is no theft while helping its farmer with the harvest)
+    questAllowsPick: (field) => {
+      const b = started ? runner.beat() : null;
+      if (b?.do !== 'goal' || !b.allowPick || runner.waiting()) return false;
+      const g = b.guide ? T.npcById(runner.q()?.cast?.[b.guide]) : null;
+      return !g || g.work === field;
+    },
     questSnapshot: () => (started ? runner.snapshot() : undefined),
     questEntry,
     questMarker: () => (started ? runner.marker() ?? null : null),
