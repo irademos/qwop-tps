@@ -353,6 +353,8 @@ export function createCartRide(ctx) {
   const ride = { y: 0, yaw: 0, camDist: 0 }; // (controls.ride)
   let riding = false;
   let holding = false;
+  let locked = false;         // held where it is (a quest: stopped on the road — lock())
+  let knock = null;           // a blast coming: { side } — over it goes on the next update (knockOver)
 
   const glbOf = () => ctx.getPlayerModel()?.userData?.qwopRig?.glbCharacter ?? null;
   // Crouched (the arms left on the IK, so whatever's in hand is held); not over a one-shot
@@ -755,6 +757,7 @@ export function createCartRide(ctx) {
 
   /** Parks it at a pose (on the ground there). */
   const place = (x, z, yaw) => {
+    knock = null;
     Object.assign(st, { x, z, yaw, v: 0, settled: false, tip: 0, tipV: 0, rear: 0, rearV: 0, flip: null });
     dust.clear();
     settle(0);
@@ -873,11 +876,22 @@ export function createCartRide(ctx) {
     settle(0);
   };
 
+  // Knocked over (a blast beside it — knockOver): onto its side away from it, as a flip does
+  const startKnock = () => {
+    Object.assign(st, { tipSide: knock.side, tip: 0.05, tipV: 3.2, rear: 0, rearV: 0, mode: null, v: 0, air: false });
+    st.flip = { phase: 'fall', t: 0 };
+    st.throwDir = null;
+    knock = null;
+  };
   // Before the controls move the player: the speed, the turn, the ground, the camera
   const update = (dt) => {
     dt = Math.min(0.1, Math.max(0, dt));
     dust.update(dt);
-    if (!riding) { if (st.flip) updateFlip(dt); return null; }
+    if (!riding) {
+      if (knock) { startKnock(); placeModel(); }
+      if (st.flip) updateFlip(dt);
+      return null;
+    }
     const c = ctx.getControls();
     if (!c) return;
     st.t += dt;
@@ -889,14 +903,16 @@ export function createCartRide(ctx) {
       holding = hold;
       if (!hold) ctx.onHoldEnd?.();
     }
-    const { ix, iz } = holding || st.air ? { ix: 0, iz: 0 } : input();
+    // (knocked over — a bomb by it: over it goes, the rider thrown out)
+    if (knock) { startKnock(); placeModel(); return 'flip'; }
+    const { ix, iz } = holding || st.air || locked ? { ix: 0, iz: 0 } : input();
     // Speed: toward the lean (backing up slower), braking quicker; a little pull downhill
     const want = (iz >= 0 ? iz : iz * BACK_SPEED) * MAX_SPEED;
     const braking = Math.abs(want) < Math.abs(st.v) || want * st.v < 0;
     // (in the air: it keeps going as it was)
     if (!st.air) {
       st.v += (want - st.v) * ease(braking ? BRAKE : ACCEL, dt);
-      if (!holding) st.v += Math.sin(st.pitch) * SLOPE_PULL * dt;
+      if (!holding && !locked) st.v += Math.sin(st.pitch) * SLOPE_PULL * dt;
       if (Math.abs(st.v) < 0.02 && Math.abs(want) < 0.01) st.v = 0;
     }
     // Turning: the sideways lean (left +), quicker the faster it rolls
@@ -1049,5 +1065,27 @@ export function createCartRide(ctx) {
     // The way the rider is thrown going over: toward the low side (world { x, z }, unit)
     throwDir: () => st.throwDir ?? worldXZ(0, 0, st.yaw, -st.tipSide, 0),
     isHolding: () => riding && holding,
+    // Held where it is (on: no rolling, the lean ignored) — a quest stopping it on the road
+    lock: (on) => { locked = !!on; if (on) st.v = 0; },
+    isLocked: () => locked,
+    // Knocked onto its side by a blast from `from` (world { x, z }): it falls away from it, the
+    // rider thrown out that way (update() → 'flip' while riding)
+    knockOver: (from) => {
+      if (st.flip) return false;
+      const dx = st.x - from.x;
+      const dz = st.z - from.z;
+      // (the cart's left, +x local, in the world: the way it falls — the low side — is away from the blast)
+      const lx = dx * Math.cos(st.yaw) - dz * Math.sin(st.yaw);
+      knock = { side: lx > 0 ? -1 : 1 };
+      return true;
+    },
+    // A spot on the bed's floor (lz: m ahead of the middle) and its turn — a passenger's seat
+    bedPose: (lz, pos = new THREE.Vector3(), quat = new THREE.Quaternion()) => {
+      pos.set(0, model.floorY(), lz);
+      model.group.updateMatrixWorld(true);
+      model.group.localToWorld(pos);
+      model.group.getWorldQuaternion(quat);
+      return { pos, quat };
+    },
   };
 }

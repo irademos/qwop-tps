@@ -265,6 +265,7 @@ export function installTownReactions(T, ctx) {
         return true;
       }
       case 'guide': return T.updateGuide(n, t, dt); // (the first day — townIntro.js)
+      case 'quest': return T.updateQuestNpc(n, t, dt); // (in a job — townQuests.js)
       case 'seek': return T.updateSeek(n, t, dt); // (the sheriff coming over — townBandits.js)
       case 'holdup': return T.updateHoldup(n, t, dt); // (a bandit robbing the player — townBandits.js)
       case 'mug': {

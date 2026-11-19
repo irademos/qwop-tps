@@ -112,6 +112,7 @@ import { installTownWire } from './townWire.js';
 import { installTownCooking } from './townCooking.js';
 import { installTownMemory, moodOf } from './townMemory.js';
 import { installTownIntro } from './townIntro.js';
+import { installTownQuests } from './townQuests.js';
 import { installTownHomes } from './townHomes.js';
 import { installTownLights } from './townLights.js';
 import { installTownGrab } from './townGrab.js';
@@ -334,6 +335,8 @@ export function createTownMode(ctx) {
     if (n.url === glbCharacterConfig.villageGirlUrl) return 'female';
     return FEMININE.has(firstName(n.name)) ? 'female' : 'male';
   };
+  // (a job's lines say Dad / Mum, he / she… by it — townQuests.js)
+  const isFeminine = (n) => n.url === glbCharacterConfig.frogMomUrl || n.url === glbCharacterConfig.villageGirlUrl || FEMININE.has(firstName(n.name));
   // Who shares an accent: each kind of townsperson (speech.js ACCENTS); the plain folk each their own
   const voiceFamily = (n) => { const s = speciesOf(n); return s === 'folk' ? null : s; };
   const voiceAt = (n) => ({ x: n.x, y: T.groundY(n) + 1.5, z: n.z });
@@ -354,6 +357,9 @@ export function createTownMode(ctx) {
       speech.say(text, { key: `player:${ctx.getPlayerName()}`, kind: playerVoiceKind(), priority: 'talk', interrupt });
       return;
     }
+    // (someone in a job who isn't a townsperson — the wizard's son, townQuests.js)
+    const extra = T.questVoice?.(who);
+    if (extra) { speech.say(text, { ...extra, priority: 'talk', interrupt, falloff: { ref: 3, rolloff: 1, max: 30 } }); return; }
     const first = firstName(String(who ?? ''));
     const n = T.talking?.npc && firstName(T.talking.npc.name) === first ? T.talking.npc
       : T.npcs.find((x) => x.alive && firstName(x.name) === first);
@@ -477,6 +483,7 @@ export function createTownMode(ctx) {
       mem: n.mem?.length ? n.mem : undefined,
     })),
     intro: T.introSnapshot(),
+    quests: T.questSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
     raidNight: T.raidNight,
@@ -524,6 +531,7 @@ export function createTownMode(ctx) {
     follow: T.npcs.filter((n) => n.alive && n.following && !n.escort).map((n) => n.id),
     mem: Object.fromEntries(T.npcs.filter((n) => n.alive && n.mem?.length).map((n) => [n.id, n.mem])),
     intro: T.introSnapshot(),
+    quests: T.questSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
     nightKills: { ...T.nightKills },
@@ -708,6 +716,8 @@ export function createTownMode(ctx) {
     T.restoreJobs(own);
     // (no save of the player's own yet: the first day starts — a save's null: it's done)
     T.startIntro(own ? own.intro : undefined);
+    // (then the jobs after it — townQuests.js; an old save's jobs were townIntro.js steps)
+    T.startQuests(own?.quests, own ? own.intro : undefined);
     // Start mid-day: everyone already at whatever they'd be doing
     T.isNight = null;
     applyTime();
@@ -796,6 +806,7 @@ export function createTownMode(ctx) {
     if (!T.active) return;
     save();
     flushCloud();
+    T.resetQuests(); // (a job's people, actors, bandits put away — it starts over at its checkpoint)
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     T.resetCart();
     T.resetDrive();
@@ -909,6 +920,7 @@ export function createTownMode(ctx) {
     T.updateFishing(dt);
     T.updateCanoe(dt);
     T.updateIntroWalk(dt);
+    T.updateQuests(dt);
     T.updateDrive(dt);
     T.updateCooking(dt);
     T.updateFarm(dt);
@@ -934,7 +946,8 @@ export function createTownMode(ctx) {
   const trySwordHit = (tip, swingDir, swingId = null) => {
     if (!T.active || !T.ready || T.sequence || T.inRoom) return false;
     for (const n of T.npcs) {
-      if (!n.alive || !n.body || n.fighter || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
+      // (someone in a job with the player — the wizard fighting beside them — isn't hit)
+      if (!n.alive || !n.body || n.fighter || n.questing || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
       // (once per swing — swordCombo.js' swingId — so quick swings each land)
       if (T.simT - n.lastHitAt < 0.18 || (swingId != null && n.lastSwing === swingId)) continue;
       const cy = T.groundY(n) + 0.55 * heightScale(n.url);
@@ -963,7 +976,7 @@ export function createTownMode(ctx) {
   };
 
   Object.assign(T, {
-    speakNear, speech, voiceKind,
+    speakNear, speech, voiceKind, isFeminine,
     actsEl, advanceClock, campChip, campWatch, clock, fade, feedLine, goods, hour, hud, jailChip,
     jobTalk, law, loadPersonal, lockpick, markers, net, netT, pool, renderGoods,
     renderStars, root, save, spawnTown, toggleLog, top, topPlace, tracker, usedNames, worldSnapshot,
@@ -983,6 +996,7 @@ export function createTownMode(ctx) {
   installTownCooking(T, ctx);
   installTownMemory(T, ctx);
   installTownIntro(T, ctx);
+  installTownQuests(T, ctx);
   installTownHomes(T, ctx);
   installTownLights(T, ctx);
   installTownGrab(T, ctx);
@@ -999,7 +1013,7 @@ export function createTownMode(ctx) {
     sleep: 'Sleeping', wander: 'Out and about', chat: 'Chatting', talk: 'Talking', follow: 'Following you',
     jailed: 'In jail', lost: 'Lost', flee: 'Running away', hide: 'Hiding', fight: 'Fighting', brawl: 'Brawling',
     mug: 'Up to no good', raid: 'Raiding', raidHome: 'Raiding', camp: 'At camp', respond: 'On duty',
-    search: 'On duty', arrest: 'On duty', guide: 'Showing you around', burgle: 'Breaking in', prowl: 'Prowling',
+    search: 'On duty', arrest: 'On duty', guide: 'Showing you around', quest: 'With you', burgle: 'Breaking in', prowl: 'Prowling',
     seek: 'Looking for you',
   };
   const npcStatus = (n) => {
@@ -1104,6 +1118,8 @@ export function createTownMode(ctx) {
           out.push(new THREE.Vector3(n.x, T.groundY(n), n.z));
         }
       }
+      // (a job's ambush — townQuests.js)
+      for (const at of T.questThreats()) if (T.distToPlayer(at) < range) out.push(at);
       return out;
     },
     // Who's talking to the player in the talk box (their feet — the camera turns to them), or null

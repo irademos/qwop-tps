@@ -5205,6 +5205,22 @@ async function initCore(runtimeContext) {
         },
       }];
     }
+    // A Town job's ally (the wizard's wand — townQuests.js): only the job's bandits
+    if (blast.side === 'ally') {
+      return hordeEnemies.filter((e) => e._questFoe && !e.isDead && e.group?.parent).map((enemy) => ({
+        center: enemy.getCenterWorldPos(),
+        radius: (enemy.bodyHitRadius ?? 0.45) * 0.9,
+        blocks: (b) => !!enemy.blocksBlast?.(b),
+        onBlocked: () => enemy.applyBlockImpact?.(),
+        onHit: (b) => {
+          if (enemy.isDead) return;
+          const dir = _magicPushDir(b);
+          enemy.applyDamage(b.element === 'fire' ? MAGIC_FIRE_DAMAGE : MAGIC_ICE_DAMAGE);
+          if (b.element === 'fire') enemy.applyBlastKnockback?.({ direction: dir, falloff: 0.75 });
+          else if (!enemy.isDead) enemy.freeze?.(_magicFreezeSeconds());
+        },
+      }));
+    }
     if (blast.side === 'enemy') {
       if (playerDead || _attacksHeld()) return [];
       _playerBlastTarget.center.copy(playerModel.position).setY(playerModel.position.y + 0.5);
@@ -11292,6 +11308,24 @@ async function initCore(runtimeContext) {
       return enemy;
     },
     setFighterPassive: (enemy, on) => _townSetFighterPassive(enemy, on),
+    // A Town job's ally casting (the wizard beside the player — townQuests.js): a wand blast from
+    // `origin` ({ x, y, z }) along `dir` ({ x, z }) that only hits the job's bandits (side 'ally')
+    castAllySpell: (origin, dir) => {
+      const forward = new THREE.Vector3(dir.x, 0, dir.z);
+      if (forward.lengthSq() < 1e-6) return;
+      forward.normalize();
+      const a = Math.random() * Math.PI;
+      magicBlasts.spawn({
+        origin: new THREE.Vector3(origin.x, origin.y, origin.z), forward,
+        line: new THREE.Vector3(Math.cos(a), Math.sin(a), 0),
+        side: 'ally', caster: null, speed: ENEMY_BLAST_SPEED_MPS * 1.3, length: ENEMY_BLAST_LENGTH,
+      });
+    },
+    // A bomb lobbed from `origin` to `target` (Vector3s) that hurts nobody — onExplode(pos) where it
+    // goes off (a Town job's: the wizard's son knocking the cart over)
+    throwBomb: (origin, target, onExplode) => playerBombs.throw(origin, target, {
+      getBlastTargets: () => [], keepHeld: true, speed: BOMB_SPEED, onExplode,
+    }),
     removeFighter: (enemy) => {
       enemy._townGear?.dispose();
       enemy._townGear = null;
@@ -13006,7 +13040,12 @@ async function initCore(runtimeContext) {
         const _allowAttack = _attackSlotSet.has(_he);
         const _othersTurn = !!_psRangedTurn && _he !== _psRangedTurn; // (another's ranged turn)
         if (_he instanceof BombThrowerEnemy) _he.throwsPaused = _othersTurn;
-        if (_attacksHeld()) {
+        // (a Town job's bandit going for someone else — the wizard beside the player, townQuests.js)
+        const _qt = _he.questTarget?.() ?? null;
+        if (_he.questTarget) _he.targetHitHandler = _qt ? _qt.onHit : null;
+        if (_qt) {
+          _he.update(frameDelta, _qt.model, null, false, !_attacksHeld(), false);
+        } else if (_attacksHeld()) {
           // (the body is being carried off / just back from a pause: no swings / bombs at it)
           _he.update(frameDelta, _he instanceof BombThrowerEnemy ? null : playerModel, playerControls, false, false, true);
         } else {

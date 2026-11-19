@@ -11,9 +11,11 @@
 // let it through); too far and it flips over, throwing the player out (ctx.throwPlayer), then
 // rights itself (src/items/cart.js). No going into houses in it (townTrade.js — `ctx.isInCart`). Only the player's own: in a shared
 // town the others don't see it (they'd see the player crouching as they go).
-// A job can load it (the veg for the wizard — townIntro.js `cartLaden`): a heap of veg in its bed,
+// A job can load it (the veg for the wizard — townQuests.js `cartLoad`): a heap of veg in its bed,
 // the cart brought round beside the player (bringCart), and it isn't taken back to its parking
-// spot while it's laden.
+// spot while a job's using it (`T.cartInUse`). A job can also hold it where it is (lockCart), knock
+// it over (knockCart — a bomb beside it) and seat a townsperson in its bed (cartSeat — the
+// passenger's place, townQuests.js).
 
 import * as THREE from 'three';
 import { createCartRide } from '../items/cart.js';
@@ -106,7 +108,8 @@ export function installTownCart(T, ctx) {
     cargo = makeCargo();
     ride.group.add(cargo);
   };
-  const laden = () => !!T.cartLaden?.();
+  const laden = () => T.cartLoad?.() === 'veg';
+  const inUse = () => laden() || !!T.cartInUse?.();
 
   // Brought round beside the player (a job's loaded it): the first spot round them it fits,
   // pointing the way they face; true if it's there (or they're in it already)
@@ -180,7 +183,7 @@ export function installTownCart(T, ctx) {
     if (!ride.isRiding()) {
       ride.update(dt); // (its dust settling, a flip playing out)
       idle += dt;
-      if (idle > RETURN_S && home && !ride.isFlipped() && !laden()) {
+      if (idle > RETURN_S && home && !ride.isFlipped() && !inUse()) {
         const c = ride.pose();
         const p = T.playerPos();
         if (dist2(c.x, c.z, home.x, home.z) > RETURN_MOVED
@@ -223,5 +226,15 @@ export function installTownCart(T, ctx) {
   };
   const inCart = () => !!ride?.isRiding();
 
-  Object.assign(T, { bringCart, cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
+  // ── For a job (townQuests.js) ──
+  // (held where it is: no rolling)
+  const lockCart = (on) => ride?.lock(on);
+  // (a blast at `from` beside it: over it goes, whoever's in it thrown out)
+  const knockCart = (from) => !!ride?.knockOver(from);
+  // (a passenger's place in the bed, `lz` m ahead of its middle — behind the rider: −0.42)
+  const cartSeat = (lz = -0.42) => (ride ? ride.bedPose(lz) : null);
+  const cartPose = () => (ride ? ride.pose() : null);
+  const cartFlipped = () => !!ride?.isFlipped();
+
+  Object.assign(T, { lockCart, knockCart, cartSeat, cartPose, cartFlipped, bringCart, cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
 }

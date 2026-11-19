@@ -41,6 +41,8 @@ import {
   FIX_CANOE_THEN, quest,
 } from './chapter1.js';
 import { createJobTalk, createQuestTracker } from '../town/townJobs.js';
+import { createTalkRunner } from '../quest/talk.js';
+import { runActions } from '../quest/actions.js';
 import { createSpeech } from '../audio/speech.js';
 
 export const STORY_SAVE_VERSION = 2;
@@ -229,31 +231,18 @@ export function createStoryMode(ctx) {
 
   // ── Talk: Town's subtitle talk box, one line at a time; the last can end in choices. The
   // talks themselves are the chapter's (TALKS); what they do when they end, ACTIONS ──
+  // (the talk itself is the shared quest talk — src/quest/talk.js, as Town's jobs use)
   const talkBox = createJobTalk(hud, { speak: speakTalk });
-  let talk = null; // { lines, i, choices, then }
-  const endTalk = (actions = null) => {
-    talk = null;
-    talkBox.close();
-    run(actions);
-  };
-  const showLine = () => {
-    const [who, text] = talk.lines[talk.i];
-    const last = talk.i >= talk.lines.length - 1;
-    const then = talk.then;
-    const choices = !last
-      ? [{ label: 'Go on', primary: true, act: true, onClick: () => { talk.i += 1; showLine(); } }]
-      : talk.choices
-        ? talk.choices.map((c, i) => ({ label: c.label, primary: i === 0, onClick: () => endTalk([...(then ?? []), ...(c.then ?? [])]) }))
-        : [{ label: 'Okay', primary: true, act: true, onClick: () => endTalk(then) }];
-    talk.who = who;
-    if (who === CROW) { crow.flutter(0.9); playCaw(); }
-    if (who === TREE) { tree.reveal(true); tree.lookAt(ctx.getPlayerModel().position); treeRevealUntil = simT + TREE_REVEAL_HOLD_S; }
-    talkBox.open({ who, text, choices });
-  };
+  const talker = createTalkRunner({
+    box: talkBox,
+    onLine: (who) => {
+      if (who === CROW) { crow.flutter(0.9); playCaw(); }
+      if (who === TREE) { tree.reveal(true); tree.lookAt(ctx.getPlayerModel().position); treeRevealUntil = simT + TREE_REVEAL_HOLD_S; }
+    },
+    run: (actions) => run(actions),
+  });
   const say = (def) => {
-    if (!def?.lines?.length) { run(def?.then); return; }
-    talk = { lines: def.lines, i: 0, choices: def.choices ?? null, then: def.then ?? null };
-    showLine();
+    talker.say(def);
     refreshActs();
   };
   // A character's talk: theirs for the step now (or `key`)
@@ -292,15 +281,14 @@ export function createStoryMode(ctx) {
       actAt = 0;
     },
   };
+  // (the shared action runner — src/quest/actions.js — with the chapter's kinds and ACTIONS)
   function run(actions) {
-    for (const a of actions ?? []) {
-      const [kind, arg, arg2] = a.split(':');
-      if (kind === 'step') setStep(arg);
-      else if (kind === 'note') note(NOTES[arg]);
-      else if (kind === 'talk') runTalk(arg, arg2);
-      else if (ACTIONS[kind]) ACTIONS[kind]();
-      else console.warn('[story] unknown action', a);
-    }
+    runActions(actions, {
+      step: (arg) => setStep(arg),
+      note: (arg) => note(NOTES[arg]),
+      talk: (who, key) => runTalk(who, key),
+      ...ACTIONS,
+    }, { warn: '[story]' });
     actAt = 0;
   }
 
@@ -515,7 +503,7 @@ export function createStoryMode(ctx) {
     treesGroup.parent?.remove(treesGroup);
     treesGroup = null;
   };
-  const canChop = () => S.hasSword && !cut && !talk && !aboard;
+  const canChop = () => S.hasSword && !cut && !talker.isOpen() && !aboard;
   const trySwordHit = (tip) => {
     if (!active || !treesGroup || held !== 'sword' || !canChop()) return false;
     return F.tryChop(tip);
@@ -709,7 +697,7 @@ export function createStoryMode(ctx) {
   let actsKey = '';
   let lobbyOfferUntil = 0;     // after "To be continued…": Back to Lobby among the acts a while
   const computeActs = () => {
-    if (cut || ending || talk) return [];
+    if (cut || ending || talker.isOpen()) return [];
     const p = ctx.getPlayerModel().position;
     const out = [];
     // (fishing without a gyro: Cast / Pull — Town's)
@@ -767,7 +755,7 @@ export function createStoryMode(ctx) {
     if (!active || e.repeat || (e.key !== 'Enter' && e.key !== 'e' && e.key !== 'E')) return;
     if (e.target?.closest?.('input, textarea, select')) return;
     if (document.body.classList.contains('settings-open')) return;
-    if (talk) { e.preventDefault(); talkAdvance(); return; }
+    if (talker.isOpen()) { e.preventDefault(); talkAdvance(); return; }
     if (acts[0]) { e.preventDefault(); acts[0].run(); actAt = 0; }
   };
 
@@ -1193,7 +1181,7 @@ export function createStoryMode(ctx) {
     active = false;
     ready = false;
     ++token;
-    if (talk) { talk = null; talkBox.close(); }
+    talker.close();
     speech.stop();
     if (F.fishing) stopFishing();
     if (aboard) leaveBoat(null);
@@ -1235,7 +1223,7 @@ export function createStoryMode(ctx) {
     crow.update(dt);
     eyeFish.update(dt);
     // (the sacred tree wakes to talk, then goes still again)
-    tree.reveal((talk && talk.who === TREE) || simT < treeRevealUntil);
+    tree.reveal((talker.isOpen() && talker.speaker() === TREE) || simT < treeRevealUntil);
     tree.update(dt);
     frogMom.update(dt);
     updateSit();
@@ -1293,12 +1281,12 @@ export function createStoryMode(ctx) {
     // The phone's Block bar as an interact button (null: nothing to do)
     interactLabel: () => {
       if (!active) return null;
-      if (talk) return talk.i < talk.lines.length - 1 ? 'Go on' : talk.choices ? talk.choices[0].label : 'Okay';
+      if (talker.isOpen()) return talker.firstLabel();
       return acts[0]?.label ?? null;
     },
     interact: () => {
       if (!active) return;
-      if (talk) talkAdvance();
+      if (talker.isOpen()) talkAdvance();
       else if (acts[0]) { acts[0].run(); actAt = 0; }
     },
     // The phone's 🎣: rod ↔ hands (in the canoe ↔ the oar)

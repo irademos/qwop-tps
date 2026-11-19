@@ -3,7 +3,7 @@
 
 import { FOLLOW_LINES, ROLES, firstName, livesOut } from './townPeople.js';
 import { FOOD_IDS, SELLER_GOOD } from './townEconomy.js';
-import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
   BODY_DIST, BODY_RELEASE_DIST, MERCHANT_START_CASH, SELLER_START_CASH, SPEECH_DIST, SPEECH_SHOUT_DIST, WOOD_BUY_CHANCE,
@@ -221,6 +221,8 @@ export function installTownFolk(T, ctx) {
     }
     // (showing the player round on their first day — townIntro.js)
     if (n.guiding) { setTask(n, { type: 'guide', dur: Infinity }); return; }
+    // (in a job of the player's — townQuests.js runs their frame)
+    if (n.questing) { setTask(n, { type: 'quest', dur: Infinity }); return; }
     // (a claim's over: back to the host's town)
     if (T.netMode === 'client') { release(n); return; }
     if (def.outlaw) { T.decideBandit(n); return; }
@@ -372,6 +374,7 @@ export function installTownFolk(T, ctx) {
   };
   const releaseBody = (n) => {
     if (!n.body) return;
+    if (n.body.seated) n.body.character.endPose();
     const { container, character } = n.body;
     n.body = null;
     toPool(n.url, { container, character });
@@ -386,7 +389,17 @@ export function installTownFolk(T, ctx) {
     const b = n.body;
     if (!b) return;
     const lying = sleepPose(n);
-    if (lying) {
+    // (seated — a passenger crouched in the cart's bed, townQuests.js: n.seat() → { pos, quat })
+    const seat = n.seat?.() ?? null;
+    if (!!seat !== !!b.seated) {
+      b.seated = !!seat;
+      if (seat) b.character.playPose(glbCharacterConfig.crouchClip);
+      else b.character.endPose();
+    }
+    if (seat) {
+      b.container.position.copy(seat.pos);
+      b.container.quaternion.copy(seat.quat);
+    } else if (lying) {
       b.container.position.set(lying.x, lying.y, lying.z);
       b.container.rotation.set(-Math.PI / 2, lying.yaw, 0);
     } else {

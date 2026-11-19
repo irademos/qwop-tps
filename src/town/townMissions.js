@@ -96,7 +96,9 @@ export function installTownMissions(T, ctx) {
     if (T.simT > T.jobsAt) { T.jobsAt = T.simT + JOB_REFRESH_S; offerJobs(); }
     // (the townsfolk's work in order on top — townIntro.js)
     const intro = T.introEntry();
-    T.tracker.render([...(intro ? [intro] : []), ...takenJobs().map((j) => ({ title: j.title, progress: jobProgress(j), icon: j.status === 'done' ? '❓' : '📍' }))]);
+    // (then the job going on — townQuests.js)
+    const quest = T.questEntry();
+    T.tracker.render([...(intro ? [intro] : []), ...(quest ? [quest] : []), ...takenJobs().map((j) => ({ title: j.title, progress: jobProgress(j), icon: j.status === 'done' ? '❓' : '📍' }))]);
   };
   const jobProgress = (j) => {
     const who = (id) => (npcById(id) ? firstName(npcById(id).name) : '?');
@@ -118,11 +120,12 @@ export function installTownMissions(T, ctx) {
     return { icon: j.status === 'done' ? '❓' : '❗', x: giver.x, z: giver.z, h: 1.7 * heightScale(giver.url) + 0.5 };
   };
   // (the town book's map: the same marks — { icon, x, z })
-  const jobMarks = () => [...T.jobs.map(markerFor), T.introTarget()].filter(Boolean);
+  const jobMarks = () => [...T.jobs.map(markerFor), T.introTarget(), T.questMarker()].filter(Boolean);
   const updateMarkers = () => {
     const live = new Set();
     const marks = T.jobs.map((j) => [j.id, markerFor(j)]);
     marks.push(['intro', T.introTarget()]);
+    marks.push(['quest', T.questMarker()]);
     for (const [id, t] of marks) {
       if (!t) continue;
       const key = `${id}:${t.icon}`;

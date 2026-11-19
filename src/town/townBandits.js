@@ -80,7 +80,8 @@ export function installTownBandits(T, ctx) {
     const dt = Math.min(1, T.simT - (T.campWatch.tickAt || T.simT));
     T.campWatch.tickAt = T.simT;
     const hideChip = () => T.campChip.classList.add('hidden');
-    if (d > CAMP_WARN_DIST + 6) {
+    // (a job going on there — the wizard come to talk to his son, townQuests.js: no warnings)
+    if (d > CAMP_WARN_DIST + 6 || T.questQuiet?.()) {
       if (T.campWatch.drawn) sheatheAll();
       Object.assign(T.campWatch, { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false });
       hideChip();
@@ -369,7 +370,7 @@ export function installTownBandits(T, ctx) {
   // A raider who runs into the player (seen, close): an armed player is fought, an unarmed one
   // robbed. (Shared town: the host's game runs them — its own player only.)
   const watchForPlayer = () => {
-    if (!T.isNight || T.inRoom || T.jail || T.sequence || ctx.isPlayerDead()) return;
+    if (!T.isNight || T.inRoom || T.jail || T.sequence || ctx.isPlayerDead() || T.questQuiet?.()) return;
     const armed = ctx.isPlayerArmed();
     for (const n of T.npcs) {
       if (!n.alive || !n.def.outlaw || n.fighter || n.inside || !n.body || !T.mine(n) || !RAIDING.has(n.task?.type)) continue;
