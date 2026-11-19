@@ -212,6 +212,7 @@ export function installTownWire(T, ctx) {
     if (Number.isFinite(s.gangDay)) T.gangDay = s.gangDay;
     if (s.houses) T.applyHouses(s.houses);
     if (s.fieldOwners) { T.applyFieldOwners(s.fieldOwners); T.assignWork(); }
+    T.restoreRuins(s, { live: true }); // (a building torn down — townRuins.js)
     if (Array.isArray(s.stands)) {
       T.dropRemoteStands();
       for (const r of s.stands) if (r && r.peer !== T.myId()) T.handleMarketNet(r.peer, { op: 'stand', k: r.k, n: r.n, g: r.g, from: r.peer });
@@ -277,6 +278,7 @@ export function installTownWire(T, ctx) {
     if (T.handleHomesNet(from, d)) return;
     if (T.handleFarmNet(from, d)) return;
     if (T.handleTreeNet(from, d)) return;
+    if (T.handleRuinNet(from, d)) return;
     // (the night raid's call, a player's house broken into — townBandits.js)
     if (T.handleBanditNet(from, d)) return;
     // (players' market stalls — townMarket.js)

@@ -122,6 +122,8 @@ export function installTownQuests(T, ctx) {
     for (const id of homeBound) {
       const n = T.npcById(id);
       if (!n?.alive) { homeBound.delete(id); continue; }
+      // (taken by the next job meanwhile: it sends them home when it's done with them)
+      if (n.questing && n.qmode && n.qmode.kind !== 'linger') { homeBound.delete(id); continue; }
       if (n.questing && n.qmode?.kind === 'linger' && T.simT < n.qmode.until) continue;
       if (T.distToPlayer(n) < LINGER_HOME_DIST) continue;
       homeBound.delete(id);

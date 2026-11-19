@@ -11180,6 +11180,22 @@ async function initCore(runtimeContext) {
     if (_activeMap) visit(_activeMap.group);
     return out;
   };
+  // A placed object gone from the world / back (setMapObjectGone in the town ctx): drawn or not,
+  // and its meshes on MAP_GONE_LAYER — the height / wall / bullet raycasts (and the cameras)
+  // only see layer 0 — with the height cache cleared so the ground under it is found again
+  const MAP_GONE_LAYER = 30;
+  const _setMapObjectGone = (object, gone) => {
+    if (!object) return;
+    if (!!object.userData.mapGone === !!gone) return;
+    object.userData.mapGone = !!gone;
+    object.visible = !gone;
+    object.traverse((m) => {
+      if (!m.isMesh) return;
+      if (gone) { m.userData.layersBeforeGone = m.layers.mask; m.layers.set(MAP_GONE_LAYER); }
+      else if (m.userData.layersBeforeGone != null) { m.layers.mask = m.userData.layersBeforeGone; delete m.userData.layersBeforeGone; }
+    });
+    _glbHeightCache.clear();
+  };
   // Big text over the world (the stage win banner's look) — Town's and Story's banners
   const _showWorldBanner = (title, sub, ms = 2600) => {
     _psWinTitle.textContent = title;
@@ -11226,6 +11242,9 @@ async function initCore(runtimeContext) {
     // The active map's placed objects (houses, trees…) with their centres inside `b` (`object`:
     // its placement wrapper — Town's trees are felled by posing it, townTrees.js)
     getMapObjects: (b) => _getMapObjects(b),
+    // A placed object taken out of the world (a destroyed building — townRuins.js) or put back:
+    // hidden, and its meshes on a layer no raycast tests, so it's no ground / wall / cover any more
+    setMapObjectGone: (object, gone) => _setMapObjectGone(object, gone),
     // Each placed road lamp's head: its light goes just under the top, like the night road
     // lights' (ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset of the 1-unit-tall model)
     getRoadLamps: () => _mapRoadLamps().map((o) => {
