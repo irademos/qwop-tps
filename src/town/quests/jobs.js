@@ -1,8 +1,17 @@
-// Town's jobs after the first day — DATA only, run in order by the quest runner
-// (src/quest/questRunner.js) with Town's beats (townQuests.js). Each job is a list of beats; the
-// next job comes only once the one before is done (`waitS` after it). A new job is a new entry
-// here made of the beats that exist; a new beat type only for something new.
+// Town's jobs after the first day — DATA only, in BRANCHES: each branch a list of jobs done in
+// order (the next only once the one before is done, `waitS` after it), run by the quest runner
+// (src/quest/questRunner.js) with Town's beats (townQuests.js). The branches run side by side:
+// any branch whose next job is ready can have its giver come and find the player — one at a
+// time, in the order they came up (a queue; a giver near the player first), and never while
+// another branch's job is under way, nor while the player's in a fight, out on the water, off on
+// another island or far off. Talking to any waiting giver (❗) starts theirs. A new job is a new
+// entry in a branch made of the beats that exist; a new branch is a new entry in BRANCHES; a new
+// beat type only for something new.
 //
+// Branch: { id, title, from?, jobs: [...] }
+//   from: when it opens — { day?: n (the town's day n or later), hours?: [from, to] (its givers
+//   only come in those hours), after?: '<branch id>' | '<job id>' (once that's done) };
+//   none: as soon as the first day's done (or skipped)
 // Job: { id, title, waitS?, failWaitS?, restartAt?, quiet?, beats: [...] }
 //   quiet: the bandit camp leaves the player be while the job's under way (from a `board` on — no
 //   warnings / hold-ups)
@@ -12,6 +21,10 @@
 //   talk    { who, lines: [[who, text]…], choices?: [{ label, then? }], reward?, reach? }
 //           who: whose talk it is (a role, or an actor's id); lines' who: a role, an actor's id or
 //           'you'. A choice's `then`: 'later' (back in a while), 'fail', 'goto:<label>'; none → on.
+//   bring   { who, good, count, text? } — the player brings them that many goods in the bag (taken
+//           when talked to with enough)
+//   build   { who, at, s, makes, text? } — they go to a place and work there s seconds; then `makes`
+//           is there ('canoe': the canoe by the fishing spot — none in Town till then)
 //   cart    { bring?, load? }   — the cart brought beside the player; `load` in its bed ('veg' / null)
 //   board   { who }             — a townsperson climbs into the back of the cart
 //   alight  { who }             — and gets out
@@ -35,14 +48,16 @@
 // (open-ended — talk to someone whenever); entry: the tracker's line.
 //   unload  {}                  — the cart's load handed over
 //   release { who, linger? }    — the townsperson back to their day (linger: s round where they are first)
-// Places (`to` / `from`): 'wizard' (his stall up the mountain), 'camp' (the bandit camp), 'town'
-// (by the shop, where the cart's parked), 'cart', 'entrance' (the newcomers' way into town).
+// Places (`to` / `from` / `at`): 'wizard' (his stall up the mountain), 'camp' (the bandit camp), 'town'
+// (by the shop, where the cart's parked), 'cart', 'entrance' (the newcomers' way into town),
+// 'fishSpot' (the fishing spot, where the canoe's moored).
 // Text: {name} = the player's name, {<role>} = that townsperson's first name, {<role>.dad} /
 // .father / .he / .him / .his / .man / .sir = the word for them (Dad or Mum…; capitalised as written).
 
 const WIZARD_URL = 'wizard';  // (an actor's url: a glbCharacterConfig key + 'Url' — townQuests.js)
 
-export const JOBS = [
+// ── The wizard: veg up the mountain, his son, his cabin ──
+const WIZARD_JOBS = [
   // ── Day 2: the farmer's veg up the mountain to the wizard ──
   {
     id: 'veg', title: 'Veg for the wizard', waitS: 40,
@@ -191,4 +206,49 @@ export const JOBS = [
       { do: 'ruin', key: 'wizardCabin', on: false, when: 'morning' },
     ],
   },
+];
+
+// ── The fisher: a canoe ──
+const FISHER_JOBS = [
+  {
+    id: 'canoe', title: 'A canoe for the fisher', waitS: 70,
+    beats: [
+      { do: 'seek', who: 'fisher' },
+      {
+        do: 'talk', who: 'fisher', reward: 'Bring 10 wood',
+        lines: [
+          ['fisher', '{name}! Got a moment? The old canoe I had rotted through last winter, and the fish out past the docks are the best in the bay.'],
+          ['fisher', 'I\'d build a new one, but I\'m no woodcutter. Bring me ten wood — fell a tree with your sword and split the logs it leaves — and I\'ll build us a canoe. You can take her out whenever you like.'],
+        ],
+        choices: [{ label: 'I\'ll get the wood' }, { label: 'Later', then: ['later'] }],
+      },
+      { do: 'release', who: 'fisher' },
+      {
+        do: 'bring', label: 'do', checkpoint: true, who: 'fisher', good: 'wood', count: 10, text: 'Bring {fisher} 10 wood',
+        talks: { woodcutter: { lines: [['woodcutter', 'Wood for a canoe? Fell a tree with your sword, then split the logs it leaves — one wood a log. Ten will do it.']] } },
+      },
+      {
+        do: 'talk', who: 'fisher', reach: 6, checkpoint: true,
+        lines: [['fisher', 'Ten good logs! Right — leave it to me. Come down to the water and watch, if you like; it won\'t take long.']],
+        choices: [{ label: 'Go on then' }],
+      },
+      { do: 'build', label: 'build', checkpoint: true, who: 'fisher', at: 'fishSpot', s: 30, makes: 'canoe', text: '{fisher} is building the canoe by the fishing spot' },
+      { do: 'seek', who: 'fisher', anyTime: true, checkpoint: true },
+      {
+        do: 'talk', who: 'fisher', reach: 7, reward: 'The canoe is yours to use',
+        lines: [
+          ['fisher', 'There she is — moored by the fishing spot! Walk up to her and get in; tip the phone to paddle.'],
+          ['fisher', 'Take a rod out there and fish anywhere on the water. And they say there\'s an island out past the bay…'],
+        ],
+        choices: [{ label: 'Thank you' }],
+      },
+      { do: 'pay', from: 'fisher', coins: 0, memory: 'The wood for the canoe' },
+      { do: 'release', who: 'fisher' },
+    ],
+  },
+];
+
+export const BRANCHES = [
+  { id: 'wizard', title: 'The wizard', jobs: WIZARD_JOBS },
+  { id: 'fisher', title: 'The fisher', jobs: FISHER_JOBS },
 ];

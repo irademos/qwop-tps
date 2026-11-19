@@ -5,7 +5,7 @@
 const ARRIVE_FAR = 60; // m off before `arrive` brings them in by its place
 
 export const peopleBeats = (W) => {
-  const { T, ctx, P, placeOf, dist2, roleNpc, roleGone, canTake, control, release, stand, fill, calm, isNight, npcMark, actors, open, talker, firstName, SNOOZE_S, SEEK_STOP, SEEK_STUCK_S } = W;
+  const { T, ctx, P, placeOf, mayApproach, dist2, roleNpc, roleGone, canTake, control, release, stand, fill, calm, isNight, npcMark, actors, open, talker, firstName, SNOOZE_S, SEEK_STOP, SEEK_STUCK_S } = W;
   return {
     // The giver comes to find the player (❗ over them); talking to them first does too
     seek: {
@@ -21,6 +21,9 @@ export const peopleBeats = (W) => {
         const n = roleNpc(c.q, b.who);
         s.n = n;
         if (!n) return false;
+        // (another branch's job under way, its giver ahead in the queue, or the player busy — in a
+        // fight, out on the water, off the island: not now — townQuests.js updateBranches)
+        if (!mayApproach(c)) { if (n.questing && ['seek', 'wait'].includes(n.qmode?.kind)) release(n); return false; }
         // (arrive: someone far off, with no walk to the player — the wizard on his mountain —
         // comes in by that place instead, the newcomers' way into town: once, out of sight)
         if (b.arrive && !s.arrived) {

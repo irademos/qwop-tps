@@ -17,6 +17,8 @@
 // (back at its mooring the next time Town opens). Dying / an arrest / leaving Town gets them
 // out too. Only the player's own: in a shared town the others don't see it move (they'd see
 // the player standing on the water).
+// There's no canoe in Town till the fisher's built it (his first job — quests/jobs.js, the `build`
+// beat → T.setCanoeBuilt(true), kept with the quests' save as a flag): hidden, no Get in.
 
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { createCanoeBoat } from './canoeBoat.js';
@@ -30,6 +32,7 @@ export function installTownCanoe(T, ctx) {
   let canoe = null;
   let unregisterFloor = null;
   let searching = false; // (looking for the shore: the canoe's floor isn't ground meanwhile)
+  let built = false;      // (the fisher's built it — T.setCanoeBuilt)
 
   const waterY = (x, z) => ctx.getWaterY(x, z) ?? 0;
 
@@ -69,6 +72,7 @@ export function installTownCanoe(T, ctx) {
     if (!home) return false;
     canoe = Object.assign(boat, home, { aboard: false, home });
     T.layout.props.group.add(canoe.group);
+    canoe.group.visible = built;
     canoe.place(0);
     return true;
   };
@@ -164,7 +168,7 @@ export function installTownCanoe(T, ctx) {
 
   // ── Acts (townActs.js): 🛶 Get in by it; aboard, 🛶 Get out by the shore ──
   const canoeActs = (calm) => {
-    if (!canoe) return [];
+    if (!canoe || (!built && !canoe.aboard)) return [];
     if (canoe.aboard) return shoreSpot() ? [{ key: 'canoeout', label: 'Get out', onClick: getOut }] : [];
     if (!calm || T.inRoom || T.jail || T.held || T.fishing || ctx.isPlayerDead()) return [];
     const p = T.playerPos();
@@ -179,10 +183,23 @@ export function installTownCanoe(T, ctx) {
     Object.assign(canoe, { x: canoe.home.x, z: canoe.home.z, yaw: canoe.home.yaw });
     canoe.place(0);
   };
+  // (built: there at its mooring from now on; not: gone — out of it first)
+  const setCanoeBuilt = (on) => {
+    built = !!on;
+    if (!canoe) return;
+    if (!built) leave();
+    if (!canoe.aboard) {
+      canoe.stop();
+      Object.assign(canoe, { x: canoe.home.x, z: canoe.home.z, yaw: canoe.home.yaw });
+      canoe.place(0);
+    }
+    canoe.group.visible = built;
+    T.actsAt = 0;
+  };
   const inCanoe = () => !!canoe?.aboard;
   // Fishing (townFishing.js): from the canoe, anywhere; a cast lands on water, not in the canoe
   const fishAnywhere = inCanoe;
   const fishWater = (x, z) => (canoe?.aboard ? canoe.floorAt(x, z) === undefined && ctx.waterDepth(x, z) > 0.4 : undefined);
 
-  Object.assign(T, { canoeActs, fishAnywhere, fishWater, inCanoe, resetCanoe, updateCanoe });
+  Object.assign(T, { canoeActs, canoeBuilt: () => built, fishAnywhere, fishWater, inCanoe, resetCanoe, setCanoeBuilt, updateCanoe });
 }
