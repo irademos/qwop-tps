@@ -4875,7 +4875,7 @@ body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-botto
 }
 /* (the first day's goal: its button ringed like the tutorial's — townIntro.js introHighlight) */
 .town-act.tutorial-highlight { position: relative; }
-/* Fishing (townFishing.js): a hint (Pull / Reel in) once the player's been getting it wrong, above the acts */
+/* Fishing (townFishing.js): which way the hooked fish swims, the reel's instruction, and a hint (which way to swipe) once the player's been getting it wrong, above the acts */
 .town-fishing {
   position: absolute;
   left: 50%;
@@ -4891,7 +4891,12 @@ body.mobile-block-bar .town-fishing { bottom: calc(160px + env(safe-area-inset-b
 .town-fishing[data-cue='bite'] .town-fishing-cue,
 .town-fishing[data-cue='pull'] .town-fishing-cue { color: var(--accent); animation: town-fish-cue 0.45s ease-in-out infinite; }
 @keyframes town-fish-cue { 50% { transform: scale(1.08); } }
-/* The on-screen reel (no phone connected — the phone has its own): crank it clockwise */
+/* (the hooked fish swimming its way — 🐟 ⬅ / ➡ / ⬆: swipe against it; then the reel's instruction) */
+.town-fishing[data-cue='left'] .town-fishing-cue,
+.town-fishing[data-cue='right'] .town-fishing-cue,
+.town-fishing[data-cue='out'] .town-fishing-cue { font-size: 24px; color: var(--accent); animation: town-fish-cue 0.4s ease-in-out infinite; }
+.town-fishing[data-cue='reel'] .town-fishing-cue { color: var(--accent); }
+/* The on-screen reel (no phone connected — the phone has its own), only once the fish is worn out: crank it clockwise */
 .town-reel {
   position: absolute;
   right: calc(16px + env(safe-area-inset-right, 0px));

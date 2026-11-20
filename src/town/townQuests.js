@@ -410,7 +410,7 @@ export function installTownQuests(T, ctx) {
     const gyro = ctx.hasGyro();
     switch (kind) {
       case 'fish':
-        if (T.fishing) return gyro ? null : { act: 'fishpull' };
+        if (T.fishing) return gyro ? null : { act: T.fishActKey?.() ?? 'fishpull' };
         if (held !== 'fishing_rod') return { gear: 'fishing_rod', phone: 'rod' };
         return gyro ? null : { act: 'fishcast' };
       case 'cook': return { act: 'cook:' };

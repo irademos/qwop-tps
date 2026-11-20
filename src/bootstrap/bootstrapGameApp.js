@@ -7848,7 +7848,7 @@ async function initCore(runtimeContext) {
     // Town fishing, the line out: the bar is a reel (cranked round on the phone's screen)
     const fishing = town?.isActive() ? town.fishingHud() : seaStart?.isActive() ? seaStart.fishingHud()
       : story?.isActive() ? story.fishingHud() : null;
-    if (fishing?.reel) return { ...status, reelMode: true, fishCue: fishing.cue, fishText: fishing.text };
+    if (fishing?.reel) return { ...status, reelMode: true, reelShow: !!fishing.show, fishCue: fishing.cue, fishText: fishing.text };
     // Town, something grabbed (the hose): the bar is its mode (💧 Water — held), 🗡/✋ drops it
     if (town?.isActive() && town.holding()) return { ...status, holding: true, heldBar: town.heldBar() };
     const interact = _phoneInteract();
@@ -7924,6 +7924,11 @@ async function initCore(runtimeContext) {
   };
   // Town fishing: the phone's reel (radians cranked, not yet taken by town.takeReel)
   const _phoneReel = { last: null, pending: 0 };
+  // Fishing: the camera turns once toward where a cast's bobber will land (ctx.turnCameraTo —
+  // eased in the game loop, by the Town talk camera's block, until it's there or FISH_CAM_TURN_S is up)
+  const FISH_CAM_TURN_S = 0.9;
+  let _fishCamTurn = null; // { x, z, until }
+  const _turnCameraTo = (x, z) => { _fishCamTurn = { x, z, until: performance.now() + FISH_CAM_TURN_S * 1000 }; };
   // Sends the phone its status now (if it changed) — fishing cues can't wait for the timer
   let _phoneSwordStatusNow = null;
   // The phone currently driving the sword. A reconnecting phone (its browser was closed) opens
@@ -10054,6 +10059,7 @@ async function initCore(runtimeContext) {
   const _resetForMenu = () => {
     playerControls?.swimReset?.();   // (swimming's out-of-breath sequence — _swimReset)
     giant.release();
+    _fishCamTurn = null;
     cancelBowDraw();
     releaseBombAim(true);
     hitFeel.cancel();
@@ -11499,6 +11505,8 @@ async function initCore(runtimeContext) {
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
     // The phone controller's reel: radians cranked since the last call
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
+    // A cast: the camera turns once toward where the bobber will land
+    turnCameraTo: _turnCameraTo,
     // A phone controller (it shows its own reel) — not "Use This Device", which needs the on-screen one
     isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
     // Something grabbed / dropped: the Block bar (here and on the phone) becomes / stops being its mode
@@ -11669,6 +11677,8 @@ async function initCore(runtimeContext) {
     getPlayerModel: () => playerModel,
     getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
+    // A cast: the camera turns once toward where the bobber will land
+    turnCameraTo: _turnCameraTo,
     isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
     refreshPhone: () => _phoneSwordStatusNow?.(),
     // 'rod' | 'oar' in hand, or null: nothing
@@ -11737,6 +11747,8 @@ async function initCore(runtimeContext) {
     getOarStroke: () => (isOarEquipped() ? _currentOarStroke() : null),
     getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
+    // A cast: the camera turns once toward where the bobber will land
+    turnCameraTo: _turnCameraTo,
     isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
     refreshPhone: () => _phoneSwordStatusNow?.(),
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
@@ -12893,6 +12905,14 @@ async function initCore(runtimeContext) {
         playerControls.yaw += wrapDeltaRad(Math.atan2(_dx, _dz) - playerControls.yaw) * Math.min(1, frameDelta * 4);
       }
       _aimCameraPitchAt(_townTalker, frameDelta);
+    }
+
+    // ── Fishing: the camera turns once toward where the cast's bobber lands (not after it) ──
+    if (_fishCamTurn && !_townTalker && playerControls && !playerDead) {
+      const _pp = playerModel.position;
+      const _err = wrapDeltaRad(Math.atan2(_fishCamTurn.x - _pp.x, _fishCamTurn.z - _pp.z) - playerControls.yaw);
+      if (performance.now() > _fishCamTurn.until || Math.abs(_err) < 0.01) _fishCamTurn = null;
+      else playerControls.yaw += _err * Math.min(1, frameDelta * 6);
     }
 
     // ── Town: with the sword / wand out, the camera turns toward whoever's coming at the player

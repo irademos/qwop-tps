@@ -231,9 +231,9 @@
     /* …and on it: Boost (higher + faster, uses mana) */
     #btn-boost { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
     #btn-boost.owned { display: block; }
-    /* Town fishing with the line out: the reel takes the joystick's place (and the Block bar
-       goes) — crank the handle round (clockwise) to wind the line in; the middle says Pull /
-       Reel in only once the player's been getting it wrong */
+    /* Town fishing, once the fish is worn out: the reel takes the joystick's place (and the Block
+       bar goes) — crank the handle round (clockwise) to wind the line in; the middle says Reel in
+       only once the player's been getting it wrong */
     #reel {
       display: none;
       position: relative;
@@ -588,7 +588,7 @@ Boost</button>
     reelEl.addEventListener('pointerup', endReel);
     reelEl.addEventListener('pointercancel', endReel);
     // A buzz for each fishing cue the game sends (a bite, the fish running, time to pull…)
-    const FISH_BUZZ = { bite: [70, 40, 70, 40, 140], run: [40], pull: [90], landed: [150, 60, 150], snap: [320], lost: [200] };
+    const FISH_BUZZ = { bite: [70, 40, 70, 40, 140], run: [40], pull: [90], left: [40, 30, 40], right: [40, 30, 40], out: [40, 30, 40], reel: [90], landed: [150, 60, 150], snap: [320], lost: [200] };
     let fishCue = null;
 
     // ── Joystick (angle in radians, 0 = right, π/2 = up; force 0–1) ────────
@@ -740,12 +740,13 @@ Boost</button>
       btnBoost.classList.toggle('owned', !!st.onBroom);
       btnBoost.classList.toggle('equipped', !!st.boosting);
       btnBoost.textContent = `🚀 Boost\n🔮${st.mana ?? 0}`;
-      // The line out: the bar's a reel
-      const reeling = !!st.reelMode;
+      // The line out (its cues buzz); once it's time to reel in, the bar's a reel
+      const lineOut = !!st.reelMode;
+      const reeling = lineOut && !!st.reelShow;
       if (reeling && !document.body.classList.contains('reel-mode') && pressMode) releaseBar();
       document.body.classList.toggle('reel-mode', reeling);
       if (!reeling) reelPointer = null;
-      const cue = reeling ? st.fishCue || null : null;
+      const cue = lineOut ? st.fishCue || null : null;
       if (cue !== fishCue && cue && FISH_BUZZ[cue] && navigator.vibrate) navigator.vibrate(FISH_BUZZ[cue]);
       fishCue = cue;
       reelText.textContent = reeling ? st.fishText || '' : '';
