@@ -188,6 +188,7 @@ export class BombThrowerEnemy {
    * @param {(direction: THREE.Vector3, falloff: number) => void} [options.onBlastPlayer]
    *                          – throws the player back when caught in a blast
    * @param {string}        [options.characterUrl] – character GLB (default glbCharacterConfig.url)
+   * @param {number}        [options.bombDamage] – health segments its blast takes from the player (BOMB_EXPLOSION_DAMAGE)
    */
   constructor(scene, rapier, rapierWorld, options = {}) {
     this.scene       = scene;
@@ -201,6 +202,7 @@ export class BombThrowerEnemy {
     this.speedScale = options.speedScale ?? 1.0;
     this._getBlastTargets = options.getBlastTargets ?? null;
     this._onBlastPlayer   = options.onBlastPlayer ?? null;
+    this.bombDamage = options.bombDamage ?? BOMB_EXPLOSION_DAMAGE;
     // Tutorial controls: never walks; throws only while `throwsHeld` is false; `aimAt()`
     // (if it returns a point) replaces aiming at the player
     this.stationary = !!options.stationary;
@@ -667,7 +669,7 @@ export class BombThrowerEnemy {
     const distToPlayer = pos.distanceTo(targetModel.position);
     if (distToPlayer <= BOMB_EXPLOSION_RADIUS) {
       if (typeof window.localHealth === 'number') {
-        window.localHealth = Math.max(0, window.localHealth - BOMB_EXPLOSION_DAMAGE);
+        window.localHealth = Math.max(0, window.localHealth - this.bombDamage);
       }
       const dir = _blastDirection(pos, targetModel.position, bomb.vel);
       if (this._onBlastPlayer) {

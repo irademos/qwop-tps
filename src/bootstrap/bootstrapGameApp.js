@@ -3725,8 +3725,10 @@ async function initCore(runtimeContext) {
       if (itemId === FISHING_ROD_ITEM_ID ? !isRodAllowed() : !isOarAllowed()) return;
       if (!inventoryState[FOAM_SWORD_ITEM_ID]) inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
     } else if (!itemId || !inventoryState[itemId]) return;
-    // (in Town's canoe the oar is all there is — and the rod, to fish from it)
-    if (town?.inCanoe?.() && itemId !== OAR_ITEM_ID && itemId !== FISHING_ROD_ITEM_ID) return;
+    // (in Town's canoe the oar is all there is — and the rod, to fish from it; the sword too while
+    // a job has the player fighting from it — the fisher's pirates, town.canoeArmed)
+    if (town?.inCanoe?.() && itemId !== OAR_ITEM_ID && itemId !== FISHING_ROD_ITEM_ID
+      && !(itemId === FOAM_SWORD_ITEM_ID && town?.canoeArmed?.())) return;
     // Town: the sword has to be bought (its inventory entry is also the wand's slot)
     if (_townLoadout && itemId === FOAM_SWORD_ITEM_ID && !_townLoadout.hasSword) return;
     // Multiplayer duels are sword only
@@ -4637,6 +4639,7 @@ async function initCore(runtimeContext) {
         getBlastTargets: () => hordeEnemies,
         onBlastPlayer: _blastPlayer,
         characterUrl: opts.characterUrl,
+        bombDamage: opts.bombDamage,
       });
     } else {
       enemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
@@ -8554,6 +8557,8 @@ async function initCore(runtimeContext) {
     isRodEquipped: () => isRodEquipped(),
     isOarEquipped: () => isOarEquipped(),
     isInCanoe: () => isOarAllowed(),
+    // (Town's canoe with a job's fight on — the fisher's pirates: the sword is all there is)
+    isCanoeArmed: () => !!town?.canoeArmed?.(),
     // Town's flying broom (bought from the wizard): owned / being ridden / on ↔ off
     hasBroom: () => !!_townLoadout?.hasBroom,
     isRidingBroom: () => !!_broomRide?.isRiding(),
@@ -11133,6 +11138,8 @@ async function initCore(runtimeContext) {
       playerControls.yaw += dYaw;
       playerModel.rotation.y += dYaw;
       _duelCamLastYaw = playerControls.yaw;
+      // (carried round, not turned by hand: Town's auto-aim carries on — the fisher's pirates)
+      if (_townCamLastYaw !== null) _townCamLastYaw += dYaw;
     }
   };
   // The joystick (on screen / the phone's) or WASD as { fwd, turn } (−1…1; turn > 0 = right) —
@@ -11434,6 +11441,31 @@ async function initCore(runtimeContext) {
       _phoneSwordStatusNow?.();
     },
     getOarModel: () => (isOarEquipped() ? foamSword?.getOarModel?.() ?? null : null),
+    // What's in hand in the canoe while a job says (the fisher's pirates — townPirates.js):
+    // 'sword' (to deflect their bombs) or 'oar' (back to paddling)
+    setCanoeWeapon: (kind) => {
+      _oarStrokeReset();
+      _putWeaponsAway();
+      _equipByPlayer(kind === 'sword' ? FOAM_SWORD_ITEM_ID : OAR_ITEM_ID);
+      _refreshGearUI();
+      _phoneSwordStatusNow?.();
+    },
+    // The map's pirate ship (the floating prop with a deck — MAPS.islandTown.floating): { holder
+    // (moved to sail it; its bow is local −X), anchor { position, yaw }, deck, model, box } or null
+    getShip: () => (_voyage ? null : _activeMap?.ship ?? null),
+    // A bomb thrower who isn't a townsperson (a Town job's — the pirates on the ship's deck):
+    // stands where it's put (`stationary` — the job carries it with the ship) and lobs bombs at
+    // the player; a bomb the sword knocks back always kills it
+    spawnBomber: ({ x, y, z, url, hearts = 1, bombDamage = 1 }) => {
+      const enemy = _spawnHordeEnemy({
+        position: new THREE.Vector3(x, Number.isFinite(y) ? y : getTerrainHeight(x, z), z),
+        hearts, characterUrl: url, bombThrower: true, bombDamage,
+      });
+      enemy._town = true;
+      enemy._coinDropped = true;
+      enemy.stationary = true;
+      return enemy;
+    },
     // The paddle stroke going on (canoeBoat.js pushes through its pull), or null
     getOarStroke: () => (isOarEquipped() ? _currentOarStroke() : null),
     // (a rod bought: it comes out in the canoe too)

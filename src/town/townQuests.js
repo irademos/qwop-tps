@@ -11,7 +11,8 @@
 //     people who aren't townsfolk (actors — the wizard's son), the bandits of an ambush (foes)
 //   - the BEATS (src/town/beats/ — people: seek, talk; goal: goal, unless, banner; cart: cart,
 //     unload, lockCart, board, alight, drive; scene: actor, bomb, actorLeave; ambush; rewards: pay,
-//     release) — each a small piece any job can use, given this file's world W (a guide leading
+//     release; craft: bring, build; sea: canoeCrew, paddle, fishHere, ship, pirates, pilotHome,
+//     canoeLand) — each a small piece any job can use, given this file's world W (a guide leading
 //     the way to a goal, the player walked along: townGuide.js); plus the runner's own `wait` and,
 //     on any beat, `talks` (talk to someone whenever — openTalk) and `entry`
 //   - the hooks Town calls: tracker line (questEntry), markers (questMarkers), acts, the button to
@@ -20,7 +21,7 @@
 //
 // A townsperson in a job (`n.questing`) does what their mode says (`n.qmode`): seek (walk up to
 // the player), lead (show the way to a goal — townGuide.js), stand, follow, board (climb into the cart) → seated (crouched in its bed, carried
-// along — n.seat, townFolk.js syncBody), knocked (thrown down a moment), fight (an ally: wand
+// along — n.seat, townFolk.js syncBody), toCanoe → canoe (kneeling in the canoe's bow — townCanoe.js), knocked (thrown down a moment), fight (an ally: wand
 // blasts at the job's foes — ctx.castAllySpell), linger (strolling round after the job). Their
 // health in a fight is the job's (ALLY_HP); bandits of an ambush can go for them
 // (`questTarget` on the foe — the horde loop in bootstrapGameApp.js).
@@ -245,6 +246,8 @@ export function installTownQuests(T, ctx) {
     if (name === 'camp') return pl.camp;
     if (name === 'town') return pl.spawn;
     if (name === 'cart') return T.cartPose?.() ?? T.playerPos();
+    // (out on the water — townPirates.js' sea plan)
+    if (name === 'sea1' || name === 'sea2' || name === 'seaPark') return T.seaPlace?.(name) ?? null;
     return pl[name] ?? null;
   };
   // The cart, out on the ground, and how far it is from a spot
@@ -494,6 +497,14 @@ export function installTownQuests(T, ctx) {
         return true;
       }
       case 'fight': return allyFight(n, m, dt);
+      case 'canoe': {
+        // (kneeling in the canoe's bow — carried with it)
+        const sp = T.canoeSeat?.();
+        if (sp) { n.x = sp.pos.x; n.z = sp.pos.z; }
+        n.moving = false;
+        n.path = null;
+        return true;
+      }
       case 'follow': {
         const d = T.distToPlayer(n);
         if (d > 3) go(n, p.x, p.z, dt, d > 8); else stand(n, p.x, p.z, dt);
@@ -569,12 +580,25 @@ export function installTownQuests(T, ctx) {
       clearActors();
       clearFoes();
       if (cartState.locked) { T.lockCart?.(false); cartState.locked = false; }
+      // (out on the water: the canoe's passenger out, no paddling for the player, the pirate ship
+      // home, the golden fish off — townCanoe.js / townPirates.js / townFishing.js)
+      T.questFish = null;
+      T.canoePilot?.(null);
+      T.setCanoeArmed?.(false);
+      T.resetPirates?.();
+      if (T.canoeHasPassenger?.()) { T.canoePassenger(null); if (!T.inCanoe?.()) T.moorCanoe?.(); }
     }
     for (const id of Object.values(q?.cast ?? {})) {
       const n = T.npcById(id);
       if (!n?.questing) continue;
       unseat(n);
       if (n.qmode?.kind === 'knocked') n.body?.character.revive();
+      // (out of the canoe: back on the bank by the fishing spot)
+      if (n.qmode?.kind === 'canoe' || n.qmode?.kind === 'toCanoe') {
+        n.seat = null;
+        const fs = P().fishSpot;
+        if (n.qmode.kind === 'canoe' && fs) { n.x = fs.x; n.z = fs.z; n.path = null; }
+      }
       // (the wizard: home once the player's away — no walk joins his mountain to town)
       if (n.def.hermit) { control(n, { kind: 'linger', until: T.simT, ax: n.x, az: n.z }); sendHome(n); }
       else release(n);
@@ -609,9 +633,10 @@ export function installTownQuests(T, ctx) {
   const branchOf = (id) => branches.find((b) => b.id === id) ?? branches.find((b) => b.quests.some((x) => x.id === id)) ?? null;
   const live = (br) => br.started && br.runner.running() && !br.runner.waiting();
   // (waiting for its giver to come up — the quest's first seek beat, or before it)
+  // (a seek beat marked `queue` — coming back for another go after a fail / 'Later' — counts too)
   const pending = (br) => {
     const k = firstSeek(br.runner.quest());
-    return k >= 0 && br.runner.bi() <= k;
+    return (k >= 0 && br.runner.bi() <= k) || (br.runner.beat()?.do === 'seek' && !!br.runner.beat().queue);
   };
   const engaged = (br) => live(br) && !pending(br);
   // A branch's saved state (running or not yet) → is quest id done?
@@ -709,7 +734,7 @@ export function installTownQuests(T, ctx) {
       if (!br.started) continue;
       const q = br.runner.q();
       if (q?.failOnDown && ctx.isPlayerDead()) {
-        br.runner.fail(fill('You went down — {wizard} limps back home. {wizard.He}\'ll ask again.', q));
+        br.runner.fail(fill(br.runner.quest().downText ?? 'You went down — {wizard} limps back home. {wizard.He}\'ll ask again.', q));
         continue;
       }
       br.runner.update(dt);
@@ -828,7 +853,7 @@ export function installTownQuests(T, ctx) {
     cartLoad: () => cartState.load,
     cartInUse: () => started && branches.some((br) => engaged(br) && !!br.runner.q()?.cast && Object.keys(br.runner.q().cast).length > 0),
     // (the sword / wand's camera auto-aim — townMode.js threats)
-    questThreats: () => liveFoes().map((f) => f.e.group.position),
+    questThreats: () => [...liveFoes().map((f) => f.e.group.position), ...(T.pirateThreats?.() ?? [])],
     // (the talk camera: an actor saying the line now)
     questTalkFocus: () => (talker.isOpen() ? actors.get(talker.speaker()) ?? null : null),
     // (text to speech for someone in a job who isn't a townsperson)

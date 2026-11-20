@@ -875,7 +875,9 @@ export class PlayerControls {
     const inCanoe = !!appState?.isInCanoe?.();
     // (Story: the rod once found, the sword once given — nothing from Showdown)
     const story = !!appState?.isStoryMode?.();
-    const weapons = inCanoe ? (hasRod ? [{ id: 'canoe_oar', label: 'Oar' }, { id: 'fishing_rod', label: 'Rod' }] : [])
+    // (a job's fight from the canoe — the fisher's pirates: the sword, and nothing to switch to)
+    const canoeArmed = inCanoe && !!appState?.isCanoeArmed?.();
+    const weapons = canoeArmed ? [] : inCanoe ? (hasRod ? [{ id: 'canoe_oar', label: 'Oar' }, { id: 'fishing_rod', label: 'Rod' }] : [])
       : story ? [
         ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
         ...(hasRod ? [{ id: 'fishing_rod', label: 'Rod' }] : []),

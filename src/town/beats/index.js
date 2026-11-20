@@ -7,7 +7,8 @@ import { sceneBeats } from './scene.js';
 import { ambushBeats } from './ambush.js';
 import { rewardsBeats } from './rewards.js';
 import { craftBeats } from './craft.js';
+import { seaBeats } from './sea.js';
 
 export const townBeats = (W) => ({
-  ...peopleBeats(W), ...goalBeats(W), ...cartBeats(W), ...sceneBeats(W), ...ambushBeats(W), ...rewardsBeats(W), ...craftBeats(W),
+  ...peopleBeats(W), ...goalBeats(W), ...cartBeats(W), ...sceneBeats(W), ...ambushBeats(W), ...rewardsBeats(W), ...craftBeats(W), ...seaBeats(W),
 });

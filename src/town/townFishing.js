@@ -34,6 +34,12 @@
 // state, fishing anywhere on the water from its canoe like Town's (T.fishAnywhere / T.fishWater).
 // (T.fishSpotReach / T.fishCancelReach / T.fishAwayText can still override the spot's reach, the
 // drift allowed and the out-of-reach line for a stand-in with a spot of its own.)
+//
+// A job can steer it (T.questFish — the fisher's golden fish, beats/sea.js): { quick } — the bite
+// comes sooner, no nibbling; { golden } — the next fish hooked is the golden one: it leaps
+// gleaming at the end of the line (the rig's `golden`), won't tire, snap the line or run off, and
+// can't be landed — T.questNote('fishHooked', { golden }) when it takes the hook, and the job
+// takes it away (T.loseFish(text) — a pirate's bomb rocks the canoe).
 
 import * as THREE from 'three';
 import { createFishingRig } from '../items/fishingRod.js';
@@ -215,7 +221,17 @@ export function installTownFishing(T, ctx) {
   const say = (text) => T.feedLine(text);
   const finish = (caught = false) => {
     T.fishing = null;
+    rig?.golden(false);
     rig?.reel(caught);
+  };
+  // A job takes the fish on the line away (the golden fish, shaken off by a blast): reeled in empty
+  const loseFish = (text) => {
+    if (!T.fishing) return false;
+    const had = !!T.fishing.fish;
+    finish(false);
+    if (text) say(text);
+    refreshHud();
+    return had;
   };
 
   let awayHintAt = -99;
@@ -238,7 +254,8 @@ export function installTownFishing(T, ctx) {
     const d = Math.max(0.5, Math.hypot(at.x - p.x, at.z - p.z));
     T.fishing = {
       phase: 'cast', dry, x: p.x, z: p.z, dir: { x: (at.x - p.x) / d, z: (at.z - p.z) / d }, d, t: 0,
-      left: rand(...FISH_WAIT_S), nibble: 0, nibbled: Math.random() < FISH_NIBBLE_CHANCE,
+      left: T.questFish?.quick || T.questFish?.golden ? rand(2.5, 4.5) : rand(...FISH_WAIT_S), nibble: 0,
+      nibbled: !(T.questFish?.quick || T.questFish?.golden) && Math.random() < FISH_NIBBLE_CHANCE,
       settleAt: T.simT + FISH_SETTLE_S, fish: null,
     };
     fishingRig().cast(rod, at);
@@ -256,10 +273,13 @@ export function installTownFishing(T, ctx) {
       say('Scared it off.');
     } else if (f.phase === 'bite') {
       const size = pickSize();
+      const golden = !!T.questFish?.golden;
       f.phase = 'fight';
       f.t = 0;
-      f.fish = { size, stamina: size.pulls, mode: 'run', left: rand(...FISH_RUN_S), tension: 0, side: Math.random() < 0.5 ? -1 : 1 };
+      f.fish = { size, stamina: golden ? Infinity : size.pulls, mode: 'run', left: rand(...FISH_RUN_S), tension: 0, side: Math.random() < 0.5 ? -1 : 1, golden };
       rig?.hook();
+      if (golden) rig?.golden(true);
+      T.questNote('fishHooked', { golden });
     } else if (f.phase === 'fight') {
       const fish = f.fish;
       if (fish.mode === 'tired') {
@@ -279,7 +299,7 @@ export function installTownFishing(T, ctx) {
   };
 
   // Put away at once (leaving Town, arrests): no reeling in
-  const stopFishingRig = () => { rig?.stop(); };
+  const stopFishingRig = () => { rig?.golden(false); rig?.stop(); };
 
   const _fishAt = { x: 0, z: 0 };
   const updateFishing = (dt) => {
@@ -309,7 +329,7 @@ export function installTownFishing(T, ctx) {
       const p = T.playerPos();
       const reach = anywhere() ? FISH_CANOE_DRIFT * FISH_CANOE_DRIFT : (T.fishCancelReach ?? FISH_CANCEL_DIST * FISH_CANCEL_DIST);
       if (dist2(p.x, p.z, f.x, f.z) > reach || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
-        if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.stop(); }
+        if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.golden(false); rig?.stop(); }
         else { if (f.fish) say('It got away.'); finish(); }
         refreshHud();
         return;
@@ -367,6 +387,8 @@ export function installTownFishing(T, ctx) {
         load = Math.min(1, load + fish.tension * 0.3);
         // (until it's worn out it won't come right in)
         if (fish.mode !== 'beaten') f.d = Math.max(FISH_LAND_DIST + 0.4, f.d);
+        // (the golden fish: on the line till the job takes it away — no snapping, no running off)
+        if (fish.golden) { fish.tension = Math.min(fish.tension, 0.8); f.d = Math.min(f.d, FISH_LINE_MAX * 0.6); }
         if (fish.tension >= 1) {
           miss();
           finish();
@@ -454,5 +476,5 @@ export function installTownFishing(T, ctx) {
     keyReel = false;
   };
 
-  Object.assign(T, { fishingActs, fishingHud, hideFishingHud, stopFishingRig, updateFishing });
+  Object.assign(T, { fishingActs, fishingHud, hideFishingHud, loseFish, stopFishingRig, updateFishing });
 }

@@ -22,6 +22,11 @@ const REEL_COLOR = 0x3a3d42;
 const BOBBER_TOP = 0xd83a2e;
 const BOBBER_BOTTOM = 0xf4f1ea;
 const FISH_COLOR = 0x8fb3c9;
+const GOLD_COLOR = 0xf2b632;   // the golden fish (a Town job's — townFishing.js T.questFish)
+const GOLD_SCALE = 2.4;
+const GOLD_LEAP_EVERY = 2.1;   // s between its leaps out of the water while it's on the line
+const GOLD_LEAP_S = 0.75;      // s in the air
+const GOLD_LEAP_H = 0.9;       // m at the top
 const LINE_COLOR = 0xe8e8e8;
 
 // Held as the sword weapon, the rod leans forward of the sword's pose (rad about its grip's X):
@@ -116,9 +121,9 @@ function createBobber() {
   return g;
 }
 
-function createFish() {
+function createFish(color = FISH_COLOR, extra = {}) {
   const g = new THREE.Group();
-  const mat = std(FISH_COLOR, { metalness: 0.35, roughness: 0.4 });
+  const mat = std(color, { metalness: 0.35, roughness: 0.4, ...extra });
   // Hangs head up from the hook: body along Y, tail at the bottom
   const body = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), mat);
   body.scale.set(0.4, 1, 0.75);
@@ -163,7 +168,13 @@ export function createFishingRig(scene) {
   line.frustumCulled = false;
   bobber.add(fish);
   fish.visible = false;
-  for (const o of [bobber, splash, line]) { o.visible = false; scene.add(o); }
+  // The golden fish (golden(true)): leaping out of the water by the bobber while it's on the line
+  const goldFish = createFish(GOLD_COLOR, { metalness: 0.7, roughness: 0.25, emissive: 0x6b4500, emissiveIntensity: 0.6 });
+  goldFish.scale.setScalar(GOLD_SCALE);
+  goldFish.visible = false;
+  let gold = false;
+  let goldT = 0;
+  for (const o of [bobber, splash, line, goldFish]) { o.visible = false; scene.add(o); }
 
   let rod = null;
   let parts = null;
@@ -183,7 +194,8 @@ export function createFishingRig(scene) {
   };
   const hide = () => {
     unbend();
-    bobber.visible = line.visible = splash.visible = fish.visible = false;
+    bobber.visible = line.visible = splash.visible = fish.visible = goldFish.visible = false;
+    gold = false;
     rod = null;
     parts = null;
     phase = 'idle';
@@ -247,6 +259,12 @@ export function createFishingRig(scene) {
       t = 0;
     },
     stop: hide,
+    // The fish on the line is the golden one (on) — or not any more (it got away)
+    golden(on) {
+      gold = !!on;
+      goldT = GOLD_LEAP_EVERY * 0.6;
+      if (!gold) goldFish.visible = false;
+    },
     update(dt, { bite = 0, load = 0, fish: fishAt = null, crank = 0 } = {}) {
       if (splash.visible) {
         splashT += dt;
@@ -306,6 +324,22 @@ export function createFishingRig(scene) {
         bobber.position.y = target.y - 0.03 - load * 0.05 + Math.sin(t * 30) * 0.01 * load;
         if (Math.random() < dt * (0.5 + load * 5)) doSplash(bobber.position, load > 0.7);
         sag = 0;
+        // The golden fish leaps clear now and then, arcing over the bobber, splashing back in
+        if (gold) {
+          goldT += dt;
+          const k = (goldT % GOLD_LEAP_EVERY) / GOLD_LEAP_S;
+          if (k < 1) {
+            const dir = Math.floor(goldT / GOLD_LEAP_EVERY) % 2 ? 1 : -1;
+            goldFish.visible = true;
+            goldFish.position.set(bobber.position.x + dir * (k - 0.5) * 1.2, target.y + GOLD_LEAP_H * 4 * k * (1 - k) - 0.1, bobber.position.z);
+            // (head first along its arc — the model hangs head up: tipped over the way it's going)
+            goldFish.rotation.set(0, 0, -dir * (Math.PI / 2 - (1 - 2 * k) * 1.1));
+            if (!goldFish.userData.out) { goldFish.userData.out = true; doSplash(goldFish.position, true); }
+          } else {
+            if (goldFish.userData.out) { goldFish.userData.out = false; doSplash(goldFish.position, true); }
+            goldFish.visible = false;
+          }
+        }
       } else if (phase === 'reel') {
         // Line comes in fast: the bobber skims back and swings up to hang below the tip
         const k = Math.min(1, t / REEL_S);
@@ -333,8 +367,8 @@ export function createFishingRig(scene) {
     },
     dispose() {
       hide();
-      for (const o of [bobber, splash, line]) scene.remove(o);
-      for (const root of [bobber, splash, line]) {
+      for (const o of [bobber, splash, line, goldFish]) scene.remove(o);
+      for (const root of [bobber, splash, line, goldFish]) {
         root.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
       }
     },

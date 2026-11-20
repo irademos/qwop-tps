@@ -80,6 +80,8 @@
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
 //   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n),
 //   refreshButtons() (something grabbed / dropped: the Block bar is / stops being its mode — the hose's 💧 Water)
+//   getShip() → the map's pirate ship { holder, anchor, deck, model, box } | null, spawnBomber({ x, y, z, url,
+//   hearts, bombDamage }) → BombThrowerEnemy, setCanoeWeapon('sword' | 'oar') — the fisher's pirates (townPirates.js)
 //   net (townNet.js, or null): start(), stop(), isOn(), ready(), isHost(), id(), hostId(),
 //   peerIds(), send(to, data), broadcast(data), loadRoomState(), saveRoomState(state),
 //   roomId(), canSave(), playerCount(), sendBounty(to, coins)
@@ -117,6 +119,7 @@ import { installTownLights } from './townLights.js';
 import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
 import { installTownCanoe } from './townCanoe.js';
+import { installTownPirates } from './townPirates.js';
 import { installTownCart } from './townCart.js';
 import { installTownDrive } from './townDrive.js';
 import { installTownTrees } from './townTrees.js';
@@ -812,6 +815,7 @@ export function createTownMode(ctx) {
     flushCloud();
     T.resetQuests(); // (a job's people, actors, bandits put away — it starts over at its checkpoint)
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
+    T.resetPirates(); // (the pirate ship back at its anchor — the fisher's golden fish)
     T.resetCart();
     T.resetDrive();
     ctx.setIntroHighlight?.(null); // (the first day's ringed buttons)
@@ -925,6 +929,7 @@ export function createTownMode(ctx) {
     T.updateFishing(dt);
     T.updateCanoe(dt);
     T.updateQuests(dt);
+    T.updatePirates(dt);
     T.updateDrive(dt);
     T.updateCooking(dt);
     T.updateFarm(dt);
@@ -1008,6 +1013,7 @@ export function createTownMode(ctx) {
   installTownTrees(T, ctx);
   installTownRuins(T, ctx);
   installTownCanoe(T, ctx);
+  installTownPirates(T, ctx);
   installTownCart(T, ctx);
   installTownDrive(T, ctx);
   installTownBook(T, ctx);
@@ -1162,6 +1168,8 @@ export function createTownMode(ctx) {
     cartAfterControls: () => T.cartAfterControls(),
     // Standing in the canoe (townCanoe.js): the oar is the only thing in hand
     inCanoe: () => !!(T.active && T.ready && T.inCanoe()),
+    // (a job's fight from the canoe — the fisher's pirates: the sword in hand there)
+    canoeArmed: () => !!(T.active && T.ready && T.canoeArmed()),
     // (dev console)
     debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, goods, stalls: T.stalls, ctx, jobs: T.jobs, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
   };
