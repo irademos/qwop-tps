@@ -101,6 +101,9 @@ const HANDS_ID = 'hands';
 // weapon sits on the wheel (the oar takes the sword's place in the canoe)
 const SLIDE_PX = 30;
 const WHEEL_SHOW_MS = 160;
+// (the d-pad round a held button: its chips just off the button's edge, grown by .ps-held)
+const PAD_HELD_SCALE = 1.4;
+const PAD_GAP_PX = 6;
 const WHEEL_DIRS = { foamSword: 'left', canoe_oar: 'left', magic_wand: 'up', fishing_rod: 'right', [HANDS_ID]: 'down' };
 const WHEEL_LABELS = { foamSword: 'Sword', canoe_oar: 'Oar', magic_wand: 'Wand', fishing_rod: 'Rod', [HANDS_ID]: 'Hands' };
 // The bow drawn (bowAiming, set by bootstrapGameApp.js `_bowDraw`): the third-person camera
@@ -768,11 +771,11 @@ export class PlayerControls {
       },
       move: (dx, dy) => {
         if (Math.hypot(dx, dy) >= SLIDE_PX / 2) this._showWeaponWheel();
-        this._markWeaponWheel(wheelPick(dx, dy));
+        this._padMark(wheelPick(dx, dy)?.dir ?? null);
       },
       release: (cancel, dx, dy) => {
         clearTimeout(wheelTimer);
-        this._hideWeaponWheel();
+        this._padHide();
         if (cancel || !this.enabled) return;
         const slid = Math.hypot(dx, dy) >= SLIDE_PX;
         const pick = slid ? wheelPick(dx, dy) : this._wheel?.default;
@@ -782,62 +785,98 @@ export class PlayerControls {
 
     // Bow / Bomb
     let bowBombMode = null; // 'bow' | 'bomb' | 'cancelled' | null (what this hold has out)
+    // (its d-pad: Bomb above while the bow's drawn and there are bombs, Cancel below)
+    let bowPadTimer = 0;
+    const showBowPad = () => {
+      if (bowBombMode === 'cancelled') return;
+      const app = getAppState();
+      const opts = [];
+      if (bowBombMode !== 'bomb' && this._bowShown() && (app?.getBombCount?.() ?? 0) > 0) opts.push({ dir: 'up', label: '💣 Bomb' });
+      if (bowBombMode) opts.push({ dir: 'down', label: 'Cancel', cancel: true });
+      this._padShow(this.psBowBtn, opts);
+    };
     bindGesture(this.psBowBtn, {
       start: () => {
         const app = getAppState();
+        clearTimeout(bowPadTimer);
         if (this._bowShown()) {
           bowBombMode = app?.startBowDraw?.() ? 'bow' : null;
-          return true; // (held either way: sliding up can still aim a bomb)
+        } else {
+          bowBombMode = app?.startBombAim?.() ? 'bomb' : null;
+          if (!bowBombMode) return false;
         }
-        bowBombMode = app?.startBombAim?.() ? 'bomb' : null;
-        return !!bowBombMode;
+        bowPadTimer = setTimeout(showBowPad, WHEEL_SHOW_MS);
+        return true; // (held either way: sliding up can still aim a bomb)
       },
       move: (dx, dy) => {
         const dir = slideDir(dx, dy);
         const app = getAppState();
         if (bowBombMode === 'cancelled') return;
+        if (Math.hypot(dx, dy) >= SLIDE_PX / 2 && this._padOwner !== this.psBowBtn) { clearTimeout(bowPadTimer); showBowPad(); }
+        this._padMark(dir);
         if (dir === 'down') {
           // (slid down: the draw / the aim is called off — nothing shot or thrown, what was in
           // hand comes back; the rest of this hold does nothing)
           if (bowBombMode === 'bow') app?.releaseBowDraw?.(true);
           else if (bowBombMode === 'bomb') app?.releaseBombAim?.(true);
           bowBombMode = 'cancelled';
+          clearTimeout(bowPadTimer);
+          this._padHide();
           this.psBowBtn.classList.remove('ps-held');
           this.updateBowButton();
           return;
         }
         if (bowBombMode === 'bomb' || !this._bowShown() || dir !== 'up') return;
         if ((app?.getBombCount?.() ?? 0) <= 0) return;
-        if (app?.switchBowToBomb?.()) bowBombMode = 'bomb';
+        if (app?.switchBowToBomb?.()) { bowBombMode = 'bomb'; showBowPad(); }
         this.updateBowButton();
       },
       release: (cancel) => {
         const app = getAppState();
         const mode = bowBombMode;
         bowBombMode = null;
+        clearTimeout(bowPadTimer);
+        if (this._padOwner === this.psBowBtn) this._padHide();
         if (mode === 'bow') app?.releaseBowDraw?.(cancel);
         else if (mode === 'bomb') app?.releaseBombAim?.(cancel);
         this.updateBowButton();
       }
     });
 
-    // Shield / Bubble
+    // Shield / Bubble (its d-pad: Bubble above)
     let bubbled = false;
+    let shieldPadTimer = 0;
+    const showShieldPad = () => {
+      if (bubbled) return;
+      this._padShow(this.psShieldBtn, [{ dir: 'up', label: '🫧 Bubble' }]);
+    };
     bindGesture(this.psShieldBtn, {
       start: () => {
         bubbled = false;
-        if (this._shieldShown()) return true;
+        clearTimeout(shieldPadTimer);
+        if (this._shieldShown()) {
+          shieldPadTimer = setTimeout(showShieldPad, WHEEL_SHOW_MS);
+          return true;
+        }
         // (no shield: it's the bubble button — cast at once)
         bubbled = true;
         getAppState()?.activateBubble?.();
         return false;
       },
       move: (dx, dy) => {
-        if (bubbled || slideDir(dx, dy) !== 'up') return;
+        if (bubbled) return;
+        if (Math.hypot(dx, dy) >= SLIDE_PX / 2 && this._padOwner !== this.psShieldBtn) { clearTimeout(shieldPadTimer); showShieldPad(); }
+        const dir = slideDir(dx, dy);
+        this._padMark(dir);
+        if (dir !== 'up') return;
         bubbled = true;
+        clearTimeout(shieldPadTimer);
+        this._padHide();
         getAppState()?.activateBubble?.();
       },
       release: (cancel) => {
+        clearTimeout(shieldPadTimer);
+        if (this._padOwner === this.psShieldBtn) this._padHide();
         if (cancel || bubbled || !this.enabled) return;
         const app = getAppState();
         if (this.getEquippedItemId() === 'shield') {
@@ -1016,7 +1055,7 @@ export class PlayerControls {
     wheel.style.display = def ? '' : 'none';
     wheel.classList.toggle('ps-wand-btn', def?.id === 'magic_wand');
     wheel.classList.toggle('ps-wheel-more', others.length > 1);
-    if (!def) this._hideWeaponWheel();
+    if (!def && this._padOwner === this.psWeaponBtn1) this._padHide();
     // Shield / Bubble: the shield part only once a shield is owned (not in Story / the canoe)
     const shieldShown = this._shieldShown();
     this.psShieldPart.style.display = shieldShown ? '' : 'none';
@@ -1065,39 +1104,61 @@ export class PlayerControls {
 
   // The weapon wheel: the weapon button's options round it while it's held (fixed on the
   // page, centred on the button), the one the slide points at marked
+  // The d-pad of a held gesture button: its options as buttons attached round it (up / down /
+  // left / right of it, `options` = [{ dir, label, current?, def? }]), the rest of the action
+  // buttons hidden meanwhile (body.ps-pad-open — visibility only, so nothing re-lays out) so
+  // there's room for them; the one the slide points at is marked (_padMark)
+  _padShow(owner, options) {
+    if (!owner || !options?.length) { this._padHide(); return; }
+    if (!this._padEl) {
+      this._padEl = document.createElement('div');
+      this._padEl.className = 'ps-pad';
+      document.body.appendChild(this._padEl);
+    }
+    const pad = this._padEl;
+    pad.innerHTML = '';
+    for (const o of options) {
+      const chip = document.createElement('div');
+      chip.className = `ps-pad-chip is-${o.dir}`;
+      chip.dataset.dir = o.dir;
+      chip.textContent = o.label;
+      chip.classList.toggle('is-current', !!o.current);
+      chip.classList.toggle('is-default', !!o.def);
+      chip.classList.toggle('is-cancel', !!o.cancel);
+      pad.appendChild(chip);
+    }
+    // (round the button as it is held — grown by .ps-held's scale, which may still be easing in)
+    const r = owner.getBoundingClientRect();
+    const held = Math.max(r.width, owner.offsetWidth * PAD_HELD_SCALE);
+    pad.style.left = `${r.left + r.width / 2}px`;
+    pad.style.top = `${r.top + r.height / 2}px`;
+    pad.style.setProperty('--pad-reach', `${Math.round(held / 2 + PAD_GAP_PX)}px`);
+    this._padOwner?.classList.remove('ps-pad-owner');
+    this._padOwner = owner;
+    owner.classList.add('ps-pad-owner');
+    pad.classList.add('is-on');
+    document.body.classList.add('ps-pad-open');
+  }
+
+  _padMark(dir) {
+    if (!this._padEl) return;
+    for (const chip of this._padEl.children) chip.classList.toggle('is-pick', !!dir && chip.dataset.dir === dir);
+  }
+
+  _padHide() {
+    this._padEl?.classList.remove('is-on');
+    this._padOwner?.classList.remove('ps-pad-owner');
+    this._padOwner = null;
+    document.body.classList.remove('ps-pad-open');
+  }
+
+  // The weapon button's d-pad: every weapon on its side (WHEEL_DIRS), the one in hand dimmed
   _showWeaponWheel() {
     const wheel = this._wheel;
-    if (!wheel || this._wheelPop?.isConnected && this._wheelPop.classList.contains('is-on')) return;
-    if (!this._wheelPop) {
-      this._wheelPop = document.createElement('div');
-      this._wheelPop.className = 'ps-wheel-pop';
-      document.body.appendChild(this._wheelPop);
-    }
-    const pop = this._wheelPop;
-    pop.innerHTML = '';
-    for (const o of wheel.options) {
-      const chip = document.createElement('div');
-      chip.className = `ps-wheel-chip is-${o.dir}`;
-      chip.dataset.id = o.id;
-      chip.textContent = o.label;
-      chip.classList.toggle('is-current', o.id === wheel.equipped);
-      chip.classList.toggle('is-default', o.id === wheel.default.id);
-      pop.appendChild(chip);
-    }
-    // (a compass in the lower middle of the screen, clear of the buttons and the finger — the
-    // slide's direction is what counts, not where the chips are)
-    pop.style.left = `${window.innerWidth / 2}px`;
-    pop.style.top = `${Math.round(window.innerHeight * 0.45)}px`;
-    pop.classList.add('is-on');
-  }
-
-  _markWeaponWheel(pick) {
-    if (!this._wheelPop) return;
-    for (const chip of this._wheelPop.children) chip.classList.toggle('is-pick', !!pick && chip.dataset.id === pick.id);
-  }
-
-  _hideWeaponWheel() {
-    this._wheelPop?.classList.remove('is-on');
+    if (!wheel || this._padOwner === this.psWeaponBtn1) return;
+    this._padShow(this.psWeaponBtn1, wheel.options.map((o) => ({
+      dir: o.dir, label: o.label, current: o.id === wheel.equipped, def: o.id === wheel.default.id
+    })));
   }
 
   // Bow / Bomb: the bow part with the arrows left on it (kept fresh each frame by the game —

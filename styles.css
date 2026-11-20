@@ -3043,7 +3043,7 @@ body.bubble-cast .ps-shield-part {
 /* ── The gesture buttons (controls.js initializeActionButtons) ─────────────────────
    Bow / Bomb and Shield / Bubble: two parts stacked — the slide-up one small on top (↑),
    the tap / hold one below. The weapon button: a tap takes what it says, held a wheel of
-   the weapons shows round it (.ps-wheel-pop) and sliding picks one */
+   the weapons shows round it as a d-pad (.ps-pad) and sliding picks one */
 .ps-combo-btn {
   flex-direction: column;
   gap: 1px;
@@ -3109,7 +3109,7 @@ body.bubble-cast .ps-shield-part {
     radial-gradient(circle, currentColor 1.5px, transparent 2px) center right / 6px 6px no-repeat;
   opacity: 0.55;
 }
-.ps-wheel-pop {
+.ps-pad {
   position: fixed;
   left: 0;
   top: 0;
@@ -3118,43 +3118,52 @@ body.bubble-cast .ps-shield-part {
   z-index: 1200;
   pointer-events: none;
   display: none;
+  --pad-reach: 48px;
+  --pad-chip: 58px;
 }
-.ps-wheel-pop.is-on { display: block; }
-.ps-wheel-pop::before {
-  content: '';
+.ps-pad.is-on { display: block; }
+/* Each option a button attached to the held one's side, like a d-pad's arms */
+.ps-pad-chip {
   position: absolute;
-  left: -7px;
-  top: -7px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--surface-hud);
-  border: 1px solid var(--border-strong);
-}
-.ps-wheel-chip {
-  position: absolute;
+  width: var(--pad-chip);
+  height: var(--pad-chip);
   transform: translate(-50%, -50%);
-  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4px;
+  box-sizing: border-box;
   border-radius: var(--radius-md);
   background: var(--surface-hud);
   border: 1px solid var(--border-strong);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  white-space: nowrap;
+  line-height: 1.1;
   box-shadow: var(--shadow-sm);
+  transition: transform 0.08s var(--ease), background-color 0.1s;
 }
-.ps-wheel-chip.is-up    { left: 0;     top: -72px; }
-.ps-wheel-chip.is-down  { left: 0;     top: 72px; }
-.ps-wheel-chip.is-left  { left: -80px; top: 0; }
-.ps-wheel-chip.is-right { left: 80px;  top: 0; }
-.ps-wheel-chip.is-current { opacity: 0.5; }
-.ps-wheel-chip.is-default { border-color: var(--accent, #f5c451); }
-.ps-wheel-chip.is-pick {
+.ps-pad-chip.is-up    { left: 0; top: calc(-1 * (var(--pad-reach) + var(--pad-chip) / 2)); }
+.ps-pad-chip.is-down  { left: 0; top: calc(var(--pad-reach) + var(--pad-chip) / 2); }
+.ps-pad-chip.is-left  { top: 0; left: calc(-1 * (var(--pad-reach) + var(--pad-chip) / 2)); }
+.ps-pad-chip.is-right { top: 0; left: calc(var(--pad-reach) + var(--pad-chip) / 2); }
+.ps-pad-chip.is-current { opacity: 0.5; }
+.ps-pad-chip.is-default { border-color: var(--accent, #f5c451); }
+.ps-pad-chip.is-cancel { color: #fca5a5; border-color: rgba(248, 113, 113, 0.6); }
+.ps-pad-chip.is-pick {
   background: var(--accent, #f5c451);
   color: #1b1405;
-  transform: translate(-50%, -50%) scale(1.15);
+  transform: translate(-50%, -50%) scale(1.12);
+}
+.ps-pad-chip.is-cancel.is-pick { background: #ef4444; color: #fff; }
+/* While a gesture button is held: the other buttons step out of the way (visibility only —
+   the layout doesn't move under the finger) */
+body.ps-pad-open .action-button:not(.ps-pad-owner),
+body.ps-pad-open #jump-button,
+body.ps-pad-open #gyro-button {
+  visibility: hidden;
 }
 /* The crosshair (the middle of the screen = where the arrow goes): a dot and four ticks that
    close in as the string comes back (--spread), the distance in metres beside it */
