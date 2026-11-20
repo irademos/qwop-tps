@@ -15,10 +15,15 @@
 //                one), a little behind it — the crew on the near rail
 //   'leave'    — off out to sea; put back at its anchor once it's well away from the player
 // and puts it back at its anchor afterwards (T.resetPirates — also on leaving Town / a job
-// dropped). The crew (T.spawnCrew(n)): bomb throwers who aren't townsfolk (ctx.spawnBomber —
-// BombThrowerEnemy, stationary), stood along the rail and carried with the ship each frame;
-// `throwsHeld` till the job lets them loose (T.crewLoose()) — then one at a time, a bomb every
-// CREW_THROW_GAP_S, aimed where the canoe's going; a bomb the sword knocks back always kills its thrower. Only the player's own: in a
+// dropped). The crew (T.spawnCrew({ bombers, archers })): bomb throwers (ctx.spawnBomber —
+// BombThrowerEnemy) and archers (ctx.spawnArcher — a bow-only fighter on ranged turns this module
+// hands out), none of them townsfolk, stood along the rail and carried with the ship each frame;
+// held till the job lets them loose (T.crewLoose()) — then one at a time, every CREW_THROW_GAP_S.
+// A bomb homes in on the player through its flight (`homing` — it arrives at sword height just
+// in front of them, wherever the canoe's got to) and a sword swing knocks it back from further off
+// than usual (`deflectRadius`, `deflectSwing` — a blade just held there doesn't): back home it
+// always kills its thrower, and nobody else (its blast hits no one but the player). An arrow is parried back
+// at its archer by a sword swing (the game's parry — bootstrapGameApp.js `_swordParry`). Only the player's own: in a
 // shared town the others don't see the ship sail.
 
 import * as THREE from 'three';
@@ -42,8 +47,11 @@ const CREW_HEARTS = 1;
 const CREW_BOMB_DAMAGE = 1;     // health segments a bomb takes off the player
 const CREW_THROW_GAP_S = [3, 4]; // s between bombs once loose — one pirate at a time
 const CREW_FIRST_THROW_S = 1.2;  // s before the first
-const CREW_SCATTER = 1.2;       // m — where a bomb's aimed, off the canoe
-const BOMB_SPEED = 6;           // m/s (BombThrowerEnemy's lob)
+const CREW_BOMB_REACH = 0.55;   // m in front of the player (toward the thrower) a bomb comes to…
+const CREW_BOMB_HEIGHT = 1.05;  // …this high over their feet: where the sword is
+const CREW_DEFLECT_R = 0.95;    // m from the sword's tip a bomb is knocked back (0.5 usually)
+const ARCHER_TURN_MAX_S = 5;    // s an archer's turn lasts at most
+const ARROW_SPEED = 9;          // m/s (an enemy's arrow — PEMBERTON_BULLET_SPEED)
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -222,8 +230,13 @@ export function installTownPirates(T, ctx) {
   const crew = [];   // { e, lx, lz }
   const liveCrew = () => crew.filter((m) => !m.e.isDead);
   const crewWorld = (m) => ship()?.holder.localToWorld(_v.set(m.lx, 0, m.lz)) ?? null;
-  // Along the rail on the side the canoe will be (sail.to for an approach, else where it is now)
-  const spawnCrew = (n) => {
+  // Along the rail on the side the canoe will be (sail.to for an approach, else where it is now):
+  // the archers among the bomb throwers
+  const spawnCrew = ({ bombers = 3, archers = 0 } = {}) => {
+    const n = bombers + archers;
+    // (the archers spread out along the rail among the bomb throwers)
+    const kinds = Array(n).fill('bomber');
+    for (let j = 0; j < archers; j++) kinds[Math.min(n - 1, Math.round(((j + 0.5) * n) / archers - 0.5))] = 'archer';
     clearCrew();
     const s = ship();
     const p = seaPlan();
@@ -235,55 +248,97 @@ export function installTownPirates(T, ctx) {
     const side = Math.sign((c.x - at.x) * Math.sin(yaw) + (c.z - at.z) * Math.cos(yaw)) || 1;
     const { minX, maxX, halfWidth } = s.deck;
     for (let i = 0; i < n; i++) {
-      const m = { lx: minX + 0.6 + ((maxX - minX - 1.2) * (i + 0.5)) / n, lz: side * (halfWidth - 0.35), e: null };
+      const m = { lx: minX + 0.6 + ((maxX - minX - 1.2) * (i + 0.5)) / n, lz: side * (halfWidth - 0.22), e: null };
       const w = crewWorld(m);
       const key = CREW_URLS[i % CREW_URLS.length];
-      m.e = ctx.spawnBomber?.({ x: w.x, y: ctx.getGroundY(w.x, w.z), z: w.z, url: glbCharacterConfig[key] ?? glbCharacterConfig.frogManUrl, hearts: CREW_HEARTS, bombDamage: CREW_BOMB_DAMAGE }) ?? null;
+      m.kind = kinds[i];
+      const y = ctx.getGroundY(w.x, w.z);
+      if (m.kind === 'archer') {
+        m.e = ctx.spawnArcher?.({ x: w.x, y, z: w.z, url: glbCharacterConfig.treeCreatureUrl, hearts: CREW_HEARTS, aimAt: () => arrowTarget(m.e) }) ?? null;
+      } else {
+        m.e = ctx.spawnBomber?.({ x: w.x, y, z: w.z, url: glbCharacterConfig[key] ?? glbCharacterConfig.frogManUrl, hearts: CREW_HEARTS, bombDamage: CREW_BOMB_DAMAGE }) ?? null;
+        if (m.e) {
+          m.e.throwsHeld = true;
+          m.e.aimAt = () => bombTarget(m.e);
+          m.e.homing = () => bombTarget(m.e);
+          m.e.deflectRadius = CREW_DEFLECT_R;
+          m.e.ignoreMapMs = 700; // (over the rail)
+          m.e.deflectSwing = true;
+          // (its blast hurts only itself — each pirate is the player's own to knock out)
+          m.e._getBlastTargets = () => [];
+        }
+      }
       if (!m.e) continue;
-      m.e.throwsHeld = true;
       m.e._questFoe = true;
-      m.e.aimAt = () => aimAtCanoe(m.e);
       crew.push(m);
     }
     return crew.length;
   };
-  // Where a bomb's aimed: where the player will be by the time it comes down (the canoe moving)
-  const _aim = new THREE.Vector3();
-  const aimAtCanoe = (e) => {
+  // Where an arrow's aimed: where the player will be when it gets there (the canoe moving)
+  const _arrowAt = new THREE.Vector3();
+  const arrowTarget = (e) => {
     const p = T.playerPos();
     const c = T.canoePose?.();
+    const from = e?.group?.position ?? p;
+    const t = Math.hypot(p.x - from.x, p.z - from.z) / ARROW_SPEED;
+    return _arrowAt.set(p.x + (c?.vx ?? 0) * t, p.y ?? 0, p.z + (c?.vz ?? 0) * t);
+  };
+  // Where a bomb's going (it homes in on it all the way — BombThrowerEnemy `homing`): just in
+  // front of the player toward its thrower, at sword height
+  const bombTarget = (e) => {
+    const p = T.playerPos();
     const from = e.group.position;
-    const t = Math.hypot(p.x - from.x, p.z - from.z) / BOMB_SPEED;
-    const a = Math.random() * Math.PI * 2;
-    const r = Math.random() * CREW_SCATTER;
-    _aim.set(p.x + (c?.vx ?? 0) * t + Math.sin(a) * r, 0, p.z + (c?.vz ?? 0) * t + Math.cos(a) * r);
-    _aim.y = ctx.getGroundY(_aim.x, _aim.z);
-    if (!Number.isFinite(_aim.y)) _aim.y = p.y ?? 0;
-    return _aim;
+    const dx = from.x - p.x;
+    const dz = from.z - p.z;
+    const d = Math.hypot(dx, dz) || 1;
+    return new THREE.Vector3(p.x + (dx / d) * CREW_BOMB_REACH, (p.y ?? 0) + CREW_BOMB_HEIGHT, p.z + (dz / d) * CREW_BOMB_REACH);
   };
   // Let loose: throwing, one pirate at a time (`turn` — its cooldown let go, the rest held), the
   // next a few seconds after it throws
   let loose = null;   // { turn, nextAt (T.simT), lastThrow }
+  const turnLog = []; // (dev: who had a turn when)
+  // (an archer: its ranged turn — it draws, looses one arrow and hands it back — EnemyPlayer)
   const crewLoose = (on = true) => {
-    for (const m of crew) m.e.throwsHeld = true;
-    loose = on ? { turn: null, nextAt: T.simT + CREW_FIRST_THROW_S, lastThrow: 0 } : null;
+    for (const m of crew) {
+      if (m.kind === 'archer') m.e.releaseRangedTurn?.();
+      else m.e.throwsHeld = true;
+    }
+    loose = on ? { turn: null, nextAt: T.simT + CREW_FIRST_THROW_S, lastThrow: 0, since: 0 } : null;
+  };
+  const turnOver = (m) => {
+    if (m.e.isDead) return true;
+    if (m.kind === 'archer') return !m.e.rangedTurn || T.simT - loose.since > ARCHER_TURN_MAX_S;
+    return m.e._lastThrowTime !== loose.lastThrow;
   };
   const updateLoose = () => {
     if (!loose) return;
     const t = loose.turn;
-    // (its turn's over once it's thrown — or gone)
-    if (t && (t.e.isDead || t.e._lastThrowTime !== loose.lastThrow)) {
-      t.e.throwsHeld = true;
+    // (its turn's over once it's thrown / shot — or gone)
+    if (t && turnOver(t)) {
+      if (t.kind === 'archer') t.e.releaseRangedTurn?.();
+      else t.e.throwsHeld = true;
       loose.turn = null;
       loose.nextAt = T.simT + CREW_THROW_GAP_S[0] + Math.random() * (CREW_THROW_GAP_S[1] - CREW_THROW_GAP_S[0]);
     }
     if (loose.turn || T.simT < loose.nextAt) return;
-    const live = liveCrew();
-    if (!live.length) return;
+    // (an archer only once it's ready to shoot — its bow's within range of the player)
+    const ready = liveCrew().filter((m) => m.kind !== 'archer' || m.e.wantsRangedTurn);
+    if (!ready.length) return;
+    // (bombs and arrows by turns, where both are on hand)
+    const other = ready.filter((m) => m.kind !== loose.lastKind);
+    const live = other.length ? other : ready;
     const m = live[Math.floor(Math.random() * live.length)];
-    m.e._lastThrowTime = -Infinity;
-    loose.lastThrow = m.e._lastThrowTime;
-    m.e.throwsHeld = false;
+    loose.lastKind = m.kind;
+    loose.since = T.simT;
+    turnLog.push(`${T.simT.toFixed(1)} ${m.kind}`);
+    if (turnLog.length > 40) turnLog.shift();
+    if (m.kind === 'archer') {
+      m.e.rangedTurn = performance.now();
+    } else {
+      m.e._lastThrowTime = -Infinity;
+      loose.lastThrow = m.e._lastThrowTime;
+      m.e.throwsHeld = false;
+    }
     loose.turn = m;
   };
   // Carried with the ship: each frame, back on its deck where they stand
@@ -327,6 +382,6 @@ export function installTownPirates(T, ctx) {
     seaPlan, seaPlace, shipSail, shipArrived: () => !!sail?.arrived, shipPose, shipMode: () => sail?.mode ?? null,
     spawnCrew, crewLoose, liveCrew, crewCount: () => crew.length, pirateThreats, updatePirates, resetPirates,
     // (dev console: town.debug().T.pirateDebug())
-    pirateDebug: () => ({ plan: seaPlan(), sail, moved, crew: crew.map((m) => ({ lx: m.lx, lz: m.lz, dead: m.e.isDead })) }),
+    pirateDebug: () => ({ plan: seaPlan(), sail, moved, turns: turnLog.slice(-20), crew: crew.map((m) => ({ kind: m.kind, lx: m.lx, lz: m.lz, dead: m.e.isDead, want: !!m.e.wantsRangedTurn, turn: loose?.turn === m })) }),
   });
 }

@@ -4661,9 +4661,12 @@ async function initCore(runtimeContext) {
       else if (opts.stageBoss) _psSpawnStageBoss(enemy, opts.stageBoss);
       else if (opts.archer) {
         // An archer (always a tree creature): the bow only — the boss fighter logic with a gun
+        // (aimAt: where to shoot instead of at the player's feet — a Town job's pirates leading the canoe)
+        const aimAt = opts.archer.aimAt;
         const fighter = createBossFighter({
           ..._bossFighterCtx(enemy), name: '', hud: false, glow: false, bowOnly: true,
           gear: { gun: true, bombs: !!opts.archer.bombs },
+          ...(aimAt ? { getTarget: () => (_attacksHeld() ? null : { position: aimAt() }) } : {}),
         });
         enemy.onAfterUpdate = () => fighter.update();
       } else if (opts.wand && opts.wandBubble) {
@@ -5963,7 +5966,7 @@ async function initCore(runtimeContext) {
     const on = _psRangedTurnsWanted();
     const now = performance.now();
     for (const e of hordeEnemies) {
-      if (e instanceof BombThrowerEnemy) continue;
+      if (e instanceof BombThrowerEnemy || e._ownTurns) continue; // (_ownTurns: a Town job hands its turns out — townPirates.js)
       e.rangedTurns = on;
       e.lineOfFire = on ? hordeEnemies : null;
     }
@@ -11446,7 +11449,7 @@ async function initCore(runtimeContext) {
     setCanoeWeapon: (kind) => {
       _oarStrokeReset();
       _putWeaponsAway();
-      _equipByPlayer(kind === 'sword' ? FOAM_SWORD_ITEM_ID : OAR_ITEM_ID);
+      _equipByPlayer(kind === 'sword' ? FOAM_SWORD_ITEM_ID : kind === 'rod' ? FISHING_ROD_ITEM_ID : OAR_ITEM_ID);
       _refreshGearUI();
       _phoneSwordStatusNow?.();
     },
@@ -11464,6 +11467,22 @@ async function initCore(runtimeContext) {
       enemy._town = true;
       enemy._coinDropped = true;
       enemy.stationary = true;
+      return enemy;
+    },
+    // An archer who isn't a townsperson (a Town job's — the pirates): the bow only (the boss
+    // fighter logic, `bowOnly`), standing where it's put, shooting only on the ranged turns the
+    // job hands it (`_ownTurns` — rangedTurn); an arrow a sword swing parries goes back at it
+    // (aimAt: () → Vector3 — where its arrows go, the player's feet by default)
+    spawnArcher: ({ x, y, z, url, hearts = 1, aimAt = null }) => {
+      const enemy = _spawnHordeEnemy({
+        position: new THREE.Vector3(x, Number.isFinite(y) ? y : getTerrainHeight(x, z), z),
+        hearts, characterUrl: url, archer: { aimAt }, swordDamage: 1,
+      });
+      enemy._town = true;
+      enemy._coinDropped = true;
+      enemy.stationary = true;
+      enemy._ownTurns = true;
+      enemy.rangedTurns = true;
       return enemy;
     },
     // The paddle stroke going on (canoeBoat.js pushes through its pull), or null
@@ -13164,7 +13183,9 @@ async function initCore(runtimeContext) {
           for (let _bi = _bombs.length - 1; _bi >= 0; _bi--) {
             const _bomb = _bombs[_bi];
             if (!_bomb || _bomb.deflected) continue;
-            if (_tipWorld.distanceTo(_bomb.mesh.position) < 0.5) {
+            // (one that wants a swing: a gyro sword held still in its way doesn't do it)
+            if (_bomb.deflectSwing && window.phoneSwordGyro?.connected && !_swordParryDir()) continue;
+            if (_tipWorld.distanceTo(_bomb.mesh.position) < (_bomb.deflectRadius ?? 0.5)) {
               // Deflect: send bomb back toward the thrower
               const _thrower = _bomb.thrower;
               let _deflectDir;

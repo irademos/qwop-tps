@@ -239,6 +239,29 @@ export function installTownQuests(T, ctx) {
     foes.list = [];
   };
 
+  // ── Said out loud: a cast member's lines one after another, each also in the feed (no talk box —
+  // the `say` beat, out on the water) ──
+  const sayQueue = [];   // { id, text, at (T.simT) }
+  // (clear: what was still to be said goes — something's happening now)
+  const sayNow = (n, text, clear = false) => {
+    if (clear) sayQueue.length = 0;
+    if (n?.alive && n.body) T.say(n, text, { big: true });
+    T.feedLine(`${n ? firstName(n.name) : '?'}: ${text}`);
+  };
+  const sayLines = (n, lines) => {
+    let at = Math.max(T.simT, sayQueue.length ? sayQueue[sayQueue.length - 1].at : 0);
+    for (const text of lines) {
+      sayQueue.push({ id: n?.id ?? null, text, at });
+      at += 1.4 + text.split(/\s+/).length * 0.32; // (time to say it)
+    }
+  };
+  const updateSay = () => {
+    while (sayQueue.length && T.simT >= sayQueue[0].at) {
+      const l = sayQueue.shift();
+      sayNow(l.id != null ? T.npcById(l.id) : null, l.text);
+    }
+  };
+
   // ── Places ──
   const placeOf = (name) => {
     const pl = P();
@@ -579,6 +602,7 @@ export function installTownQuests(T, ctx) {
       T.driveTo(null);
       clearActors();
       clearFoes();
+      sayQueue.length = 0;
       if (cartState.locked) { T.lockCart?.(false); cartState.locked = false; }
       // (out on the water: the canoe's passenger out, no paddling for the player, the pirate ship
       // home, the golden fish off — townCanoe.js / townPirates.js / townFishing.js)
@@ -608,7 +632,7 @@ export function installTownQuests(T, ctx) {
   // ── Town's quest world for the beats (src/town/beats/) ──
   const W = {
     T, ctx, P, THREE, roleNpc, roleGone, canTake, control, release, go, stand, fill, calm, isNight, npcMark, placeOf, cartAt,
-    actors, spawnActor, actorSay, foes, liveFoes, clearFoes, seat, unseat, hitAlly, sendHome, open, talker, tipTalk,
+    actors, spawnActor, actorSay, sayNow, sayLines, foes, liveFoes, clearFoes, seat, unseat, hitAlly, sendHome, open, talker, tipTalk,
     guideBuys, goalHighlight, cartState, newLead, glbCharacterConfig, BANDIT_NAMES, firstName, pickOf, dist2,
     mayApproach, make: (what, on) => makers[what]?.(on), SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
     BOMB_THROW_AT_S, BOMB_AFTER_S, FOE_HEARTS, FOE_SPAWN_DIST, FOE_GEAR, FOE_COINS,
@@ -728,6 +752,7 @@ export function installTownQuests(T, ctx) {
   const update = (dt) => {
     updateActors(dt);
     updateHomeBound();
+    updateSay();
     if (!started) return;
     updateBranches();
     for (const br of branches) {

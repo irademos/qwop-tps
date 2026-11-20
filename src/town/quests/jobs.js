@@ -45,13 +45,16 @@
 //           (roles) fight beside them; done once they're all down, failed if an ally or the player goes down
 //   pay     { from, coins, memory } — the reward
 //   canoeCrew { who }         — they climb into the canoe's bow, and the player gets in too
-//   paddle  { to, r, text }   — glowing arrows on the water to a place; done once the canoe's within r
+//   paddle  { to, r, stop?, text } — glowing arrows on the water to a place (the oar out); done once the
+//           canoe's within r — stop: it's stopped there and the rod comes out
 //   fishHere { golden?, text } — a fish caught there (quick bites); golden: the golden fish hooked
 //           (it won't come in — the next beat takes it away)
 //   ship    { mode }          — the pirate ship: 'park' (out on the horizon, waiting)
-//   pirates { who, count }    — in comes the ship, a bomb shakes the golden fish off, then the chase:
-//           `who` paddles, the crew of `count` throw bombs, the player knocks them back; done once
-//           they're all down (townPirates.js)
+//   pirates { who, bombers, archers } — in comes the ship, a bomb shakes the golden fish off, then
+//           the chase: `who` paddles, the crew (bomb throwers and archers, one at a time) attack, the
+//           player knocks their bombs / arrows back; done once they're all down (townPirates.js)
+//   say     { who, lines }    — `who` says these out loud (and in the feed), one after another — no
+//           talk box, no buttons; the job goes straight on
 //   pilotHome { who, text }   — `who` paddles the canoe home to its mooring
 //   canoeLand { who }         — the player and `who` ashore, the canoe moored
 //   wait    { until? } — the runner's own: nothing happens till a talk / action moves on
@@ -283,37 +286,16 @@ const FISHER_JOBS = [
       { do: 'canoeCrew', label: 'crew', checkpoint: true, who: 'fisher' },
       // (the pirate ship: off its anchor, out on the horizon past the fishing grounds, waiting — townPirates.js)
       { do: 'ship', mode: 'park' },
-      {
-        do: 'talk', who: 'fisher', reach: 6,
-        lines: [['fisher', 'In we get! Follow the arrows out — the herring run just past the docks. She might be swimming with them.']],
-        choices: [{ label: 'Paddle out' }],
-      },
-      { do: 'paddle', to: 'sea1', r: 5, text: 'Paddle out to the first fishing spot' },
-      {
-        do: 'talk', who: 'fisher', reach: 6,
-        lines: [['fisher', 'Here\'ll do. Rod out, cast over the side, and let\'s see what bites.']],
-        choices: [{ label: 'Cast out' }],
-      },
-      { do: 'fishHere', text: 'Catch a fish', talks: { fisher: { lines: [['fisher', 'Take your rod out and cast over the side — a swing forward. Pull when the bobber goes under, reel when it tires.']] } } },
-      {
-        do: 'talk', who: 'fisher', reach: 6,
-        lines: [
-          ['fisher', 'A herring! A fine one — but not her.'],
-          ['fisher', 'She keeps further out, where the water\'s deep. Paddle on — follow the arrows.'],
-        ],
-        choices: [{ label: 'Paddle on' }],
-      },
-      { do: 'paddle', to: 'sea2', r: 5, text: 'Paddle further out' },
-      {
-        do: 'talk', who: 'fisher', reach: 6,
-        lines: [
-          ['fisher', 'This is it. Grandad\'s spot.'],
-          ['fisher', 'That ship out there\'s been sat on the horizon all morning. Never mind it. Cast out — gently now.'],
-        ],
-        choices: [{ label: 'Cast out' }],
-      },
+      // (out on the water: no talk box, no buttons — he just says it, and the arrows go on)
+      { do: 'say', who: 'fisher', lines: ['In we get! Follow the arrows out — the herring run just past the docks.', 'She might be swimming with them. Keep your eyes peeled.'] },
+      { do: 'paddle', to: 'sea1', r: 5, stop: true, text: 'Paddle out to the first fishing spot' },
+      { do: 'say', who: 'fisher', lines: ['Here\'ll do. Cast over the side and let\'s see what bites.'] },
+      { do: 'fishHere', text: 'Catch a fish', talks: { fisher: { lines: [['fisher', 'Cast over the side — a swing forward. Pull when the bobber goes under, reel when it tires.']] } } },
+      { do: 'say', who: 'fisher', lines: ['A herring! A fine one — but not her.', 'She keeps further out, where the water\'s deep. Oar out — follow the arrows.'] },
+      { do: 'paddle', to: 'sea2', r: 5, stop: true, text: 'Paddle further out' },
+      { do: 'say', who: 'fisher', lines: ['This is it. Grandad\'s spot.', 'That ship\'s been sat on the horizon all morning. Never mind it. Cast out — gently now.'] },
       { do: 'fishHere', golden: true, text: 'Fish for the golden fish' },
-      { do: 'pirates', who: 'fisher', count: 4 },
+      { do: 'pirates', who: 'fisher', bombers: 3, archers: 2 },
       { do: 'pilotHome', who: 'fisher', text: '{fisher} paddles you back to shore' },
       { do: 'canoeLand', who: 'fisher' },
       {

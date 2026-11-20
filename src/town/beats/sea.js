@@ -13,19 +13,15 @@ const CREW_BOARD_S = 25;      // …or after this long walking to it (no walk th
 const SHOUT_EVERY_S = [7, 11]; // s between the passenger's shouts in the chase
 const ROCK_SAY_S = 2.2;       // s after the blast before the chase begins
 const PILOT_LEAD = 0.45;      // rad round the ring ahead of the canoe the passenger steers for
-const PILOT_SPEED = 2.4;      // m/s round it…
+const PILOT_SPEED = 1.6;      // m/s round it (slow: the pirates' bombs / arrows reach the player)…
 const HOME_SPEED = 2.8;       // …and home
 const HOME_STUCK_S = 14;      // s getting no nearer home: put there
 const BOMB_MISS = 3.2;        // m off the canoe the first bomb lands (on the ship's side)
 
 export const seaBeats = (W) => {
-  const { T, ctx, THREE, roleNpc, control, go, fill, placeOf, goalHighlight, firstName, pickOf, dist2, glbCharacterConfig } = W;
+  const { T, ctx, THREE, roleNpc, control, go, fill, placeOf, goalHighlight, firstName, pickOf, dist2, glbCharacterConfig, sayNow, sayLines } = W;
   // Something said out loud and in the feed (out on the water nothing else shows it)
-  const shout = (n, text, q) => {
-    const line = fill(text, q);
-    if (n?.body) T.say(n, line, { big: true });
-    T.feedLine(`${n ? firstName(n.name) : '?'}: ${line}`);
-  };
+  const shout = (n, text, q) => sayNow(n, fill(text, q), true);
   const pirateSay = (text) => {
     const m = T.liveCrew()[0];
     const at = m?.e.group.position;
@@ -99,13 +95,32 @@ export const seaBeats = (W) => {
       },
       icon: '🛶',
     },
-    // Glowing arrows on the water to a place; done once the canoe's within r of it
+    // Said out loud, one line after another (no talk box, no buttons); on at once
+    say: {
+      start: (c) => {
+        sayLines(roleNpc(c.q, c.beat.who), (c.beat.lines ?? []).map((t) => fill(t, c.q)));
+        return true;
+      },
+    },
+    // Glowing arrows on the water to a place (the oar out to paddle); done once the canoe's within
+    // r of it — stop: stopped there, the oar put away and the rod out
     paddle: {
+      start: (c) => { c.s.oarAt = 0; },
       update: (c) => {
         const to = placeOf(c.beat.to);
         if (!to) return true; // (no open water for it: on without)
         T.driveTo({ x: to.x, z: to.z, r: Math.min(3, c.beat.r * 0.5), water: true });
-        return T.inCanoe() && canoeDist(to) < c.beat.r;
+        // (the rod from the last spot put away: the oar back out)
+        if (T.inCanoe() && !T.fishing && ctx.heldWeapon?.() !== 'canoe_oar' && T.simT > c.s.oarAt) {
+          c.s.oarAt = T.simT + 1.5;
+          ctx.setCanoeWeapon?.('oar');
+        }
+        if (!(T.inCanoe() && canoeDist(to) < c.beat.r)) return false;
+        if (c.beat.stop) {
+          T.canoeStop?.();
+          if (ctx.isRodAllowed?.()) ctx.setCanoeWeapon?.('rod');
+        }
+        return true;
       },
       end: () => T.driveTo(null),
       entry: (c) => fill(c.beat.text ?? 'Paddle there', c.q),
@@ -136,7 +151,9 @@ export const seaBeats = (W) => {
         s.dir = Math.random() < 0.5 ? 1 : -1;
         s.phase = 'arrive';
         if (T.shipMode?.() !== 'park') T.shipSail?.('park', { dir: s.dir });
-        const ok = T.shipSail?.('approach', { dir: s.dir }) && T.spawnCrew(b.count ?? 4) > 0;
+        const ok = T.shipSail?.('approach', { dir: s.dir }) && T.spawnCrew({ bombers: b.bombers ?? 3, archers: ctx.hasGyro?.() ? b.archers ?? 0 : 0 }) > 0;
+        // (archers only with a gyro sword: an arrow is sent back by a swing — without one there'd be
+        // no beating them)
         if (!ok) { T.feedLine('The sea\'s quiet today.'); s.phase = 'none'; }
         s.total = T.crewCount();
       },
@@ -190,7 +207,7 @@ export const seaBeats = (W) => {
         }
         if (s.phase === 'rocked') {
           if (s.t < ROCK_SAY_S) return false;
-          shout(n, 'Pirates! Get your sword out, {name} — knock their bombs back at them! I\'ll paddle!', q);
+          shout(n, 'Pirates! Get your sword out, {name} — swing at their bombs and arrows, send them back! I\'ll paddle!', q);
           // (no sword of their own: the fisher's old cutlass)
           if (!ctx.getItems()?.sword && ctx.grantItem('sword')) T.feedLine(`${n ? firstName(n.name) : 'The fisher'} tossed you an old cutlass.`);
           T.setCanoeArmed(true);
@@ -219,7 +236,7 @@ export const seaBeats = (W) => {
         const { s } = c;
         if (s.phase === 'arrive') return 'Reel in the golden fish!';
         if (s.phase === 'throw' || s.phase === 'rocked') return 'Hold on!';
-        if (s.phase === 'chase') return `Knock the pirates' bombs back at them (${s.total - T.liveCrew().length} / ${s.total})`;
+        if (s.phase === 'chase') return `Swing at the pirates' bombs and arrows — send them back (${s.total - T.liveCrew().length} / ${s.total})`;
         return null;
       },
       highlight: (c) => (c.s.phase === 'chase' && ctx.heldWeapon?.() !== 'foamSword' ? { gear: 'foamSword', phone: 'sword' } : null),

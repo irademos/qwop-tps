@@ -333,6 +333,8 @@ export function installTownCanoe(T, ctx) {
   const fishAnywhere = inCanoe;
   const fishWater = (x, z) => (canoe?.aboard ? canoe.floorAt(x, z) === undefined && ctx.waterDepth(x, z) > 0.4 : undefined);
 
+  // Stopped where it is (a job's fishing spot reached)
+  const canoeStop = () => { if (canoe) { canoe.vx = 0; canoe.vz = 0; canoe.w = 0; } };
   // (back at its mooring — the job's over, the player not in it)
   const moorCanoe = () => {
     if (!canoe || canoe.aboard) return;
@@ -343,7 +345,7 @@ export function installTownCanoe(T, ctx) {
 
   Object.assign(T, {
     canoeActs, canoeBuilt: () => built, fishAnywhere, fishWater, inCanoe, resetCanoe, setCanoeBuilt, updateCanoe,
-    canoePassenger, canoeHasPassenger: () => !!passenger, canoePilot, canoeSeat, canoeRock, canoePose, canoeLand, moorCanoe,
+    canoeStop, canoePassenger, canoeHasPassenger: () => !!passenger, canoePilot, canoeSeat, canoeRock, canoePose, canoeLand, moorCanoe,
     setCanoeArmed, canoeArmed: () => armed && !!canoe?.aboard,
   });
 }

@@ -81,7 +81,7 @@
 //   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n),
 //   refreshButtons() (something grabbed / dropped: the Block bar is / stops being its mode — the hose's 💧 Water)
 //   getShip() → the map's pirate ship { holder, anchor, deck, model, box } | null, spawnBomber({ x, y, z, url,
-//   hearts, bombDamage }) → BombThrowerEnemy, setCanoeWeapon('sword' | 'oar') — the fisher's pirates (townPirates.js)
+//   hearts, bombDamage }) → BombThrowerEnemy, setCanoeWeapon('sword' | 'oar' | 'rod'), spawnArcher({ x, y, z, url, hearts }) — the fisher's pirates (townPirates.js)
 //   net (townNet.js, or null): start(), stop(), isOn(), ready(), isHost(), id(), hostId(),
 //   peerIds(), send(to, data), broadcast(data), loadRoomState(), saveRoomState(state),
 //   roomId(), canSave(), playerCount(), sendBounty(to, coins)
