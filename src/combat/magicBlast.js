@@ -121,8 +121,11 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
     sparks.push({ sprite, vel, life: SPARK_LIFE_S, max: SPARK_LIFE_S, size, element });
   };
 
-  const burst = (pos, element, count = 18) => {
+  // (`sparksOnly`: a blast knocked back by a sword swing — sparks fly, but a fire blast doesn't
+  // go off: it flies on back at its caster)
+  const burst = (pos, element, count = 18, sparksOnly = false) => {
     for (let i = 0; i < count; i++) spawnSpark(pos, element, 4, 0.22);
+    if (sparksOnly) return;
     if (element === 'fire') {
       const groundY = getGroundBelow(pos.x, pos.z, pos.y);
       spawnExplosion(scene, pos, { scale: 0.4, groundY: Number.isFinite(groundY) ? Math.min(groundY, pos.y) : pos.y - 0.5 });
@@ -282,7 +285,7 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
       if (parried) {
         const p = from.clone().addScaledVector(dir, THREE.MathUtils.clamp(parried.along, 0, segLen));
         reflectBlast(b, p, parried.back);
-        burst(p, b.element, 14);
+        burst(p, b.element, 14, true);
         continue;
       }
       for (const t of targets) {

@@ -9174,11 +9174,12 @@ async function initCore(runtimeContext) {
       enemy.stationary = stationary;
       return _tutorialMarkEnemy(enemy);
     },
-    spawnBomber: ({ position, hearts = 1, throwsHeld = true, aimAt = null }) => {
+    spawnBomber: ({ position, hearts = 1, throwsHeld = true, aimAt = null, homing = null }) => {
       const enemy = _spawnHordeEnemy({ position, hearts, speedScale: PS_ENEMY_SPEED, bombThrower: true });
       enemy.stationary = true;
       enemy.throwsHeld = throwsHeld;
       enemy.aimAt = aimAt;
+      if (homing) enemy.homing = homing;
       return _tutorialMarkEnemy(enemy);
     },
     // Wand caster (ranged, holds its spells until forceCast)
