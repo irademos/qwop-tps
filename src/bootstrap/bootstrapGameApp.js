@@ -2045,7 +2045,7 @@ async function initCore(runtimeContext) {
   //                   map's own island the same way (its name on the pin, where its land is)
   const MAPS = {
     islandTown: {
-      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree|pirate_ship/i, scale: 1.4,
+      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree(?!.*house)|pirate_ship/i, scale: 1.4,
       spawn: { x: 14, z: -5.6, radius: 3 },   // the flat ground in the middle of the island
       // The pirate ship: anchored off the north-east shore, in water deep enough for its hull
       // (world ≈ (69, −108) — in sight of stage 7's road)
@@ -2422,7 +2422,7 @@ async function initCore(runtimeContext) {
   // Each tree model is measured once (its first copy) and the trunk carried over to the other
   // copies in the model's own frame: ~160 trees, 14 models on the island — tens of ms at map
   // load, a grid lookup a frame.
-  const TREE_TRUNK_RE = /tree/i;
+  const TREE_TRUNK_RE = /tree(?!.*house)/i; // (not tree_trunk_house.glb — a house)
   function _measureMapTrunks(root) {
     const out = [];
     const byFile = new Map(); // modelFile → { local: trunk middle in the model's frame, r: its radius there, h: height there }

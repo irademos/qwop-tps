@@ -18,7 +18,8 @@ export function installTownFolk(T, ctx) {
     const { homes } = T.layout.places;
     // (bandits live at the camp, the wizard in his tent by his stall: home index -1)
     const homeIndex = livesOut(def) ? -1
-      : Number.isInteger(home) && home >= 0 && home < homes.length ? home : Math.floor(Math.random() * homes.length);
+      : Number.isInteger(home) && home >= 0 && home < homes.length && !homes[home].extra ? home
+        : Math.floor(Math.random() * homes.filter((h) => !h.extra).length);
     const homeSpot = def.outlaw ? T.layout.places.camp : def.hermit ? T.layout.places.wizard.hut : homes[homeIndex];
     return {
       id, name, role, url, def,
