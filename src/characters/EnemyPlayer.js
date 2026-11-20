@@ -47,6 +47,8 @@ const CHASE_RANGE   = 1.05;  // stop moving closer when this close (during attac
 // until CHASE_RANGE apart again
 const TOO_CLOSE_DIST  = 0.85;
 const SPACING_SPEED   = 2.0;   // m/s while stepping back to swing distance
+const GAIT_START_SPEED = 0.5; // m/s of ground speed that starts the walk clip
+const GAIT_STOP_SPEED  = 0.25; // … and below which it goes back to idle
 const BACKOFF_SPEED = 1.6;   // m/s retreat speed when yielding attack slot
 const BACKOFF_DIST  = 3.8;   // target distance while backing off
 
@@ -952,7 +954,13 @@ export class EnemyPlayer {
     }
 
     // ── GLB character body animation (walk / idle; arms are posed below) ──
-    this._glbCharacter?.setMoving(this._aiState === 'chase' || this._aiState === 'backoff' || this._makingSpace || !!clearing);
+    // (from how fast it's actually going, not the AI state: in 'attack' it still closes in
+    // at chase speed, and in 'chase' it can be standing within CHASE_RANGE — hysteresis
+    // so it doesn't flicker between walk / idle around the threshold)
+    const lv = this.rigidBody.linvel();
+    const hSpeed = Math.hypot(lv.x, lv.z);
+    this._gaitMoving = this._gaitMoving ? hSpeed > GAIT_STOP_SPEED : hSpeed > GAIT_START_SPEED;
+    this._glbCharacter?.setMoving(this._gaitMoving);
     this._glbCharacter?.animate(dt);
 
     // ── Right hand (drives sword position) ────────────────────────────────
