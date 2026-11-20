@@ -650,7 +650,8 @@ export class PlayerControls {
     //   canoe) — a tap takes the default (the sword, or empty hands while the sword's in hand),
     //   held a wheel of the rest comes up round it (WHEEL_DIRS) and sliding that way picks one
     // · Bow / Bomb (psBowBtn): held draws the bow, let go looses; slid up mid-draw, the draw is
-    //   dropped and a bomb aimed instead (let go throws it). No bow: it's the bomb button
+    //   dropped and a bomb aimed instead (let go throws it); slid down, either is called off.
+    //   No bow: it's the bomb button
     // · Shield / Bubble (psShieldBtn): a tap takes the shield out (or puts it back), slid up
     //   casts a bubble. No shield: a tap casts the bubble
     const part = (button, cls) => {
@@ -780,7 +781,7 @@ export class PlayerControls {
     });
 
     // Bow / Bomb
-    let bowBombMode = null; // 'bow' | 'bomb' | null (what this hold has out)
+    let bowBombMode = null; // 'bow' | 'bomb' | 'cancelled' | null (what this hold has out)
     bindGesture(this.psBowBtn, {
       start: () => {
         const app = getAppState();
@@ -792,8 +793,20 @@ export class PlayerControls {
         return !!bowBombMode;
       },
       move: (dx, dy) => {
-        if (bowBombMode === 'bomb' || !this._bowShown() || slideDir(dx, dy) !== 'up') return;
+        const dir = slideDir(dx, dy);
         const app = getAppState();
+        if (bowBombMode === 'cancelled') return;
+        if (dir === 'down') {
+          // (slid down: the draw / the aim is called off — nothing shot or thrown, what was in
+          // hand comes back; the rest of this hold does nothing)
+          if (bowBombMode === 'bow') app?.releaseBowDraw?.(true);
+          else if (bowBombMode === 'bomb') app?.releaseBombAim?.(true);
+          bowBombMode = 'cancelled';
+          this.psBowBtn.classList.remove('ps-held');
+          this.updateBowButton();
+          return;
+        }
+        if (bowBombMode === 'bomb' || !this._bowShown() || dir !== 'up') return;
         if ((app?.getBombCount?.() ?? 0) <= 0) return;
         if (app?.switchBowToBomb?.()) bowBombMode = 'bomb';
         this.updateBowButton();
@@ -1156,19 +1169,18 @@ export class PlayerControls {
       const shown = (b) => !!b && b.style.display !== 'none' && getComputedStyle(b).display !== 'none';
       const gyro = document.getElementById('gyro-button');
       const rows = [shown(gyro) ? 2 : 1, 0];   // next free row: [jump column, other column]
-      for (const b of [this.psShieldBtn, this.psBowBtn, this.psBroomBtn, this.psBoostBtn]) {
+      // (the weapon button in the inner column, off the screen's edge, so its wheel can be
+      // slid right as well as left; Bow / Bomb on top of the jump column)
+      for (const b of [this.psShieldBtn, this.psWeaponBtn1, this.psBroomBtn, this.psBoostBtn]) {
         if (shown(b)) place(b, { x: 1, y: rows[1]++ });
       }
-      if (shown(this.psWeaponBtn1)) {
-        const col = rows[1] <= rows[0] ? 1 : 0;
-        place(this.psWeaponBtn1, { x: col, y: rows[col]++ });
-      }
+      if (shown(this.psBowBtn)) place(this.psBowBtn, { x: 0, y: rows[0]++ });
       return;
     }
     if (this.punchButton.style.display !== 'none') this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
-    this.applyMobileButtonPosition(this.psWeaponBtn1, { x: 2, y: 0 });
+    this.applyMobileButtonPosition(this.psBowBtn, { x: 2, y: 0 });
     this.applyMobileButtonPosition(this.psShieldBtn, { x: 1, y: 1 });
-    this.applyMobileButtonPosition(this.psBowBtn, { x: 1, y: 2 });
+    this.applyMobileButtonPosition(this.psWeaponBtn1, { x: 1, y: 2 });
     // (Town's broom: the weapon column)
     this.applyMobileButtonPosition(this.psBroomBtn, { x: 2, y: 1 });
     this.applyMobileButtonPosition(this.psBoostBtn, { x: 2, y: 2 });
