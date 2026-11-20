@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { loadHomeInterior, loadShopInterior } from '../village/villageMode.js';
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
 import { ROOMS_ORIGIN, ROOM_COLUMNS, ROOM_SPACING } from './townConfig.js';
+import { PORTAL_LAYER, createCubeCapture, createInteriorMaterial, createOutsideMaterial, renderCubeFaces, useCapture } from './townPortals.js';
 
 // ── Room types (room-local metres: the middle of the floor at the origin, the doorway at +Z) ──
 const MODEL_FLOOR_Y = -2.977;        // both models' floor (their units = metres)
@@ -99,6 +100,21 @@ const WINDOW_NIGHT = 0x141c33;
 // it (seen at a slant, nothing of the real world past its edges)
 const BACKDROP_PAD = 0.6;            // m past the opening's edges (hidden behind the wall)
 const WINDOW_BACK = 0.04;            // m behind a window pane
+
+// Seeing through the doors (townPortals.js): outside, each house's door pane shows its room
+// (a small cube capture of the room, taken while the player's near); inside, the doorway and the
+// windows show the street (the outdoors captured at the door when the player walks in)
+const PORTAL_PANE = { w: 0.9, h: 1.8 };   // m — the pane in a house's door unless its model says (HOUSE_DOORS `pane`); its room's doorway is fitted to its height
+const PORTAL_DIST = 35;              // m from the player: a door within this shows its room (the nearest
+                                     // PORTAL_MAX_CUBES of them — a nearer one takes the furthest's capture)
+const PORTAL_MAX_CUBES = 8;          // room captures kept at once
+const PORTAL_CUBE_SIZE = 128;        // px a face — a room
+const PORTAL_REFRESH_S = 30;         // s before a room seen through its door is captured again
+const PORTAL_PROBE_Y = 1.6;          // m over the floor / the ground: where the captures are taken from
+const OUTSIDE_CUBE_SIZE = 256;       // px a face — the street seen from inside
+const OUTSIDE_REFRESH_S = 40;        // s before it's captured again while the player's inside…
+const OUTSIDE_NIGHT_STEP = 0.12;     // …or once the night's this much darker / lighter
+const OUTSIDE_RADIUS = 30;           // m: the street's sphere round the door spot
 
 const _v = new THREE.Vector3();
 
@@ -214,10 +230,10 @@ const originOf = (index) => ({
 
 /**
  * @param {object} ctx
- *  camera, getPlayerPosition() → Vector3
+ *  camera, getPlayerPosition() → Vector3, renderer + scene (the doors' captures — none without them)
  */
 export function createTownRooms(ctx) {
-  const { camera } = ctx;
+  const { camera, renderer, scene } = ctx;
   // index → { key, type, origin, root, light, doorway, windows: [mesh] }
   const rooms = [];
   let night = false;
@@ -228,7 +244,10 @@ export function createTownRooms(ctx) {
   const add = (key, typeName) => {
     const index = roomIndex(key);
     if (index < 0) throw new Error(`[Town] bad room key ${key}`);
-    rooms[index] ??= { key, type: ROOM_TYPES[typeName], typeName, origin: originOf(index), root: null, light: null, doorway: null, windows: [] };
+    rooms[index] ??= {
+      key, type: ROOM_TYPES[typeName], typeName, origin: originOf(index), root: null, light: null, doorway: null, windows: [],
+      loaded: false, outMat: null, portal: null, panes: [], cube: null, capturedAt: -Infinity, capturedNight: null,
+    };
     return rooms[index];
   };
   add('shop', 'shop');
@@ -363,8 +382,11 @@ export function createTownRooms(ctx) {
     root.add(light);
     room.light = light;
     // The doorway: daylight (or the night) outside
-    const doorway = new THREE.Mesh(new THREE.PlaneGeometry(type.door.halfW * 2 + BACKDROP_PAD * 2, type.door.h + BACKDROP_PAD * 2),
-      new THREE.MeshBasicMaterial({ color: night ? DOORWAY_NIGHT : DOORWAY_DAY, fog: false }));
+    // (and once the street's been captured, the street — townPortals.js)
+    room.outMat = createOutsideMaterial(night ? DOORWAY_NIGHT : DOORWAY_DAY);
+    room.windowMat = createOutsideMaterial(night ? WINDOW_NIGHT : WINDOW_DAY);
+    syncPortal(room);
+    const doorway = new THREE.Mesh(new THREE.PlaneGeometry(type.door.halfW * 2 + BACKDROP_PAD * 2, type.door.h + BACKDROP_PAD * 2), room.outMat);
     doorway.position.set(type.door.x, type.door.h / 2, type.halfD + type.door.back);
     doorway.rotation.y = Math.PI;
     root.add(doorway);
@@ -406,8 +428,7 @@ export function createTownRooms(ctx) {
         const s = box.getSize(new THREE.Vector3());
         const onX = s.x < s.z; // (in a side wall)
         const sign = Math.sign(onX ? c.x : c.z) || 1;
-        const sky = new THREE.Mesh(new THREE.PlaneGeometry((onX ? s.z : s.x) + BACKDROP_PAD * 2, s.y + BACKDROP_PAD * 2),
-          new THREE.MeshBasicMaterial({ color: night ? WINDOW_NIGHT : WINDOW_DAY, fog: false }));
+        const sky = new THREE.Mesh(new THREE.PlaneGeometry((onX ? s.z : s.x) + BACKDROP_PAD * 2, s.y + BACKDROP_PAD * 2), room.windowMat);
         sky.position.copy(c);
         if (onX) sky.position.x += sign * WINDOW_BACK;
         else sky.position.z += sign * WINDOW_BACK;
@@ -435,8 +456,181 @@ export function createTownRooms(ctx) {
         ceiling.position.set(0, height + t / 2, 0);
         root.add(ceiling);
       }
+      room.loaded = true;
     }).catch((e) => console.warn(`[Town] ${key} room failed to load:`, e));
     return root;
+  };
+
+  // ── Seeing through the doors (townPortals.js) ──
+  // A room's door outside (townLayout.js): the doorway in the house's wall (x, z — where the pane
+  // stands), its threshold (y), the ground at the door spot (ground), the way out (yaw), the door spot outside (door) and whether a
+  // pane goes in it (pane: a house's door; a door on an open spot has none); `group` = the layout's
+  const setDoor = (key, { x, z, y, ground = y, yaw, door, pane, size = null, group }) => {
+    const room = get(key);
+    if (!room) return;
+    const w = size?.w ?? PORTAL_PANE.w;
+    const h = size?.h ?? PORTAL_PANE.h;
+    room.portal = { x, z, y, ground, yaw, door, w, h };
+    syncPortal(room);
+    if (!pane || !renderer) return;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h).translate(0, h / 2, 0), paneMat);
+    mesh.position.set(x, y, z);
+    mesh.rotation.y = yaw;
+    mesh.renderOrder = 1;
+    group.add(mesh);
+    room.panes.push(mesh);
+    room.interiorMat ??= createInteriorMaterial();
+    room.interiorMat.uniforms.uArch.value = size?.arch ? h / w : 0;
+    syncPortal(room);
+  };
+  // The faint gold pane where a door's room isn't captured (yet / too far)
+  const paneMat = new THREE.MeshBasicMaterial({ color: 0xffd36b, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide });
+  // The two doors' transform (world outside → the room, fitted so the pane's height is the room's
+  // doorway's) and the captures' places, into the materials
+  const _fh = new THREE.Matrix4();
+  const _fr = new THREE.Matrix4();
+  const _q = new THREE.Quaternion();
+  const syncPortal = (room) => {
+    const P = room.portal;
+    if (!P) return;
+    const { type, origin } = room;
+    const s = type.door.h / P.h;
+    _fh.compose(_v.set(P.x, P.y, P.z), _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), P.yaw), new THREE.Vector3(1, 1, 1));
+    _fr.compose(_v.set(origin.x + type.door.x, origin.y, origin.z + type.halfD), _q.identity(), new THREE.Vector3(s, s, s));
+    const toRoom = _fr.clone().multiply(_fh.clone().invert());
+    room.toRoom = toRoom;
+    const toOut = toRoom.clone().invert();
+    const probe = new THREE.Vector3(P.door.x, P.ground + PORTAL_PROBE_Y, P.door.z);
+    for (const m of [room.outMat, room.windowMat]) {
+      if (!m) continue;
+      m.uniforms.uToOut.value.copy(toOut);
+      m.uniforms.uProbe.value.copy(probe);
+      m.uniforms.uGround.value = P.ground;
+      m.uniforms.uRadius.value = OUTSIDE_RADIUS;
+    }
+    const im = room.interiorMat;
+    if (im) {
+      im.uniforms.uToRoom.value.copy(toRoom);
+      im.uniforms.uBoxMin.value.set(origin.x - type.halfW, origin.y, origin.z - type.halfD);
+      im.uniforms.uBoxMax.value.set(origin.x + type.halfW, origin.y + type.height, origin.z + type.halfD);
+      im.uniforms.uProbe.value.set(origin.x, origin.y + PORTAL_PROBE_Y, origin.z);
+    }
+  };
+  const showInterior = (room, on) => {
+    for (const m of room.panes) m.material = on ? room.interiorMat : paneMat;
+  };
+  const dropCube = (room) => {
+    if (!room.cube) return;
+    room.cube.dispose();
+    room.cube = null;
+    if (room.interiorMat) useCapture(room.interiorMat, null);
+    room.capturedAt = -Infinity;
+    showInterior(room, false);
+  };
+  // A room captured into its cube: only it (its meshes and the scene's own lights on PORTAL_LAYER
+  // meanwhile), lit as if the player were in it
+  const captureRoom = (room) => {
+    room.cube ??= createCubeCapture(PORTAL_CUBE_SIZE);
+    const { root, light, origin } = room;
+    const lights = scene.children.filter((o) => o.isLight);
+    const tagged = [];
+    const tag = (o) => { if (!o.layers.isEnabled(PORTAL_LAYER)) { o.layers.enable(PORTAL_LAYER); tagged.push(o); } };
+    root.traverse(tag);
+    for (const l of lights) tag(l);
+    const wasRoot = root.visible;
+    const wasLight = light.visible;
+    root.visible = true;
+    light.visible = true;
+    room.cube.position.set(origin.x, origin.y + PORTAL_PROBE_Y, origin.z);
+    try {
+      renderCubeFaces(renderer, scene, room.cube, 0, 6, { layer: PORTAL_LAYER });
+    } finally {
+      root.visible = wasRoot;
+      light.visible = wasLight;
+      for (const o of tagged) o.layers.disable(PORTAL_LAYER);
+    }
+    useCapture(room.interiorMat, room.cube);
+    room.capturedAt = performance.now() / 1000;
+    room.capturedNight = night;
+    showInterior(room, true);
+  };
+
+  // The street seen from inside: for the room the player's in, a face a frame, into the cube
+  // that isn't being looked at (two, swapped once one's done — never drawn into while sampled)
+  let outside = null;   // { room, face, at, level, ready }
+  const outsideCubes = [];
+  let outsideShown = 0;
+  const startOutside = (key) => {
+    if (outside?.room) {
+      outside.room.outMat.uniforms.uReady.value = 0;
+      outside.room.windowMat.uniforms.uReady.value = 0;
+      useCapture(outside.room.outMat, null);
+      useCapture(outside.room.windowMat, null);
+    }
+    outside = null;
+    const room = key ? get(key) : null;
+    if (!room?.portal || !room.outMat || !renderer) return;
+    if (!outsideCubes.length) outsideCubes.push(createCubeCapture(OUTSIDE_CUBE_SIZE), createCubeCapture(OUTSIDE_CUBE_SIZE));
+    outside = { room, face: 0, at: 0, level: null, ready: false };
+  };
+
+  // Each frame (townMode.js): the captures that are due — outside, at most one room a frame
+  // (the nearest due); inside, the street a face at a time
+  let nightLevel = 0;
+  const updatePortals = (level = 0) => {
+    if (!renderer || !unregisterHeight) return;
+    nightLevel = level;
+    const now = performance.now() / 1000;
+    if (insideKey) {
+      const o = outside;
+      if (!o) return;
+      const stale = o.ready && (now - o.at > OUTSIDE_REFRESH_S || Math.abs(nightLevel - o.level) > OUTSIDE_NIGHT_STEP);
+      if (stale) o.face = 0;
+      if (o.face >= 6) return;
+      if (o.face === 0) { o.at = now; o.level = nightLevel; }
+      const P = o.room.portal;
+      const back = outsideCubes[1 - outsideShown];
+      back.position.set(P.door.x, P.ground + PORTAL_PROBE_Y, P.door.z);
+      renderCubeFaces(renderer, scene, back, o.face, o.face + 1);
+      o.face += 1;
+      if (o.face === 6) {
+        outsideShown = 1 - outsideShown;
+        o.ready = true;
+        for (const m of [o.room.outMat, o.room.windowMat]) {
+          useCapture(m, back);
+          m.uniforms.uReady.value = 1;
+        }
+      }
+      return;
+    }
+    const p = ctx.getPlayerPosition();
+    let due = null;
+    let dueD = Infinity;
+    let held = 0;
+    for (const r of rooms) {
+      if (!r?.panes.length) continue;
+      const d = Math.hypot(r.portal.x - p.x, r.portal.z - p.z);
+      r.portalDist = d;
+      if (r.cube) held += 1;
+      if (d > PORTAL_DIST || !r.loaded) continue;
+      if (r.cube && now - r.capturedAt < PORTAL_REFRESH_S && r.capturedNight === night) continue;
+      if (d < dueD) { due = r; dueD = d; }
+    }
+    if (!due) return;
+    if (!due.cube && held >= PORTAL_MAX_CUBES) {
+      // (let go of the furthest one, if it's further than this one — none: wait)
+      let far = null;
+      for (const r of rooms) if (r?.cube && (!far || r.portalDist > far.portalDist)) far = r;
+      if (!far || far.portalDist <= dueD) return;
+      dropCube(far);
+    }
+    captureRoom(due);
+  };
+  const releasePortals = () => {
+    startOutside(null);
+    for (const r of rooms) if (r) dropCube(r);
+    for (const c of outsideCubes) c.dispose();
+    outsideCubes.length = 0;
   };
 
   // The follow camera inside a room: kept within its walls and under the ceiling (squeezed
@@ -460,6 +654,7 @@ export function createTownRooms(ctx) {
 
   // The player's in that room (or none): it's drawn and lit, the others aren't
   const setInside = (key) => {
+    if (key !== insideKey) startOutside(key);
     insideKey = key;
     for (const r of rooms) {
       if (!r?.root) continue;
@@ -471,8 +666,8 @@ export function createTownRooms(ctx) {
     night = !!on;
     for (const r of rooms) {
       if (!r) continue;
-      r.doorway?.material.color.setHex(night ? DOORWAY_NIGHT : DOORWAY_DAY);
-      for (const w of r.windows) w.material.color.setHex(night ? WINDOW_NIGHT : WINDOW_DAY);
+      r.outMat?.uniforms.uFallback.value.setHex(night ? DOORWAY_NIGHT : DOORWAY_DAY);
+      r.windowMat?.uniforms.uFallback.value.setHex(night ? WINDOW_NIGHT : WINDOW_DAY);
     }
   };
   const setActive = (on) => {
@@ -481,6 +676,7 @@ export function createTownRooms(ctx) {
       unregisterHeight?.();
       unregisterHeight = null;
       setInside(null);
+      releasePortals();
     }
   };
 
@@ -490,6 +686,8 @@ export function createTownRooms(ctx) {
     jailSpots, constrainToCell, outsideCell, cellDoor,
     constrainPlayer, leftThroughDoor, clampCamera,
     setInside, setNight, setActive,
+    setDoor, updatePortals,
+    portalDebug: () => ({ outsideCubes, outsideShown, outside, rooms }),
     inside: () => insideKey,
   };
 }

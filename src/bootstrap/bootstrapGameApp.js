@@ -11234,6 +11234,7 @@ async function initCore(runtimeContext) {
   town = createTownMode({
     net: townNet,
     scene,
+    renderer,
     camera,
     domElement: renderer.domElement,
     getPlayerPosition: () => playerModel.position,
