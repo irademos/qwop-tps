@@ -108,6 +108,7 @@ const _pvpProbe = { group: { position: null } };
 const _wallPoint = new THREE.Vector3();
 const _wallNormal = new THREE.Vector3();
 const _trailPoint = new THREE.Vector3();
+const _homeTo = new THREE.Vector3();
 
 function removeProjectileAt(projectiles, index) {
   const projectile = projectiles[index];
@@ -226,6 +227,19 @@ export function updateProjectiles({
       continue;
     }
     const vel = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
+    // (knocked back at a shooter that's moving — `homeParried`, a Town job's pirate on its ship:
+    // it steers in on them all the way, through the map, so it lands)
+    const homeOn = proj.userData.homeOn;
+    if (homeOn) {
+      if (homeOn.isDead || !homeOn.group?.parent) proj.userData.homeOn = null;
+      else {
+        _homeTo.copy(homeOn.group.position).setY(homeOn.group.position.y + 0.9 * (homeOn.group.scale.y || 1)).sub(proj.position);
+        if (_homeTo.lengthSq() > 1e-4) {
+          vel.copy(_homeTo.normalize().multiplyScalar(Math.max(8, vel.length())));
+          rb.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
+        }
+      }
+    }
     // (the trail streams off the arrow's nock — its origin is the tip)
     if (proj.userData.trail && vel.lengthSq() > 1e-4) {
       _trailPoint.copy(vel).normalize().multiplyScalar(-ARROW_LENGTH * 0.85).add(proj.position);
@@ -250,7 +264,7 @@ export function updateProjectiles({
     // Map geometry (buildings, walls, ground) stops the shot. Fighters in front of the wall
     // on this frame's path still get hit: the swept checks below end at the wall.
     const prevPos = proj.userData.prevPos ?? proj.position;
-    const wallHit = raycastMapSegment(proj.userData.prevPos ?? proj.userData.spawnPosition, proj.position);
+    const wallHit = proj.userData.homeOn ? null : raycastMapSegment(proj.userData.prevPos ?? proj.userData.spawnPosition, proj.position);
     if (wallHit) {
       _wallPoint.copy(wallHit.point);
       _wallNormal.copy(wallHit.normal);
@@ -275,6 +289,8 @@ export function updateProjectiles({
           proj.userData.reflected = true; // (only enemies now — never another player)
           proj.userData.spawnPosition = proj.position.clone();
           proj.userData.lifetime = Math.max(proj.userData.lifetime, 2000);
+          const shooter = proj.userData.shooter;
+          if (shooter?.homeParried && !shooter.isDead) proj.userData.homeOn = shooter;
           (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
         };
         // A timed sword swing knocks it back (`parry`, within `parryRadius` of `parryCenter`,
@@ -356,6 +372,8 @@ export function updateProjectiles({
     if (Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && leftShooter) {
       for (const enemy of hordeEnemies) {
         if (enemy.isDead) continue;
+        // (homing back at its shooter: through anyone else on the way)
+        if (proj.userData.homeOn && enemy !== proj.userData.homeOn) continue;
         const enemyBox = getObjectBox(enemy.group);
         if (!enemyBox) continue;
         if ((!wallHit && projBox.intersectsBox(enemyBox)) || sweptHitsEnemy(prevPos, segEnd, enemy)) {

@@ -22,7 +22,9 @@
 // A bomb homes in on the player through its flight (`homing` — it arrives at sword height just
 // in front of them, wherever the canoe's got to) and a sword swing knocks it back from further off
 // than usual (`deflectRadius`, `deflectSwing` — a blade just held there doesn't): back home it
-// always kills its thrower, and nobody else (its blast hits no one but the player). An arrow is parried back
+// always kills its thrower, and nobody else (its blast hits no one but the player). An arrow
+// parried back homes in on its archer the same way (`homeParried` — projectiles.js), so the
+// moving ship can't take it out of the way. An arrow is parried back
 // at its archer by a sword swing (the game's parry — bootstrapGameApp.js `_swordParry`). Only the player's own: in a
 // shared town the others don't see the ship sail.
 
@@ -255,6 +257,8 @@ export function installTownPirates(T, ctx) {
       const y = ctx.getGroundY(w.x, w.z);
       if (m.kind === 'archer') {
         m.e = ctx.spawnArcher?.({ x: w.x, y, z: w.z, url: glbCharacterConfig.treeCreatureUrl, hearts: CREW_HEARTS, aimAt: () => arrowTarget(m.e) }) ?? null;
+        // (an arrow parried back homes in on it — the ship's moving: projectiles.js `homeParried`)
+        if (m.e) m.e.homeParried = true;
       } else {
         m.e = ctx.spawnBomber?.({ x: w.x, y, z: w.z, url: glbCharacterConfig[key] ?? glbCharacterConfig.frogManUrl, hearts: CREW_HEARTS, bombDamage: CREW_BOMB_DAMAGE }) ?? null;
         if (m.e) {
