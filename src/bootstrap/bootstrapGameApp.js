@@ -6035,7 +6035,7 @@ async function initCore(runtimeContext) {
     _psSongAudio.pause();
     _psSongAudio.src = `assets/audio/${song}`;
     _psSongAudio.currentTime = 0;
-    _psSongAudio.volume = audioManager.musicVolume;
+    _psSongAudio.volume = audioManager.musicLevel;
     _psSongAudio.onended = () => { if (_psStageActive) _psPlayNextSong(isNight); };
     audioManager.playMusic();
   };
@@ -11611,7 +11611,7 @@ async function initCore(runtimeContext) {
     J.el.pause();
     J.el.src = `assets/audio/${song}`;
     J.el.currentTime = 0;
-    J.el.volume = audioManager.musicVolume;
+    J.el.volume = audioManager.musicLevel;
     J.el.onended = () => { if (_townJobSong.on) _townJobNextSong(); };
     audioManager.playMusic();
   };
@@ -11619,18 +11619,19 @@ async function initCore(runtimeContext) {
     const J = _townJobSong;
     J.on = false; J.fade = 0;
     // (only while the element still plays ours — a Showdown stage may have taken it over since)
-    if (J.el && J.last && J.el.src.endsWith(J.last)) { J.el.onended = null; audioManager.stopMusic(); J.el.volume = audioManager.musicVolume; }
+    if (J.el && J.last && J.el.src.endsWith(J.last)) { J.el.onended = null; audioManager.stopMusic(); J.el.volume = audioManager.musicLevel; }
   };
   const _updateTownJobSongs = (dt) => {
     const J = _townJobSong;
     const want = !!town?.jobActive?.();
     if (want && !J.on) { J.on = true; J.fade = 0; J.pool = []; _townJobNextSong(); return; }
-    if (want) { if (J.fade > 0 && J.el) { J.fade = 0; J.el.volume = audioManager.musicVolume; } return; }
+    // (the volume re-read every frame, so the Settings' Music / Master Volume apply mid-song)
+    if (want) { J.fade = 0; if (J.el) J.el.volume = audioManager.musicLevel; return; }
     if (!J.on) return;
     // (the job's over — or Town left: fade out, then stop)
     if (!town?.isActive()) { _townJobSongStop(); return; }
     J.fade += dt;
-    if (J.el) J.el.volume = audioManager.musicVolume * Math.max(0, 1 - J.fade / TOWN_JOB_SONG_FADE_S);
+    if (J.el) J.el.volume = audioManager.musicLevel * Math.max(0, 1 - J.fade / TOWN_JOB_SONG_FADE_S);
     if (J.fade >= TOWN_JOB_SONG_FADE_S) _townJobSongStop();
   };
 

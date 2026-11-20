@@ -306,6 +306,7 @@ export class AudioManager {
       this.masterGain.gain.value = this.masterVolume;
     }
     this._applyBGSVolume();
+    this._applyMusicVolume();
   }
 
   setSFXVolume(value) {
@@ -360,11 +361,19 @@ export class AudioManager {
     return Math.max(-1, Math.min(1, ((dx * l.rx + dz * l.rz) / d) * Math.min(1, d / 4))) * 0.7;
   }
 
+  /** The music element's volume: the Music Volume setting × the master volume. */
+  get musicLevel() {
+    return Math.max(0, Math.min(1, this.musicVolume * this.masterVolume));
+  }
+
   setMusicVolume(value) {
     this.musicVolume = Math.max(0, Math.min(1, value));
-    if (this.phoneSwordAudio) {
-      this.phoneSwordAudio.volume = this.musicVolume;
-    }
+    this._applyMusicVolume();
+  }
+
+  // (the songs on the music element — stage songs, Town's job songs — follow the settings at once)
+  _applyMusicVolume() {
+    if (this.musicElement) this.musicElement.volume = this.musicLevel;
   }
 
   async preloadCommonSFX() {
