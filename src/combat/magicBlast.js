@@ -121,8 +121,11 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
     sparks.push({ sprite, vel, life: SPARK_LIFE_S, max: SPARK_LIFE_S, size, element });
   };
 
-  const burst = (pos, element, count = 18) => {
+  // (`sparksOnly`: a blast parried by a sword swing, sent back by a bubble or blocked — sparks
+  // fly, but a fire blast doesn't go off)
+  const burst = (pos, element, count = 18, sparksOnly = false) => {
     for (let i = 0; i < count; i++) spawnSpark(pos, element, 4, 0.22);
+    if (sparksOnly) return;
     if (element === 'fire') {
       const groundY = getGroundBelow(pos.x, pos.z, pos.y);
       spawnExplosion(scene, pos, { scale: 0.4, groundY: Number.isFinite(groundY) ? Math.min(groundY, pos.y) : pos.y - 0.5 });
@@ -282,7 +285,7 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
       if (parried) {
         const p = from.clone().addScaledVector(dir, THREE.MathUtils.clamp(parried.along, 0, segLen));
         reflectBlast(b, p, parried.back);
-        burst(p, b.element, 14);
+        burst(p, b.element, 14, true);
         continue;
       }
       for (const t of targets) {
@@ -304,12 +307,12 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
         const back = hit.reflect?.(b);
         if (back) {
           reflectBlast(b, p, back);
-          burst(p, b.element, 10);
+          burst(p, b.element, 10, true);
           continue;
         }
         if (hit.blocks?.(b)) {
           hit.onBlocked?.(b);
-          burst(p, b.element, 10);
+          burst(p, b.element, 10, true);
         } else {
           hit.onHit(b);
           burst(p, b.element, 22);

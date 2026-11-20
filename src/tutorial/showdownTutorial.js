@@ -6,7 +6,7 @@
  *      until the player lands a swing along the blade (swipe arrow drawn over it)
  *   3. Blocking: the swordsman winds up a swing and only swings once the player holds
  *      Block with the blade across the swing (block bar drawn over it)
- *   4. Deflecting bombs: a bomber throws once the sword tip is at the marker
+ *   4. Deflecting bombs: a bomber throws once the sword tip is at the marker; a swipe knocks it back
  *   5. Coins + auto-buy + throwing a bomb at three distant swordsmen (stationary)
  *   6. Shield (bought, equipped, then hit until it breaks)
  *   7. Bubble (bought, activated, enemy swords bounce off it)
@@ -363,13 +363,15 @@ export function createShowdownTutorial(ctx) {
       aimAt: () => {
         const t = ctx.getSwordTip(tip);
         return (t && t.distanceTo(aim) < 0.8 ? t : aim).clone();
-      }
+      },
+      // …and it comes to the marker however the player moves meanwhile
+      homing: () => aim.clone()
     });
     onCleanup(() => { if (!bomber.isDead) removeEnemy(bomber); });
     const beam = addMarker(makeBeam());
     onCleanup(() => removeMarker(beam));
     panel(8, TOTAL, 'DEFLECT A BOMB',
-      'Bombers lob bombs at you. Touch a bomb with your sword to knock it straight back at the thrower! Hold your sword tip in the glowing marker — the bomber throws when you’re ready.');
+      'Bombers lob bombs at you. Swing your sword through a bomb to knock it straight back at the thrower! Hold your sword tip in the glowing marker — the bomber throws when you’re ready — then swipe as the bomb gets there.');
 
     let readyFor = 0;
     let throwRequested = false;
@@ -398,7 +400,7 @@ export function createShowdownTutorial(ctx) {
 
       const inFlight = bomber._bombs?.length || 0;
       if (inFlight < bombsOut && !bomber.isDead) {
-        overlay.setHint('Missed it — hold your sword tip in the marker and let the bomb touch it.', 'warn');
+        overlay.setHint('Missed it — hold your sword tip in the marker and swipe through the bomb as it arrives.', 'warn');
       }
       bombsOut = inFlight;
 

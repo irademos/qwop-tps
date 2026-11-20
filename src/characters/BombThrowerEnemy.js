@@ -62,6 +62,11 @@ export const BOMB_LIFETIME_MS = 8000;
 
 // Deflected bomb travels back this fast (also used by the foam-sword deflect in bootstrapGameApp)
 export const BOMB_DEFLECT_SPEED = 10;
+// Where a bomb homes in to by default (in front of its target, toward the thrower, at sword
+// height) and how far from the sword's tip a swing knocks it back
+const BOMB_SWORD_REACH = 0.55;
+const BOMB_SWORD_HEIGHT = 1.05;
+const BOMB_DEFLECT_RADIUS = 0.95;
 
 const HEALTH_BAR_DISPLAY_MS = 2000;
 
@@ -214,13 +219,15 @@ export class BombThrowerEnemy {
     this.throwsPaused = false;
     this.aimAt      = options.aimAt ?? null;
     // Optional () → THREE.Vector3: its bombs home in on this through their flight, arriving there
-    // when the lob would have (a Town job's pirates — at the player's sword, wherever the canoe's
-    // got to); deflectRadius: how far from the sword's tip one is knocked back (the game's 0.5)
+    // when the lob would have. None given: at sword height just in front of whoever it's throwing
+    // at, toward the thrower (`_swordHoming` — every mode, as the Town fisher's pirates), so a
+    // swing can meet it; deflectRadius: how far from the sword's tip one is knocked back
     this.homing = options.homing ?? null;
-    this.deflectRadius = options.deflectRadius ?? null;
+    this.deflectRadius = options.deflectRadius ?? BOMB_DEFLECT_RADIUS;
     // Its bombs are knocked back only by a swing of a gyro sword, not by a blade held still in
-    // their way (bootstrapGameApp.js's deflect check)
-    this.deflectSwing = !!options.deflectSwing;
+    // their way (bootstrapGameApp.js's deflect check) — on unless asked otherwise
+    this.deflectSwing = options.deflectSwing ?? true;
+    this._target = null; // (the model it last threw at — `_swordHoming`)
     // ms after the throw its bombs go through the map (thrown from behind a ship's rail)
     this.ignoreMapMs = options.ignoreMapMs ?? 0;
     this._characterUrl = options.characterUrl ?? glbCharacterConfig.url;
@@ -349,6 +356,20 @@ export class BombThrowerEnemy {
 
   // ─── bomb spawning ──────────────────────────────────────────────────────────
 
+  // () → the point in front of `model` at sword height, toward this thrower (or null)
+  _swordHoming(model) {
+    if (!model?.position) return null;
+    const out = new THREE.Vector3();
+    return () => {
+      const p = model.position;
+      const from = this.group?.position ?? p;
+      const dx = from.x - p.x;
+      const dz = from.z - p.z;
+      const d = Math.hypot(dx, dz) || 1;
+      return out.set(p.x + (dx / d) * BOMB_SWORD_REACH, p.y + BOMB_SWORD_HEIGHT, p.z + (dz / d) * BOMB_SWORD_REACH);
+    };
+  }
+
   _spawnBomb(targetPos) {
     // Leaves from the throwing hand (chest height until the character has loaded)
     const origin = new THREE.Vector3();
@@ -373,7 +394,7 @@ export class BombThrowerEnemy {
       deflected: false,
       deflectedAt: 0,
       thrower: this,
-      homing: this.homing,
+      homing: this.homing ?? this._swordHoming(this._target),
       arriveAt: Date.now() + flightMs,
       deflectRadius: this.deflectRadius,
       deflectSwing: this.deflectSwing,
@@ -532,6 +553,7 @@ export class BombThrowerEnemy {
         }
         const aimGroundY = getGroundBelow(aimTarget.x, aimTarget.z, aimTarget.y + 0.5);
         if (Number.isFinite(aimGroundY)) aimTarget.y = aimGroundY;
+        this._target = targetModel;
         this._spawnBomb(this.aimAt?.() ?? aimTarget);
       }
     }
