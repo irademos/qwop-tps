@@ -875,6 +875,8 @@ export function installTownQuests(T, ctx) {
     // (a quiet job, once it's under way — the wizard aboard: the camp leaves the player be)
     questQuiet: () => started && branches.some((br) => engaged(br) && !!br.runner.quest()?.quiet && !!br.runner.q()?.failOnDown),
     questDone: (id) => started && questDone(id),
+    // (a job under way — any branch but the first day, past its giver coming up: Town's job songs)
+    questJobActive: () => started && branches.some((br) => br !== first && engaged(br)),
     cartLoad: () => cartState.load,
     cartInUse: () => started && branches.some((br) => engaged(br) && !!br.runner.q()?.cast && Object.keys(br.runner.q().cast).length > 0),
     // (the sword / wand's camera auto-aim — townMode.js threats)
