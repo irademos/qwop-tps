@@ -12,7 +12,7 @@ import { createVeg } from '../items/vegModels.js';
 
 const VEG_CROP_LENGTH = 0.24; // m, the longest side of a field crop's vegetable
 import {
-  BUILDING_RE, CABIN_RE, CAMP_DIST, DRIVE_BOUNDS, DOOR_ENTER_DIST, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CABIN_RE, CAMP_CHASE_DIST, CAMP_DIST, DRIVE_BOUNDS, DOOR_ENTER_DIST, EXTRA_HOUSES, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, WIZARD_CABIN_STALL, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
@@ -29,7 +29,10 @@ export function installTownLayout(T, ctx) {
       pathAt: ctx.pathAt,
     });
     const objects = ctx.getMapObjects(TOWN_BOUNDS);
-    const buildings = objects.filter((o) => BUILDING_RE.test(o.file));
+    const isExtra = (o) => !!EXTRA_HOUSES[o.file?.split('/').pop()];
+    const buildings = objects.filter((o) => BUILDING_RE.test(o.file) && !isExtra(o));
+    // (the extra houses out of town — the player's to buy, nobody lives there: EXTRA_HOUSES)
+    const extraHouses = ctx.getMapObjects(NAV_BOUNDS).filter(isExtra);
     const trees = objects.filter((o) => TREE_RE.test(o.file) && !STUMP_RE.test(o.file));
     // Trees aren't ground (the height raycast skips them): walk round their trunks (out of
     // town too — the way to the bandit camp)
@@ -184,6 +187,15 @@ export function installTownLayout(T, ctx) {
       homes.push(home);
     }
     if (!homes.length) homes.push({ ...fire, room: null });
+    // The extra houses: after the town's (their indices stay put in old saves), only with a door
+    for (const b of extraHouses) {
+      const door = doorOf(b);
+      if (!door) continue;
+      const home = { x: door.door.x, z: door.door.z, building: b, room: `home${homes.length}`, extra: true, price: EXTRA_HOUSES[b.file.split('/').pop()].price, mapId: b.id };
+      T.rooms.add(home.room, 'home');
+      rooms[home.room] = { key: home.room, kind: 'home', home: homes.length, building: b, ...door };
+      homes.push(home);
+    }
     // The market stalls (townMarket.js): two, one either side of the shop's door, a little out
     // from the house, facing the road in front of it (the way out of the door) — the stall
     // itself off the road / trail (its customers stand at the road's edge), clear of the doors
@@ -281,11 +293,14 @@ export function installTownLayout(T, ctx) {
 
     // The bandit camp: an open spot far out of town, off the roads (or the furthest open one)
     const campMid = (CAMP_DIST[0] + CAMP_DIST[1]) / 2;
+    // (well clear of the extra houses — out of the gang's sight from their doors)
+    const awayFromExtras = (i) => extraHouses.every((b) => dist2(nav.cellX(i), nav.cellZ(i), b.x, b.z) > CAMP_CHASE_DIST + b.radius);
     const campOk = (i) => {
       const d = dC(i);
-      return d >= CAMP_DIST[0] && d <= CAMP_DIST[1] && nav.clearanceAt(i) >= 3 && !nearRoad(i, 8);
+      return d >= CAMP_DIST[0] && d <= CAMP_DIST[1] && nav.clearanceAt(i) >= 3 && !nearRoad(i, 8) && awayFromExtras(i);
     };
     let campCell = best(nav.cellsWhere(campOk), (i) => Math.min(nav.clearanceAt(i), 6) - Math.abs(dC(i) - campMid) * 0.15);
+    if (campCell < 0) campCell = best(nav.cellsWhere((i) => nav.clearanceAt(i) >= 3 && !nearRoad(i, 8) && awayFromExtras(i)), (i) => -Math.abs(dC(i) - campMid));
     if (campCell < 0) campCell = best(nav.cellsWhere((i) => nav.clearanceAt(i) >= 2), (i) => dC(i));
     const camp = campCell >= 0 ? cellPos(campCell) : { ...entrance };
     const campFire = { x: camp.x + 2.2, z: camp.z };
@@ -403,7 +418,7 @@ export function installTownLayout(T, ctx) {
     // Every tree in town can be chopped down (townTrees.js; it grows back)
     const choppable = trees.map((t) => ({ x: t.x, z: t.z, id: t.id, object: t.object }));
     // (the houses, shops included: out of their reach at night the player carries a lantern)
-    const houses = buildings.map((b) => ({ x: b.x, z: b.z, radius: b.radius }));
+    const houses = [...buildings, ...extraHouses].map((b) => ({ x: b.x, z: b.z, radius: b.radius }));
     const props = buildProps(places);
     // (the felled trees' stumps: the pack's own stump model, wherever it was placed)
     const stump = ctx.getMapObjects({ minX: -1e5, maxX: 1e5, minZ: -1e5, maxZ: 1e5 }).find((o) => STUMP_RE.test(o.file));

@@ -13,6 +13,11 @@
 // bought lock-pick (single use, the shop) opens any locked door — the lockpick minigame —
 // and it's a break-in (a theft) if anyone sees.
 //
+// Extra houses (EXTRA_HOUSES — the tree trunk house in the woods): nobody lives there; any player
+// can buy one at its door for its own price, on top of the house kept for them (first come in a
+// shared town — the host decides: 'buyExtra'). Bought, it's theirs like their own house — the same
+// chest (T.store), the bed. The player's own record: T.extraHomes (the houses' map object ids).
+//
 // Belongings: the player's bag holds BAG_MAX goods and the wallet WALLET_MAX coins (the wallet's
 // cap is the game's — bootstrapGameApp.js: coins that don't fit stay on the ground); the rest
 // goes in the chest in their home (📦 Chest — townStoragePanel.js; T.store, saved with the
@@ -48,13 +53,14 @@ export function installTownHomes(T, ctx) {
   T.store = { coins: 0, goods: Object.fromEntries(GOOD_IDS.map((g) => [g, 0])) };
   T.lockpicks = 0;
   T.homeBought = false;       // (the player's own record: a shared town's host is told on joining)
+  T.extraHomes = [];          // (the extra houses the player bought: their map object ids — the same)
   T.invites = {};             // room key → sim time the invitation lapses
   T.knock = null;             // { key, at } — waiting on an answer
   T.knockedAt = {};           // room key → sim time
   T.doorPick = null;          // the door being picked (the lockpick minigame)
   const noteAt = {};          // room key → sim time a locked door last said so
-  let sign = null;            // the sign over the player's house's door
-  let signText = '';
+  const signs = {};           // home index → { sprite, text }: over the player's house's door, the extra houses'
+  let pendingExtra = null;    // (a shared town's client) { i, price } — bought, the host not yet heard from
 
   // (one panel for every store: the chest at home, the cart's bed — townCart.js — `source` the
   // one open: { model(), move(id, n), near() })
@@ -68,11 +74,16 @@ export function installTownHomes(T, ctx) {
   // ── Who lives where ──
   const myKey = () => (T.mp() ? ctx.memberKey() : 'me');
   const P = () => T.layout.places;
+  const isExtra = (i) => !!P().homes[i]?.extra;
+  // (the house kept for the player — not an extra one they bought)
   const myHome = () => {
     const k = myKey();
-    for (const [i, h] of Object.entries(T.houses)) if (h.k === k) return Number(i);
+    for (const [i, h] of Object.entries(T.houses)) if (h.k === k && !isExtra(Number(i))) return Number(i);
     return -1;
   };
+  // Every house that's the player's, bought (their own + extra ones)
+  const myHomes = () => Object.entries(T.houses).filter(([, h]) => h.k === myKey() && h.b).map(([i]) => Number(i));
+  const extraIndexOf = (mapId) => P().homes.findIndex((h) => h.extra && h.mapId === mapId);
   const residents = (i) => T.npcs.filter((n) => n.alive && !n.def.outlaw && n.homeIndex === i);
   const roomOf = (i) => P().homes[i]?.room ?? null;
   const homeOfRoom = (key) => {
@@ -82,6 +93,7 @@ export function installTownHomes(T, ctx) {
   const takenHomes = () => {
     const used = new Set(Object.keys(T.houses).map(Number));
     for (const n of T.npcs) if (n.alive && !n.def.outlaw && n.homeIndex >= 0) used.add(n.homeIndex);
+    P().homes.forEach((h, i) => { if (h.extra) used.add(i); });
     return used;
   };
   // A house nobody lives in (one with a room first — those can be walked into)
@@ -159,6 +171,7 @@ export function installTownHomes(T, ctx) {
   // (old saves had families sharing). Authority only.
   const settleHomes = () => {
     const used = new Set(Object.keys(T.houses).map(Number));
+    P().homes.forEach((h, i) => { if (h.extra) used.add(i); });
     const r = ranks();
     const moved = [];
     for (const n of [...r.keys()].sort((a, b) => r.get(a) - r.get(b))) {
@@ -187,6 +200,8 @@ export function installTownHomes(T, ctx) {
     GOOD_IDS.forEach((g) => { T.store.goods[g] = Math.max(0, Math.floor(own?.store?.goods?.[g] || 0)); });
     T.lockpicks = Math.max(0, Math.min(LOCKPICK_MAX, Math.floor(own?.lockpicks || 0)));
     T.homeBought = !!own?.homeBought;
+    T.extraHomes = Array.isArray(own?.extraHomes) ? own.extraHomes.filter((id) => id != null).slice(0, 8) : [];
+    pendingExtra = null;
     T.invites = {};
     T.knock = null;
     T.knockedAt = {};
@@ -198,7 +213,7 @@ export function installTownHomes(T, ctx) {
   const reserveFirst = () => {
     if (!T.isHost()) return;
     const S = P().spawn;
-    const order = P().homes.map((h, i) => i).filter((i) => roomOf(i) && !T.houses[i])
+    const order = P().homes.map((h, i) => i).filter((i) => roomOf(i) && !T.houses[i] && !isExtra(i))
       .sort((a, b) => dist2(P().homes[a].x, P().homes[a].z, S.x, S.z) - dist2(P().homes[b].x, P().homes[b].z, S.x, S.z));
     if (myHome() < 0 && order.length) T.houses[order[0]] = { k: myKey(), n: ctx.getPlayerName(), b: T.homeBought };
   };
@@ -209,11 +224,12 @@ export function installTownHomes(T, ctx) {
       const moved = [];
       const i = reserveHome(myKey(), ctx.getPlayerName(), moved);
       if (i >= 0 && T.homeBought) T.houses[i].b = true;
+      claimExtras(myKey(), ctx.getPlayerName(), T.extraHomes);
       moved.push(...settleHomes());
       for (const line of moved) T.feedLine(line);
       if (T.mp()) broadcastHouses(moved);
     } else {
-      T.net.send(T.net.hostId(), { w: 1, op: 'home', k: myKey(), n: ctx.getPlayerName(), b: T.homeBought });
+      T.net.send(T.net.hostId(), { w: 1, op: 'home', k: myKey(), n: ctx.getPlayerName(), b: T.homeBought, x: T.extraHomes });
     }
     // (more than fits in the wallet / bag — an old save: it's in the chest at home)
     const extraCoins = ctx.getCoins() - WALLET_MAX;
@@ -240,19 +256,37 @@ export function installTownHomes(T, ctx) {
     if (T.netMode !== 'host') return;
     T.net.broadcast({ w: 1, op: 'houses', h: T.houses, moved });
   };
+  // (authority) the extra houses a player bought (their own record: map object ids) — theirs
+  // again unless someone else has it now
+  const claimExtras = (k, name, ids) => {
+    for (const id of Array.isArray(ids) ? ids.slice(0, 8) : []) {
+      const i = extraIndexOf(id);
+      if (i >= 0 && !T.houses[i]) T.houses[i] = { k, n: name || '', b: true };
+    }
+  };
   // (host) a player asks for their house; bought: they bought it already (their own record)
   const onHomeAsk = (d) => {
     if (typeof d.k !== 'string' || !d.k) return;
     const moved = [];
-    const i = reserveHome(d.k, typeof d.n === 'string' ? d.n.slice(0, 40) : '', moved);
+    const name = typeof d.n === 'string' ? d.n.slice(0, 40) : '';
+    const i = reserveHome(d.k, name, moved);
     if (i >= 0 && d.b) T.houses[i].b = true;
+    claimExtras(d.k, name, d.x);
     for (const line of moved) T.feedLine(line);
     broadcastHouses(moved);
     T.save();
   };
   const onBuyHome = (d) => {
-    for (const h of Object.values(T.houses)) if (h.k === d.k) h.b = true;
+    for (const [i, h] of Object.entries(T.houses)) if (h.k === d.k && !isExtra(Number(i))) h.b = true;
     broadcastHouses();
+  };
+  // (host) a player bought an extra house: theirs if it's still free (else the broadcast says
+  // whose it is and their game gives the coins back)
+  const onBuyExtra = (d) => {
+    const i = Number(d.i);
+    if (isExtra(i) && !T.houses[i]) T.houses[i] = { k: d.k, n: typeof d.n === 'string' ? d.n.slice(0, 40) : '', b: true };
+    broadcastHouses();
+    T.save();
   };
   const onHouses = (d) => {
     const before = myHome();
@@ -261,11 +295,23 @@ export function installTownHomes(T, ctx) {
     const i = myHome();
     if (i >= 0 && before < 0 && !T.houses[i].b) T.feedLine(`A house is kept for you — buy it at its door (${HOUSE_PRICE} coins).`);
     if (i < 0 && before < 0 && T.ready) T.feedLine('No house free in town for you right now.');
+    // (an extra house bought here that someone else got first: the coins back)
+    if (pendingExtra) {
+      const h = T.houses[pendingExtra.i];
+      if (h && h.k !== myKey()) {
+        ctx.addCoins(pendingExtra.price);
+        T.extraHomes = T.extraHomes.filter((id) => id !== P().homes[pendingExtra.i]?.mapId);
+        T.feedLine(`${h.n || 'Another player'} bought that house first — your ${pendingExtra.price} coins are back.`);
+        T.save();
+      }
+      if (h) pendingExtra = null;
+    }
   };
   const handleHomesNet = (from, d) => {
     if (d.op === 'houses') { if (from === T.net.hostId() && T.netMode === 'client') onHouses(d); return true; }
-    if (T.netMode !== 'host' || !T.ready) return d.op === 'home' || d.op === 'buyHome';
+    if (T.netMode !== 'host' || !T.ready) return d.op === 'home' || d.op === 'buyHome' || d.op === 'buyExtra';
     if (d.op === 'home') { onHomeAsk(d); return true; }
+    if (d.op === 'buyExtra') { if (typeof d.k === 'string') onBuyExtra(d); return true; }
     if (d.op === 'buyHome') { if (typeof d.k === 'string') onBuyHome(d); return true; }
     return false;
   };
@@ -285,6 +331,10 @@ export function installTownHomes(T, ctx) {
     const i = homeOfRoom(key);
     if (i < 0) return { open: true };
     const h = T.houses[i];
+    if (isExtra(i)) {
+      if (!h) return { open: false, why: 'forSale', home: i, price: P().homes[i].price };
+      return h.k === myKey() ? { open: true, mine: true } : { open: false, why: 'player', owner: h };
+    }
     if (h) {
       if (h.k === myKey()) return h.b ? { open: true, mine: true } : { open: false, why: 'forSale' };
       return { open: false, why: h.b ? 'player' : 'kept', owner: h };
@@ -301,7 +351,9 @@ export function installTownHomes(T, ctx) {
     if (T.simT - (noteAt[key] ?? -1e9) < 4) return;
     noteAt[key] = T.simT;
     if (a.why !== 'forSale') ctx.playSfx?.('locked');
-    if (a.why === 'forSale') T.feedLine(`Your house — for sale, ${HOUSE_PRICE} coins. Buy it here at the door.`);
+    if (a.why === 'forSale') {
+      T.feedLine(a.price ? `A house for sale — ${a.price} coins. Buy it here at the door.` : `Your house — for sale, ${HOUSE_PRICE} coins. Buy it here at the door.`);
+    }
     else if (a.why === 'player') T.feedLine(`${a.owner.n || 'Another player'}'s home — locked.`);
     else if (a.why === 'kept') T.feedLine(`This house is kept for ${a.owner.n || 'another player'}.`);
     else if (a.why === 'closed') T.feedLine('The shop\'s shut for the night. Come back in the morning.');
@@ -386,6 +438,24 @@ export function installTownHomes(T, ctx) {
     T.actsAt = 0;
     T.save();
   };
+  // An extra house (EXTRA_HOUSES): bought outright at its door, the player's as well as their own
+  const buyExtra = (i) => {
+    const home = P().homes[i];
+    if (!home?.extra || T.houses[i]) return;
+    if (ctx.getCoins() < home.price) { T.feedLine(`You need ${home.price} coins for this house.`); return; }
+    ctx.addCoins(-home.price);
+    T.houses[i] = { k: myKey(), n: ctx.getPlayerName(), b: true };
+    if (!T.extraHomes.includes(home.mapId)) T.extraHomes.push(home.mapId);
+    if (T.netMode === 'client') {
+      pendingExtra = { i, price: home.price };
+      T.net.send(T.net.hostId(), { w: 1, op: 'buyExtra', k: myKey(), n: ctx.getPlayerName(), i });
+    }
+    broadcastHouses();
+    ctx.showBanner('A NEW HOME', 'The house is yours — your chest is inside', 2600);
+    T.feedLine('The house is yours. Your chest is in the corner, the same as at home.');
+    T.actsAt = 0;
+    T.save();
+  };
 
   // ── The bag, the wallet, the chest ──
   const bagCount = () => GOOD_IDS.reduce((s, g) => s + T.goods[g], 0);
@@ -448,7 +518,11 @@ export function installTownHomes(T, ctx) {
     const a = doorAccess(key);
     if (a.open) return [];
     const out = [];
-    if (a.why === 'forSale') out.push({ key: 'buyhouse', label: `Buy house · ${HOUSE_PRICE} 🪙`, onClick: buyHouse });
+    if (a.why === 'forSale') {
+      out.push(a.price
+        ? { key: `buyextra:${a.home}`, label: `Buy house · ${a.price} 🪙`, onClick: () => buyExtra(a.home) }
+        : { key: 'buyhouse', label: `Buy house · ${HOUSE_PRICE} 🪙`, onClick: buyHouse });
+    }
     if (a.why === 'night' && !T.knock && T.simT - (T.knockedAt[key] ?? -1e9) >= KNOCK_AGAIN_S) {
       out.push({ key: `knock:${key}`, label: 'Knock', onClick: () => knock(key) });
     }
@@ -461,7 +535,7 @@ export function installTownHomes(T, ctx) {
   // In the player's own home, by the bed: sleep till night / till morning (the clock jumps — not
   // in a shared town, whose clock is everyone's — and the player wakes up rested, at full health)
   const atBed = () => {
-    if (!T.inRoom || homeOfRoom(T.inRoom) < 0 || homeOfRoom(T.inRoom) !== myHome()) return false;
+    if (!T.inRoom || !myHomes().includes(homeOfRoom(T.inRoom))) return false;
     const b = T.rooms.bedside(T.inRoom);
     const p = T.playerPos();
     return !!b && dist2(p.x, p.z, b.x, b.z) < BED_ACT_DIST;
@@ -516,30 +590,44 @@ export function installTownHomes(T, ctx) {
     if (storage.isOpen() && !(source ?? chestSource).near()) storage.close();
     updateSign();
   };
-  // Over the player's house's door: for sale / home
+  // Over the player's house's door (for sale / home) and the extra houses' (for sale / home —
+  // nothing once another player's)
+  const signTextOf = (i) => {
+    const h = T.houses[i];
+    if (isExtra(i)) return !h ? `For sale · ${P().homes[i].price} 🪙` : h.k === myKey() ? 'Home' : '';
+    return i === myHome() ? (h.b ? 'Home' : `For sale · ${HOUSE_PRICE} 🪙`) : '';
+  };
+  const dropSign = (i) => {
+    const s = signs[i]?.sprite;
+    if (s) { s.parent?.remove(s); s.material.map?.dispose(); s.material.dispose(); }
+    delete signs[i];
+  };
   const updateSign = () => {
-    const i = myHome();
-    const r = i >= 0 ? P().rooms[roomOf(i)] : null;
-    const text = !r ? '' : T.houses[i].b ? 'Home' : `For sale · ${HOUSE_PRICE} 🪙`;
-    if (text === signText) return;
-    signText = text;
-    if (sign) { sign.parent?.remove(sign); sign.material.map?.dispose(); sign.material.dispose(); sign = null; }
-    if (!r) return;
-    sign = makeTextSprite(text, { height: 0.32 });
-    sign.position.set(r.door.x, T.groundAt(r.door.x, r.door.z, 0) + 2.6, r.door.z);
-    T.root.add(sign);
+    const want = new Set([myHome(), ...P().homes.map((h, i) => (h.extra ? i : -1))].filter((i) => i >= 0));
+    for (const i of Object.keys(signs).map(Number)) if (!want.has(i)) dropSign(i);
+    for (const i of want) {
+      const r = P().rooms[roomOf(i)];
+      const text = r ? signTextOf(i) : '';
+      if ((signs[i]?.text ?? '') === text) continue;
+      dropSign(i);
+      if (!text) continue;
+      const sprite = makeTextSprite(text, { height: 0.32 });
+      sprite.position.set(r.door.x, T.groundAt(r.door.x, r.door.z, 0) + 2.6, r.door.z);
+      T.root.add(sprite);
+      signs[i] = { sprite, text };
+    }
   };
   const resetHomes = () => {
     storage.close();
     T.knock = null;
     T.doorPick = null;
-    if (sign) { sign.parent?.remove(sign); sign.material.map?.dispose(); sign.material.dispose(); sign = null; }
-    signText = '';
+    for (const i of Object.keys(signs)) dropSign(i);
   };
   const homesSnapshot = () => ({
     store: { coins: T.store.coins, goods: { ...T.store.goods } },
     lockpicks: T.lockpicks,
     homeBought: T.homeBought,
+    extraHomes: [...T.extraHomes],
   });
 
   // (a later full town from the host: its houses, quietly)
@@ -547,6 +635,6 @@ export function installTownHomes(T, ctx) {
 
   Object.assign(T, {
     applyHouses, openStorage, storageKind: () => (source ?? chestSource).kind, bagCount, bagFullNote, bagRoom, bedActs, chestActs, doorAccess, doorActs, freeHome, handleHomesNet, homeKey: myKey, homesSnapshot,
-    lockedNote, myHome, reserveFirst, resetHomes, restoreHomes, settleAfterSpawn, storage, updateHomes,
+    lockedNote, myHome, myHomes, reserveFirst, resetHomes, restoreHomes, settleAfterSpawn, storage, updateHomes,
   });
 }

@@ -16,7 +16,8 @@ export const DRIVE_BOUNDS = { minX: -98, maxX: 42, minZ: -100, maxZ: 68 };
 export const NAV_CELL = 1.25;
 export const NAV_START = { x: -24.9, z: -31.5 };
 export const BUILDING_RE = /house|building|cabin/i;
-export const TREE_RE = /tree/i;
+// (a tree model, not a house built into one — tree_trunk_house.glb)
+export const TREE_RE = /tree(?!.*house)/i;
 export const STUMP_RE = /tree_12\.glb/i;   // the pack's cut stump (a "tree" file): not chopped; felled trees leave one (townTrees.js)
 // Where each house model's front door is (its own frame — the GLB's axes): the wall it's in
 // ('+x' / '-x' / '+z' / '-z'), how far along that wall from its middle (`at`, -1 … 1 of the
@@ -34,6 +35,13 @@ export const HOUSE_DOORS = {
   // (the door in the back corner wall — the front one's up a flight of stairs)
   'fantasy_house.glb': { point: [0.53, -0.5], normal: [1, -1] },
   'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48, pane: { w: 0.9, h: 1.15, arch: true } },
+  // (the door in the trunk, under the mossy roof — the base mound sticks out past it)
+  'tree_trunk_house.glb': { side: '+z', at: 0.08, inset: 0.75, pane: { w: 1, h: 1.9, arch: true } },
+};
+// Extra houses out of town (model file → { price }): found anywhere in NAV_BOUNDS, nobody lives
+// there — a home the player can buy as well as their own (townHomes.js; first come in a shared town)
+export const EXTRA_HOUSES = {
+  'tree_trunk_house.glb': { price: 300 },
 };
 // (pane: the door's size in m — the pane that shows its room (townRooms.js setDoor); 0.9 × 1.8 if not given)
 export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)…

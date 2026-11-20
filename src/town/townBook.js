@@ -297,11 +297,10 @@ export function installTownBook(T, ctx) {
 
     const P = T.layout.places;
     // Houses (the player's own outlined gold)
-    const mine = T.myHome?.() ?? -1;
-    const myHouse = mine >= 0 ? P.homes[mine] : null;
+    const myHouses = [...new Set([T.myHome?.() ?? -1, ...(T.myHomes?.() ?? [])])].filter((i) => i >= 0).map((i) => P.homes[i]).filter(Boolean);
     for (const h of T.layout.buildings) {
       const r = Math.max(4, h.radius * 0.72 * scale);
-      const own = myHouse && Math.hypot(myHouse.x - h.x, myHouse.z - h.z) < h.radius + 4;
+      const own = myHouses.some((m) => Math.hypot(m.x - h.x, m.z - h.z) < h.radius + 4);
       g.fillStyle = C.house;
       g.strokeStyle = own ? C.mine : C.houseEdge;
       g.lineWidth = own ? 2.5 : 1.5;
@@ -323,7 +322,7 @@ export function installTownBook(T, ctx) {
     place(P.fishSpot, '🎣', null);
     place(P.wizard, '🔮', 'Wizard');
     place(P.camp, '⛺', 'Bandit camp');
-    if (myHouse) place(myHouse, '🏠', 'Home');
+    for (const m of myHouses) place(m, '🏠', 'Home');
 
     // People
     hits = [];

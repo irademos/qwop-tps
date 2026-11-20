@@ -121,7 +121,7 @@ export function findStoryLayout(island, ctx) {
   // The sacred tree: inland, straight up the beach, by one of the island's trees with others
   // round it — the creature stands beside it
   const inland = { x: -dir.x, z: -dir.z };
-  const trees = objs.filter((o) => /tree/i.test(o.file) && !/stump/i.test(o.file) && dry(o.x, o.z));
+  const trees = objs.filter((o) => /tree(?!.*house)/i.test(o.file) && !/stump/i.test(o.file) && dry(o.x, o.z));
   let best = null;
   for (const o of trees) {
     const ox = o.x - wash.x;
