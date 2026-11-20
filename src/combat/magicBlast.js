@@ -121,8 +121,8 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
     sparks.push({ sprite, vel, life: SPARK_LIFE_S, max: SPARK_LIFE_S, size, element });
   };
 
-  // (`sparksOnly`: a blast knocked back by a sword swing — sparks fly, but a fire blast doesn't
-  // go off: it flies on back at its caster)
+  // (`sparksOnly`: a blast parried by a sword swing, sent back by a bubble or blocked — sparks
+  // fly, but a fire blast doesn't go off)
   const burst = (pos, element, count = 18, sparksOnly = false) => {
     for (let i = 0; i < count; i++) spawnSpark(pos, element, 4, 0.22);
     if (sparksOnly) return;
@@ -307,12 +307,12 @@ export function createMagicBlasts({ scene, getWaterLevel = null }) {
         const back = hit.reflect?.(b);
         if (back) {
           reflectBlast(b, p, back);
-          burst(p, b.element, 10);
+          burst(p, b.element, 10, true);
           continue;
         }
         if (hit.blocks?.(b)) {
           hit.onBlocked?.(b);
-          burst(p, b.element, 10);
+          burst(p, b.element, 10, true);
         } else {
           hit.onHit(b);
           burst(p, b.element, 22);
