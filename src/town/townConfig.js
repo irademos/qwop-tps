@@ -33,8 +33,9 @@ export const HOUSE_DOORS = {
   'medieval_building_005.glb': { side: '+x', at: 0.36, inset: 0.55 },
   // (the door in the back corner wall — the front one's up a flight of stairs)
   'fantasy_house.glb': { point: [0.53, -0.5], normal: [1, -1] },
-  'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48 },
+  'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48, pane: { w: 0.9, h: 1.15, arch: true } },
 };
+// (pane: the door's size in m — the pane that shows its room (townRooms.js setDoor); 0.9 × 1.8 if not given)
 export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)…
 export const HOUSE_DOOR_MAX_OUT = 3.5;      // …or further out (up to this), past a roof overhang the height ray lands on
 export const HOUSE_DOOR_STEP = 0.5;         // m above the lowest ground in front of the door the spot may stand (porch steps)

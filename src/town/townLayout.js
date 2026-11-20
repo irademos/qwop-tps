@@ -412,6 +412,7 @@ export function installTownLayout(T, ctx) {
   };
 
   // ── Props: the shops, campfire, jail cell, fields ──
+  const PANE_SILL_MAX = 1.2;   // m a door's threshold may be over the door spot outside (porch steps)
   const groundAt = (x, z, fallback = 0) => {
     const y = ctx.getGroundY(x, z);
     return Number.isFinite(y) ? y : fallback;
@@ -430,19 +431,18 @@ export function installTownLayout(T, ctx) {
       signSprite.position.set(door.x + Math.sin(exitYaw) * 0.3, groundAt(door.x, door.z) + 2.5, door.z + Math.cos(exitYaw) * 0.3);
       group.add(signSprite);
     }
-    // A faint gold pane standing in each house's doorway (the shop, the jail, homes): where to walk in
-    const paneGeo = new THREE.PlaneGeometry(0.9, 1.8).translate(0, 0.9, 0);
-    const paneMat = new THREE.MeshBasicMaterial({
-      color: 0xffd36b, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide,
-    });
-    for (const r of Object.values(places.rooms)) {
-      if (!r.building || !r.doorway) continue;
-      const pane = new THREE.Mesh(paneGeo, paneMat);
-      // (standing on the ground at the door spot — the ray at the doorway itself hits the roof)
-      pane.position.set(r.doorway.x, groundAt(r.door.x, r.door.z), r.doorway.z);
-      pane.rotation.y = r.exitYaw;
-      pane.renderOrder = 1;
-      group.add(pane);
+    // Each house's door shows its room (townRooms.js setDoor: a pane in the doorway — a faint
+    // gold one till the room's captured — and, inside, the street through the doorway)
+    for (const [key, r] of Object.entries(places.rooms)) {
+      if (!r.door) continue;
+      const at = r.doorway ?? r.door;
+      // (standing on the threshold: the ground at the doorway itself when that's a porch step up
+      // from the door spot — higher, the height ray there has hit the roof: the door spot's ground)
+      const spotY = groundAt(r.door.x, r.door.z);
+      const sill = groundAt(at.x, at.z, NaN);
+      const y = sill > spotY - 0.05 && sill < spotY + PANE_SILL_MAX ? sill : spotY;
+      const size = HOUSE_DOORS[r.building?.file?.split('/').pop()]?.pane ?? null;
+      T.rooms.setDoor(key, { x: at.x, z: at.z, y, ground: spotY, yaw: r.exitYaw, door: r.door, pane: !!(r.building && r.doorway), size, group });
     }
     // Campfire
     const fire = makeCampfire();

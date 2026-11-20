@@ -100,7 +100,7 @@ export function installTownTrade(T, ctx) {
 
   // ── The houses' rooms (townRooms.js — under the map, entered through the houses' doors):
   // the shop, the jail and the homes ──
-  const rooms = createTownRooms({ camera: ctx.camera, getPlayerPosition: () => ctx.getPlayerPosition() });
+  const rooms = createTownRooms({ camera: ctx.camera, renderer: ctx.renderer, scene: ctx.scene, getPlayerPosition: () => ctx.getPlayerPosition() });
   // The room the player's in (null: out in town)
   const playerRoom = () => { const p = T.playerPos(); return rooms.roomAt(p.x, p.z); };
   // At the shop's back counter / the wizard's stall (its buttons, the sell panel)
