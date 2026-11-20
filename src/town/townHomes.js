@@ -278,8 +278,10 @@ export function installTownHomes(T, ctx) {
     const i = homeOfRoom(key);
     return residents(i).some((n) => n.following || T.jobs.some((j) => j.giverId === n.id && (j.status === 'active' || j.status === 'done')));
   };
-  // Can the player walk into that room? { open, why: 'forSale' | 'kept' | 'player' | 'night', owner }
+  // Can the player walk into that room? { open, why: 'forSale' | 'kept' | 'player' | 'night' | 'closed', owner }
+  // (the shop shuts up for the night — 'closed'; a locked door shows no room through it — townRooms.js)
   const doorAccess = (key) => {
+    if (key === 'shop' && T.isNight) return { open: false, why: 'closed' };
     const i = homeOfRoom(key);
     if (i < 0) return { open: true };
     const h = T.houses[i];
@@ -302,6 +304,7 @@ export function installTownHomes(T, ctx) {
     if (a.why === 'forSale') T.feedLine(`Your house — for sale, ${HOUSE_PRICE} coins. Buy it here at the door.`);
     else if (a.why === 'player') T.feedLine(`${a.owner.n || 'Another player'}'s home — locked.`);
     else if (a.why === 'kept') T.feedLine(`This house is kept for ${a.owner.n || 'another player'}.`);
+    else if (a.why === 'closed') T.feedLine('The shop\'s shut for the night. Come back in the morning.');
     else T.feedLine(`${whose(key)} locked for the night. Knock?`);
   };
   const knock = (key) => {
@@ -449,7 +452,7 @@ export function installTownHomes(T, ctx) {
     if (a.why === 'night' && !T.knock && T.simT - (T.knockedAt[key] ?? -1e9) >= KNOCK_AGAIN_S) {
       out.push({ key: `knock:${key}`, label: 'Knock', onClick: () => knock(key) });
     }
-    if (a.why !== 'forSale' && T.lockpicks > 0) out.push({ key: `lockpick:${key}`, label: `Pick the lock (${T.lockpicks})`, onClick: () => pickDoor(key) });
+    if (a.why !== 'forSale' && a.why !== 'closed' && T.lockpicks > 0) out.push({ key: `lockpick:${key}`, label: `Pick the lock (${T.lockpicks})`, onClick: () => pickDoor(key) });
     return out;
   };
   // Inside a home, by its chest

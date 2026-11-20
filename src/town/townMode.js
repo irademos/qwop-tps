@@ -923,7 +923,7 @@ export function createTownMode(ctx) {
     if (door) door.rotation.y = angleLerp(door.rotation.y, occupied ? 0 : -1.9, 1 - Math.exp(-4 * dt));
 
     T.updateRooms();
-    T.rooms.updatePortals(T.nightLevel);
+    T.rooms.updatePortals(T.nightLevel, (key) => T.doorAccess(key).open);
     T.updateHomes();
     for (const n of T.npcs) T.updateNpc(n, dt);
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);

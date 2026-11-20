@@ -577,7 +577,15 @@ export function createTownRooms(ctx) {
   // Each frame (townMode.js): the captures that are due — outside, at most one room a frame
   // (the nearest due); inside, the street a face at a time
   let nightLevel = 0;
-  const updatePortals = (level = 0) => {
+  // A door the player can't walk through now (locked for the night, for sale, another's, the shop
+  // shut — townHomes.js doorAccess, `isOpen`) shows no pane: just the house's own door
+  const setPaneShown = (room, on) => {
+    if (room.paneShown === on) return;
+    room.paneShown = on;
+    for (const m of room.panes) m.visible = on;
+    if (!on) dropCube(room);
+  };
+  const updatePortals = (level = 0, isOpen = null) => {
     if (!renderer || !unregisterHeight) return;
     nightLevel = level;
     const now = performance.now() / 1000;
@@ -609,6 +617,8 @@ export function createTownRooms(ctx) {
     let held = 0;
     for (const r of rooms) {
       if (!r?.panes.length) continue;
+      setPaneShown(r, !isOpen || isOpen(r.key) !== false);
+      if (!r.paneShown) continue;
       const d = Math.hypot(r.portal.x - p.x, r.portal.z - p.z);
       r.portalDist = d;
       if (r.cube) held += 1;
