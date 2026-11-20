@@ -510,7 +510,7 @@ export function createShowdownTutorial(ctx) {
     await collectCoins(await ctx.getPrice('bubble'));
     if (!(await ctx.buy('bubble'))) ctx.giveItem('bubble');
     panel(12, TOTAL, 'USE THE BUBBLE',
-      'Tap 🫧 to surround yourself with a bubble for 10 seconds. Swords and bombs bounce right off it.');
+      'Hold the Shield button and slide up (🫧 on the phone) to surround yourself with a bubble for 10 seconds. Swords and bombs bounce right off it.');
     frameHandler = () => setHighlight(ctx.isBubbleActive() ? null : 'bubble');
     await waitFor(() => ctx.isBubbleActive());
     enemy.script = null;
@@ -585,7 +585,7 @@ export function createShowdownTutorial(ctx) {
     ctx.lendWand();
     onCleanup(() => ctx.returnWand());
     panel(14, TOTAL, 'MAGIC WAND',
-      'The market sells a Magic Wand. Here’s one to try — tap Wand to take it out.');
+      'The market sells a Magic Wand. Here’s one to try — hold the weapon button and slide up to Wand to take it out.');
     frameHandler = () => setHighlight('wand');
     await waitFor(() => ctx.isEquipped('magic_wand'));
     setHighlight(null);

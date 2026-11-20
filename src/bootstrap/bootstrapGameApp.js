@@ -7915,8 +7915,9 @@ async function initCore(runtimeContext) {
     const gear = hl?.gear ?? null;
     const phone = hl?.phone ?? null;
     if (playerControls) {
-      for (const b of [playerControls.psWeaponBtn1, playerControls.psWeaponBtn2, playerControls.psWeaponBtn3, playerControls.psWeaponBtn4, playerControls.psWeaponBtn5]) {
-        b?.classList.toggle('tutorial-highlight', !!gear && b.dataset.psWeaponId === gear && b.style.display !== 'none');
+      const ringed = gear ? playerControls.weaponButtonFor?.(gear) : null;
+      for (const b of [playerControls.psWeaponBtn1, playerControls.psBowBtn, playerControls.psShieldBtn]) {
+        b?.classList.toggle('tutorial-highlight', !!ringed && b === ringed);
       }
     }
     if ((_townIntroHl?.phone ?? null) !== phone) { _townIntroHl = { gear, phone }; _phoneSwordStatusNow?.(); }
@@ -8546,6 +8547,12 @@ async function initCore(runtimeContext) {
     // The 💣 button held: aim (the arc), let go: thrown along it
     startBombAim: () => startBombAim(),
     releaseBombAim: (cancel) => releaseBombAim(cancel),
+    // (the Bow / Bomb button slid up mid-draw: the draw is dropped and a bomb aimed instead)
+    switchBowToBomb: () => {
+      if (!_canThrowBomb()) return false;
+      cancelBowDraw();
+      return startBombAim();
+    },
     isBombAiming: () => _bombAim.active,
     // Magic wand: owned (Showdown / the tutorial) or picked up in a Multiplayer battle
     isWandAllowed: () => isWandAllowed(),
@@ -9136,12 +9143,10 @@ async function initCore(runtimeContext) {
   const _tutorialButton = (name) => {
     const pc = playerControls;
     if (!pc) return null;
-    if (name === 'bomb') return pc.psBombBtn;
-    if (name === 'bubble') return pc.psBubbleBtn;
     if (name === 'block' || name === 'fire') return pc.punchButton;
-    if (name === 'gun') return pc.psBowBtn; // (the bow: held to draw)
-    const itemId = name === 'gun' ? 'pistol' : name === 'shield' ? SHIELD_ITEM_ID : name === 'wand' ? MAGIC_WAND_ITEM_ID : name;
-    return [pc.psWeaponBtn1, pc.psWeaponBtn2, pc.psWeaponBtn3].find(b => b?.dataset.psWeaponId === itemId) || null;
+    // (Bow / Bomb, Shield / Bubble and the weapon button — controls.js weaponButtonFor)
+    const itemId = name === 'shield' ? SHIELD_ITEM_ID : name === 'wand' ? MAGIC_WAND_ITEM_ID : name;
+    return pc.weaponButtonFor?.(itemId) ?? null;
   };
   const _refreshShowdownButtons = () => {
     playerControls?.refreshActionButtons?.();

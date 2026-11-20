@@ -96,6 +96,16 @@ export const CLIMB_CONFIG = {
 };
 // Weapon button id for "put everything away" (Town: nothing in hand)
 const HANDS_ID = 'hands';
+// The gesture buttons (initializeActionButtons): how far a held finger slides to count as a
+// slide, how long a held weapon button waits before its wheel shows, and which way each
+// weapon sits on the wheel (the oar takes the sword's place in the canoe)
+const SLIDE_PX = 30;
+const WHEEL_SHOW_MS = 160;
+// (the d-pad round a held button: its chips just off the button's edge, grown by .ps-held)
+const PAD_HELD_SCALE = 1.4;
+const PAD_GAP_PX = 6;
+const WHEEL_DIRS = { foamSword: 'left', canoe_oar: 'left', magic_wand: 'up', fishing_rod: 'right', [HANDS_ID]: 'down' };
+const WHEEL_LABELS = { foamSword: 'Sword', canoe_oar: 'Oar', magic_wand: 'Wand', fishing_rod: 'Rod', [HANDS_ID]: 'Hands' };
 // The bow drawn (bowAiming, set by bootstrapGameApp.js `_bowDraw`): the third-person camera
 // eases in over the right shoulder (bowZoom 0 → 1), the crosshair at the middle of the screen
 // is where arrows go (getBowAimPoint)
@@ -638,100 +648,246 @@ export class PlayerControls {
     // Block (sword) / Fire (gun) button
     this.punchButton = createButton('punch-button', 'mobile-primary-action ps-block-btn', 'Attack');
 
-    // Weapon switch buttons (two slots showing the non-equipped weapons)
-    this.psWeaponBtn1 = createButton('ps-weapon-btn-1', 'mobile-primary-action ps-weapon-btn', '');
-    this.psWeaponBtn2 = createButton('ps-weapon-btn-2', 'mobile-primary-action ps-weapon-btn', '');
-    const makePsWeaponHandler = (btnRef) => (event) => {
-      if (!this.enabled) return;
-      const itemId = btnRef.dataset.psWeaponId;
-      if (!itemId) return;
-      if (itemId === HANDS_ID) getAppState()?.putWeaponsAway?.();
-      else getAppState()?.equipInventoryItem?.(itemId);
-      this.refreshActionButtons();
-      if (event) this.safePreventDefault(event);
+    // Three gesture buttons hold the gear (each held, then slid — SLIDE_PX — or tapped):
+    // · the weapon button (psWeaponBtn1): sword / wand / rod / hands (the oar / rod in the
+    //   canoe) — a tap takes the default (the sword, or empty hands while the sword's in hand),
+    //   held a wheel of the rest comes up round it (WHEEL_DIRS) and sliding that way picks one
+    // · Bow / Bomb (psBowBtn): held draws the bow, let go looses; slid up mid-draw, the draw is
+    //   dropped and a bomb aimed instead (let go throws it); slid down, either is called off.
+    //   No bow: it's the bomb button
+    // · Shield / Bubble (psShieldBtn): a tap takes the shield out (or puts it back), slid up
+    //   casts a bubble. No shield: a tap casts the bubble
+    const part = (button, cls) => {
+      const span = document.createElement('span');
+      span.className = `ps-combo-part ${cls}`;
+      button.appendChild(span);
+      return span;
     };
-    // (third slot: the magic wand once it's owned in Showdown; fourth / fifth: Town's fishing
-    // rod and ✋ Hands)
-    this.psWeaponBtn3 = createButton('ps-weapon-btn-3', 'mobile-primary-action ps-weapon-btn', '');
-    this.psWeaponBtn4 = createButton('ps-weapon-btn-4', 'mobile-primary-action ps-weapon-btn', '');
-    this.psWeaponBtn5 = createButton('ps-weapon-btn-5', 'mobile-primary-action ps-weapon-btn', '');
-    bindPress(this.psWeaponBtn1, makePsWeaponHandler(this.psWeaponBtn1));
-    bindPress(this.psWeaponBtn2, makePsWeaponHandler(this.psWeaponBtn2));
-    bindPress(this.psWeaponBtn3, makePsWeaponHandler(this.psWeaponBtn3));
-    bindPress(this.psWeaponBtn4, makePsWeaponHandler(this.psWeaponBtn4));
-    bindPress(this.psWeaponBtn5, makePsWeaponHandler(this.psWeaponBtn5));
+    this.psWeaponBtn1 = createButton('ps-weapon-btn-1', 'mobile-primary-action ps-weapon-btn ps-wheel-btn', '');
+    this.psWeaponBtn1.setAttribute('aria-label', 'Tap to switch weapon, hold and slide to pick one');
+    this.psBowBtn = createButton('ps-bow-btn', 'mobile-primary-action ps-weapon-btn ps-bow-btn ps-combo-btn', '');
+    this.psBowBtn.setAttribute('aria-label', 'Hold to draw the bow, slide up for a bomb, let go to shoot / throw');
+    // (the parts' labels / counts are kept fresh by the game: updateBowButton here, the bomb's
+    // updatePsBombButton in bootstrapGameApp.js — psBombBtn is its part)
+    this.psBombBtn = part(this.psBowBtn, 'ps-bomb-part');
+    this.psBombBtn.textContent = `💣 ${getAppState()?.getBombCount?.() ?? 0}`;
+    this.psBowPart = part(this.psBowBtn, 'ps-bow-part');
+    this.psShieldBtn = createButton('ps-shield-btn', 'mobile-primary-action ps-weapon-btn ps-shield-btn ps-combo-btn', '');
+    this.psShieldBtn.setAttribute('aria-label', 'Tap for the shield, slide up for a protective bubble');
+    this.psBubbleBtn = part(this.psShieldBtn, 'ps-bubble-part');
+    this.psBubbleBtn.textContent = `🫧 ${getAppState()?.getBubbleCount?.() ?? 0}`;
+    this.psShieldPart = part(this.psShieldBtn, 'ps-shield-part');
+    this.psShieldPart.textContent = 'Shield';
 
-    // The bow: held to draw (equips it, the string comes back, the camera eases in over the
-    // shoulder), let go to loose — then what was in hand comes back (bootstrapGameApp.js _bowDraw)
-    this.psBowBtn = createButton('ps-bow-btn', 'mobile-primary-action ps-weapon-btn ps-bow-btn', 'Bow');
-    this.psBowBtn.setAttribute('aria-label', 'Hold to draw the bow, let go to shoot');
-    // A button held down (the bow, a bomb): `start()` on the press (true = it took — the button
-    // grows while held, `ps-held`, so the finger doesn't slip off it), `release(cancel)` when that
-    // finger lifts. The finger is followed on the window, so only it lifting lets go — nothing
-    // that happens to the button meanwhile (the bow coming out, the weapon buttons changing, the
-    // button's label redrawn under the finger) ends it
-    const bindHold = (button, { start, release, isHeld }) => {
+    // A button held down: `start()` on the press (true = it took — the button grows while held,
+    // `ps-held`, so the finger doesn't slip off it), `move(dx, dy)` as the finger slides (px from
+    // where it went down), `release(cancel, dx, dy)` when that finger lifts. The finger is
+    // followed on the window, so only it lifting lets go — nothing that happens to the button
+    // meanwhile (the bow coming out, the buttons changing, a label redrawn under the finger) ends it
+    const bindGesture = (button, { start, move, release }) => {
       let touchUsed = false;
       let touchId = null;
-      const down = (event) => {
+      let mouseDown = false;
+      let x0 = 0, y0 = 0, dx = 0, dy = 0;
+      const down = (event, x, y) => {
         if (event) this.safePreventDefault(event);
-        if (!this.enabled) return;
+        if (!this.enabled) return false;
+        x0 = x; y0 = y; dx = 0; dy = 0;
         if (start()) button.classList.add('ps-held');
+        return true;
+      };
+      const moved = (x, y) => {
+        dx = x - x0;
+        dy = y - y0;
+        move?.(dx, dy);
       };
       const up = (cancel) => {
-        touchId = null;
         button.classList.remove('ps-held');
-        release(cancel);
+        release(cancel, dx, dy);
       };
       const touchOf = (e) => Array.from(e.changedTouches || []).find((t) => t.identifier === touchId);
       button.addEventListener('touchstart', (e) => {
         touchUsed = true;
         this.lastTouchButtonTime = performance.now();
         if (touchId !== null) { this.safePreventDefault(e); return; } // (a second finger on it)
-        touchId = e.changedTouches?.[0]?.identifier ?? null;
-        down(e);
+        const t = e.changedTouches?.[0];
+        touchId = t?.identifier ?? null;
+        if (!down(e, t?.clientX ?? 0, t?.clientY ?? 0)) touchId = null;
       }, { passive: false });
+      window.addEventListener('touchmove', (e) => {
+        if (touchId === null) return;
+        const t = touchOf(e);
+        if (t) moved(t.clientX, t.clientY);
+      }, { passive: true, capture: true });
       window.addEventListener('touchend', (e) => {
         if (touchId === null || !touchOf(e)) return;
         if (e.target === button || button.contains(e.target)) this.safePreventDefault(e);
+        touchId = null;
         up(false);
       }, { passive: false, capture: true });
       // (the system taking the touch over: let go rather than throw it away)
       window.addEventListener('touchcancel', (e) => {
         if (touchId === null || !touchOf(e)) return;
+        touchId = null;
         up(false);
       }, { passive: false, capture: true });
       button.addEventListener('mousedown', (e) => {
         if (touchUsed || (performance.now() - this.lastTouchButtonTime) <= 550) return;
-        down(e);
+        mouseDown = down(e, e.clientX, e.clientY);
       });
-      button.addEventListener('mouseup', () => { if (!touchUsed) up(false); });
-      button.addEventListener('mouseleave', () => { if (!touchUsed && isHeld()) up(false); });
+      window.addEventListener('mousemove', (e) => { if (mouseDown) moved(e.clientX, e.clientY); });
+      window.addEventListener('mouseup', () => {
+        if (!mouseDown) return;
+        mouseDown = false;
+        up(false);
+      });
       button.addEventListener('contextmenu', (e) => e.preventDefault());
     };
-    bindHold(this.psBowBtn, {
-      start: () => !!getAppState()?.startBowDraw?.(),
-      release: (cancel) => getAppState()?.releaseBowDraw?.(cancel),
-      isHeld: () => !!getAppState()?.isBowDrawing?.()
+    // Which way a slide went ('up' / 'down' / 'left' / 'right'), or null short of SLIDE_PX
+    const slideDir = (dx, dy) => {
+      if (Math.hypot(dx, dy) < SLIDE_PX) return null;
+      return Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down');
+    };
+
+    // The weapon button
+    const pickWeapon = (itemId) => {
+      if (!itemId) return;
+      if (itemId === HANDS_ID) getAppState()?.putWeaponsAway?.();
+      else getAppState()?.equipInventoryItem?.(itemId);
+      this.refreshActionButtons();
+    };
+    const wheelPick = (dx, dy) => {
+      const dir = slideDir(dx, dy);
+      return dir ? (this._wheel?.options || []).find((o) => o.dir === dir) ?? null : null;
+    };
+    let wheelTimer = 0;
+    bindGesture(this.psWeaponBtn1, {
+      start: () => {
+        if (!this._wheel?.options.length) return false;
+        // (a quick tap never shows the wheel)
+        clearTimeout(wheelTimer);
+        wheelTimer = setTimeout(() => this._showWeaponWheel(), WHEEL_SHOW_MS);
+        return true;
+      },
+      move: (dx, dy) => {
+        if (Math.hypot(dx, dy) >= SLIDE_PX / 2) this._showWeaponWheel();
+        this._padMark(wheelPick(dx, dy)?.dir ?? null);
+      },
+      release: (cancel, dx, dy) => {
+        clearTimeout(wheelTimer);
+        this._padHide();
+        if (cancel || !this.enabled) return;
+        const slid = Math.hypot(dx, dy) >= SLIDE_PX;
+        const pick = slid ? wheelPick(dx, dy) : this._wheel?.default;
+        if (pick && pick.id !== this._wheel?.equipped) pickWeapon(pick.id);
+      }
     });
 
-    // Protective bubble (bought in the shop); label/count kept fresh by the game loop
-    this.psBubbleBtn = createButton('ps-bubble-btn', 'mobile-primary-action ps-bubble-btn', `🫧 ${getAppState()?.getBubbleCount?.() ?? 0}`);
-    this.psBubbleBtn.setAttribute('aria-label', 'Activate protective bubble');
-    bindPress(this.psBubbleBtn, (event) => {
-      if (!this.enabled) return;
-      getAppState()?.activateBubble?.();
-      if (event) this.safePreventDefault(event);
+    // Bow / Bomb
+    let bowBombMode = null; // 'bow' | 'bomb' | 'cancelled' | null (what this hold has out)
+    // (its d-pad: Bomb above while the bow's drawn and there are bombs, Cancel below)
+    let bowPadTimer = 0;
+    const showBowPad = () => {
+      if (bowBombMode === 'cancelled') return;
+      const app = getAppState();
+      const opts = [];
+      if (bowBombMode !== 'bomb' && this._bowShown() && (app?.getBombCount?.() ?? 0) > 0) opts.push({ dir: 'up', label: '💣 Bomb' });
+      if (bowBombMode) opts.push({ dir: 'down', label: 'Cancel', cancel: true });
+      this._padShow(this.psBowBtn, opts);
+    };
+    bindGesture(this.psBowBtn, {
+      start: () => {
+        const app = getAppState();
+        clearTimeout(bowPadTimer);
+        if (this._bowShown()) {
+          bowBombMode = app?.startBowDraw?.() ? 'bow' : null;
+        } else {
+          bowBombMode = app?.startBombAim?.() ? 'bomb' : null;
+          if (!bowBombMode) return false;
+        }
+        bowPadTimer = setTimeout(showBowPad, WHEEL_SHOW_MS);
+        return true; // (held either way: sliding up can still aim a bomb)
+      },
+      move: (dx, dy) => {
+        const dir = slideDir(dx, dy);
+        const app = getAppState();
+        if (bowBombMode === 'cancelled') return;
+        if (Math.hypot(dx, dy) >= SLIDE_PX / 2 && this._padOwner !== this.psBowBtn) { clearTimeout(bowPadTimer); showBowPad(); }
+        this._padMark(dir);
+        if (dir === 'down') {
+          // (slid down: the draw / the aim is called off — nothing shot or thrown, what was in
+          // hand comes back; the rest of this hold does nothing)
+          if (bowBombMode === 'bow') app?.releaseBowDraw?.(true);
+          else if (bowBombMode === 'bomb') app?.releaseBombAim?.(true);
+          bowBombMode = 'cancelled';
+          clearTimeout(bowPadTimer);
+          this._padHide();
+          this.psBowBtn.classList.remove('ps-held');
+          this.updateBowButton();
+          return;
+        }
+        if (bowBombMode === 'bomb' || !this._bowShown() || dir !== 'up') return;
+        if ((app?.getBombCount?.() ?? 0) <= 0) return;
+        if (app?.switchBowToBomb?.()) { bowBombMode = 'bomb'; showBowPad(); }
+        this.updateBowButton();
+      },
+      release: (cancel) => {
+        const app = getAppState();
+        const mode = bowBombMode;
+        bowBombMode = null;
+        clearTimeout(bowPadTimer);
+        if (this._padOwner === this.psBowBtn) this._padHide();
+        if (mode === 'bow') app?.releaseBowDraw?.(cancel);
+        else if (mode === 'bomb') app?.releaseBombAim?.(cancel);
+        this.updateBowButton();
+      }
     });
 
-    // Bombs (bought in the shop): throws one forward; label/count kept fresh by the game loop
-    this.psBombBtn = createButton('ps-bomb-btn', 'mobile-primary-action ps-bomb-btn', `💣 ${getAppState()?.getBombCount?.() ?? 0}`);
-    this.psBombBtn.setAttribute('aria-label', 'Hold to aim a bomb, let go to throw');
-    // Held: the arc shows where it'll land (aimed with the gyro / the camera), let go: thrown
-    bindHold(this.psBombBtn, {
-      start: () => !!getAppState()?.startBombAim?.(),
-      release: (cancel) => getAppState()?.releaseBombAim?.(cancel),
-      isHeld: () => !!getAppState()?.isBombAiming?.()
+    // Shield / Bubble (its d-pad: Bubble above)
+    let bubbled = false;
+    let shieldPadTimer = 0;
+    const showShieldPad = () => {
+      if (bubbled) return;
+      this._padShow(this.psShieldBtn, [{ dir: 'up', label: '🫧 Bubble' }]);
+    };
+    bindGesture(this.psShieldBtn, {
+      start: () => {
+        bubbled = false;
+        clearTimeout(shieldPadTimer);
+        if (this._shieldShown()) {
+          shieldPadTimer = setTimeout(showShieldPad, WHEEL_SHOW_MS);
+          return true;
+        }
+        // (no shield: it's the bubble button — cast at once)
+        bubbled = true;
+        getAppState()?.activateBubble?.();
+        return false;
+      },
+      move: (dx, dy) => {
+        if (bubbled) return;
+        if (Math.hypot(dx, dy) >= SLIDE_PX / 2 && this._padOwner !== this.psShieldBtn) { clearTimeout(shieldPadTimer); showShieldPad(); }
+        const dir = slideDir(dx, dy);
+        this._padMark(dir);
+        if (dir !== 'up') return;
+        bubbled = true;
+        clearTimeout(shieldPadTimer);
+        this._padHide();
+        getAppState()?.activateBubble?.();
+      },
+      release: (cancel) => {
+        clearTimeout(shieldPadTimer);
+        if (this._padOwner === this.psShieldBtn) this._padHide();
+        if (cancel || bubbled || !this.enabled) return;
+        const app = getAppState();
+        if (this.getEquippedItemId() === 'shield') {
+          // (back to the sword — or empty hands where the sword has to be bought)
+          if (app?.ownsSword?.() ?? true) app?.equipInventoryItem?.('foamSword');
+          else app?.putWeaponsAway?.();
+        } else {
+          app?.equipInventoryItem?.('shield');
+        }
+        this.refreshActionButtons();
+      }
     });
 
     // Town's flying broom (bought from the wizard): on it ↔ off it (refreshActionButtons shows it)
@@ -864,8 +1020,6 @@ export class PlayerControls {
   refreshActionButtons() {
     if (!this.punchButton) return;
     const appState = appContext.uiState.appState ?? window.appState;
-    const inventory = appState?.getInventory?.() || {};
-    const hasShield = (inventory.shield?.count ?? 0) > 0;
     const hasWand = !!appState?.isWandAllowed?.();
     const hasRod = !!appState?.isRodAllowed?.();
     // (Town: the sword is bought like the rest, and ✋ Hands puts everything away)
@@ -877,29 +1031,36 @@ export class PlayerControls {
     const story = !!appState?.isStoryMode?.();
     // (a job's fight from the canoe — the fisher's pirates: the sword, and nothing to switch to)
     const canoeArmed = inCanoe && !!appState?.isCanoeArmed?.();
-    const weapons = canoeArmed ? [] : inCanoe ? (hasRod ? [{ id: 'canoe_oar', label: 'Oar' }, { id: 'fishing_rod', label: 'Rod' }] : [])
-      : story ? [
-        ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
-        ...(hasRod ? [{ id: 'fishing_rod', label: 'Rod' }] : []),
-      ] : [
-      ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
-      ...(hasWand ? [{ id: 'magic_wand', label: 'Wand' }] : []),
-      ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
-      ...(hasRod ? [{ id: 'fishing_rod', label: 'Rod' }] : []),
-    ];
-    // Default to foamSword when nothing detected (unless nothing in hand is allowed); while
-    // the bow is out for a draw, the item that comes back after
+    const ids = canoeArmed ? [] : inCanoe ? (hasRod ? ['canoe_oar', 'fishing_rod'] : [])
+      : [
+        ...(hasSword ? ['foamSword'] : []),
+        ...(hasWand && !story ? ['magic_wand'] : []),
+        ...(hasRod ? ['fishing_rod'] : []),
+        ...(unarmedAllowed ? [HANDS_ID] : []),
+      ];
+    // What's in hand (the sword when nothing's detected, unless nothing in hand is allowed);
+    // while the bow is out for a draw, the item that comes back after
     const bowDraw = appState?.getBowDrawPrev?.();
-    const equippedId = bowDraw ? bowDraw.prev : this.getEquippedItemId();
-    const others = weapons.filter(w => w.id !== equippedId);
-    if (unarmedAllowed && equippedId && !inCanoe) others.push({ id: HANDS_ID, label: 'Hands' });
-    [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5].forEach((button, index) => {
-      const w = others[index];
-      button.dataset.psWeaponId = w ? w.id : '';
-      button.textContent = w ? w.label : '';
-      button.style.display = w ? '' : 'none';
-      button.classList.toggle('ps-wand-btn', w?.id === 'magic_wand');
-    });
+    const equippedId = (bowDraw ? bowDraw.prev : this.getEquippedItemId()) ?? (unarmedAllowed ? HANDS_ID : 'foamSword');
+    const options = ids.map((id) => ({ id, dir: WHEEL_DIRS[id], label: WHEEL_LABELS[id] }));
+    const others = options.filter((o) => o.id !== equippedId);
+    // A tap: the sword — or, with the sword in hand, empty hands — else the first of the rest
+    const preferred = equippedId === 'foamSword' ? HANDS_ID : 'foamSword';
+    const def = others.find((o) => o.id === preferred) ?? others[0] ?? null;
+    this._wheel = def ? { options, default: def, equipped: equippedId } : null;
+    const wheel = this.psWeaponBtn1;
+    wheel.dataset.psWeaponId = def ? def.id : '';
+    wheel.dataset.psWeaponIds = def ? options.map((o) => o.id).join(',') : '';
+    if (wheel.dataset.label !== (def?.label ?? '')) { wheel.dataset.label = def?.label ?? ''; wheel.textContent = def?.label ?? ''; }
+    wheel.style.display = def ? '' : 'none';
+    wheel.classList.toggle('ps-wand-btn', def?.id === 'magic_wand');
+    wheel.classList.toggle('ps-wheel-more', others.length > 1);
+    if (!def && this._padOwner === this.psWeaponBtn1) this._padHide();
+    // Shield / Bubble: the shield part only once a shield is owned (not in Story / the canoe)
+    const shieldShown = this._shieldShown();
+    this.psShieldPart.style.display = shieldShown ? '' : 'none';
+    this.psBubbleBtn.classList.toggle('ps-combo-alt', shieldShown);
+    this.psShieldBtn.classList.toggle('ps-shield-on', shieldShown && equippedId === 'shield');
     this.updateBowButton(false);
     // Town's broom: Broom (get on) / Land (get off)
     if (this.psBroomBtn) {
@@ -920,26 +1081,111 @@ export class PlayerControls {
     this.layoutMobileActionButtons();
   }
 
-  // The bow (held to draw): its own button with the arrows left on it — kept fresh each frame
-  // by the game (bootstrapGameApp.js _updateBowDraw); a change of shown / hidden re-lays out
+  // The bow part of Bow / Bomb: owned and not in the canoe
+  _bowShown() {
+    const appState = appContext.uiState.appState ?? window.appState;
+    return !!appState?.ownsBow?.() && !appState?.isInCanoe?.();
+  }
+
+  // The shield part of Shield / Bubble: owned, not in Story or the canoe
+  _shieldShown() {
+    const appState = appContext.uiState.appState ?? window.appState;
+    const hasShield = ((appState?.getInventory?.() || {}).shield?.count ?? 0) > 0;
+    return hasShield && !appState?.isStoryMode?.() && !appState?.isInCanoe?.();
+  }
+
+  /** The on-screen button that holds an item ('pistol' / 'bomb' / 'shield' / 'bubble' / a weapon id) */
+  weaponButtonFor(itemId) {
+    if (itemId === 'pistol' || itemId === 'gun' || itemId === 'bomb') return this.psBowBtn ?? null;
+    if (itemId === 'shield' || itemId === 'bubble') return this.psShieldBtn ?? null;
+    const wheel = this.psWeaponBtn1;
+    return wheel && wheel.style.display !== 'none' && (wheel.dataset.psWeaponIds || '').split(',').includes(itemId) ? wheel : null;
+  }
+
+  // The weapon wheel: the weapon button's options round it while it's held (fixed on the
+  // page, centred on the button), the one the slide points at marked
+  // The d-pad of a held gesture button: its options as buttons attached round it (up / down /
+  // left / right of it, `options` = [{ dir, label, current?, def? }]), the rest of the action
+  // buttons hidden meanwhile (body.ps-pad-open — visibility only, so nothing re-lays out) so
+  // there's room for them; the one the slide points at is marked (_padMark)
+  _padShow(owner, options) {
+    if (!owner || !options?.length) { this._padHide(); return; }
+    if (!this._padEl) {
+      this._padEl = document.createElement('div');
+      this._padEl.className = 'ps-pad';
+      document.body.appendChild(this._padEl);
+    }
+    const pad = this._padEl;
+    pad.innerHTML = '';
+    for (const o of options) {
+      const chip = document.createElement('div');
+      chip.className = `ps-pad-chip is-${o.dir}`;
+      chip.dataset.dir = o.dir;
+      chip.textContent = o.label;
+      chip.classList.toggle('is-current', !!o.current);
+      chip.classList.toggle('is-default', !!o.def);
+      chip.classList.toggle('is-cancel', !!o.cancel);
+      pad.appendChild(chip);
+    }
+    // (round the button as it is held — grown by .ps-held's scale, which may still be easing in)
+    const r = owner.getBoundingClientRect();
+    const held = Math.max(r.width, owner.offsetWidth * PAD_HELD_SCALE);
+    pad.style.left = `${r.left + r.width / 2}px`;
+    pad.style.top = `${r.top + r.height / 2}px`;
+    pad.style.setProperty('--pad-reach', `${Math.round(held / 2 + PAD_GAP_PX)}px`);
+    this._padOwner?.classList.remove('ps-pad-owner');
+    this._padOwner = owner;
+    owner.classList.add('ps-pad-owner');
+    pad.classList.add('is-on');
+    document.body.classList.add('ps-pad-open');
+  }
+
+  _padMark(dir) {
+    if (!this._padEl) return;
+    for (const chip of this._padEl.children) chip.classList.toggle('is-pick', !!dir && chip.dataset.dir === dir);
+  }
+
+  _padHide() {
+    this._padEl?.classList.remove('is-on');
+    this._padOwner?.classList.remove('ps-pad-owner');
+    this._padOwner = null;
+    document.body.classList.remove('ps-pad-open');
+  }
+
+  // The weapon button's d-pad: every weapon on its side (WHEEL_DIRS), the one in hand dimmed
+  _showWeaponWheel() {
+    const wheel = this._wheel;
+    if (!wheel || this._padOwner === this.psWeaponBtn1) return;
+    this._padShow(this.psWeaponBtn1, wheel.options.map((o) => ({
+      dir: o.dir, label: o.label, current: o.id === wheel.equipped, def: o.id === wheel.default.id
+    })));
+  }
+
+  // Bow / Bomb: the bow part with the arrows left on it (kept fresh each frame by the game —
+  // bootstrapGameApp.js _updateBowDraw; the bomb part's count by its updatePsBombButton);
+  // a change of shown / hidden re-lays out
   updateBowButton(relayout = true) {
     const btn = this.psBowBtn;
     if (!btn) return;
     const appState = appContext.uiState.appState ?? window.appState;
-    const show = !!appState?.ownsBow?.() && !appState?.isInCanoe?.();
-    const display = show ? '' : 'none';
-    if (btn.style.display !== display) {
-      btn.style.display = display;
+    const bowShown = this._bowShown();
+    const display = bowShown ? '' : 'none';
+    if (this.psBowPart.style.display !== display) {
+      this.psBowPart.style.display = display;
       if (relayout) this.layoutMobileActionButtons();
     }
     const arrows = appState?.getPistolAmmoCount?.() ?? 0;
     const label = `🏹 ${arrows}`;
-    if (btn.dataset.label !== label) { btn.dataset.label = label; btn.textContent = label; }
-    btn.classList.toggle('ps-bow-empty', arrows <= 0);
+    if (this.psBowPart.dataset.label !== label) { this.psBowPart.dataset.label = label; this.psBowPart.textContent = label; }
+    this.psBowPart.classList.toggle('ps-bow-empty', arrows <= 0);
     const drawing = !!appState?.isBowDrawing?.();
+    const aiming = !!appState?.isBombAiming?.();
     btn.classList.toggle('ps-bow-drawing', drawing);
-    if (!drawing) btn.classList.remove('ps-held');
-    if (!appState?.isBombAiming?.()) this.psBombBtn?.classList.remove('ps-held');
+    btn.classList.toggle('ps-bomb-aiming', aiming);
+    // (the bomb is the main part with no bow, or while one's aimed)
+    this.psBombBtn.classList.toggle('ps-combo-alt', bowShown && !aiming);
+    this.psBowPart.classList.toggle('ps-combo-alt', aiming);
+    if (!drawing && !aiming) btn.classList.remove('ps-held');
     if (!this._holdingButton() && this._touchLayoutStale) this.layoutMobileActionButtons();
   }
 
@@ -959,17 +1205,18 @@ export class PlayerControls {
     button.style.setProperty('--mobile-grid-y', String(slot.y));
   }
 
-  // Block/fire button + two weapon switch buttons, bubble and bomb
+  // Block/fire button + the weapon button, Bow / Bomb, Shield / Bubble (+ the broom's)
   layoutMobileActionButtons() {
-    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5, this.psBowBtn, this.psBubbleBtn, this.psBombBtn, this.psBroomBtn, this.psBoostBtn].forEach((button) => {
+    const buttons = [this.punchButton, this.psWeaponBtn1, this.psBowBtn, this.psShieldBtn, this.psBroomBtn, this.psBoostBtn];
+    buttons.forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
     // Touch screens: two columns only — the jump column (jump, the gyro button over it) and
-    // bubble / bomb beside it; the weapon buttons stack on top of both (the middle of the
+    // Shield / Bubble, Bow / Bomb beside it; the weapon button on top (the middle of the
     // screen stays clear for the interact buttons)
     if (this.isTouchLayout()) {
-      // (mid-draw / mid-aim the buttons stay where they are — the finger's on the bow / bomb;
+      // (mid-draw / mid-aim the buttons stay where they are — the finger's on the button;
       // laid out again after)
       if (this._holdingButton() && this._touchLayout) {
         for (const [b, slot] of this._touchLayout) this.applyMobileButtonPosition(b, slot);
@@ -982,47 +1229,22 @@ export class PlayerControls {
       const place = (b, slot) => { placed.push([b, slot]); this.applyMobileButtonPosition(b, slot); };
       const shown = (b) => !!b && b.style.display !== 'none' && getComputedStyle(b).display !== 'none';
       const gyro = document.getElementById('gyro-button');
-      const rows = [shown(gyro) ? 2 : 1, 0];   // next free row: [jump column, bomb column]
-      if (shown(this.psBubbleBtn)) place(this.psBubbleBtn, { x: 1, y: rows[1]++ });
-      if (shown(this.psBombBtn)) place(this.psBombBtn, { x: 1, y: rows[1]++ });
-      if (shown(this.psBroomBtn)) place(this.psBroomBtn, { x: 1, y: rows[1]++ });
-      if (shown(this.psBoostBtn)) place(this.psBoostBtn, { x: 1, y: rows[1]++ });
-      for (const b of [this.psBowBtn, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psWeaponBtn5]) {
-        if (b === this.psBowBtn ? !shown(b) : !b.dataset.psWeaponId) continue;
-        const col = rows[1] <= rows[0] ? 1 : 0;
-        place(b, { x: col, y: rows[col]++ });
+      const rows = [shown(gyro) ? 2 : 1, 0];   // next free row: [jump column, other column]
+      // (the weapon button in the inner column, off the screen's edge, so its wheel can be
+      // slid right as well as left; Bow / Bomb on top of the jump column)
+      for (const b of [this.psShieldBtn, this.psWeaponBtn1, this.psBroomBtn, this.psBoostBtn]) {
+        if (shown(b)) place(b, { x: 1, y: rows[1]++ });
       }
+      if (shown(this.psBowBtn)) place(this.psBowBtn, { x: 0, y: rows[0]++ });
       return;
     }
-    const blockInGrid = true;
-    if (blockInGrid && this.punchButton.style.display !== 'none') {
-      this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
-    }
-    if (this.psWeaponBtn1.dataset.psWeaponId) {
-      this.applyMobileButtonPosition(this.psWeaponBtn1, { x: 2, y: 0 });
-    }
-    if (this.psWeaponBtn2.dataset.psWeaponId) {
-      this.applyMobileButtonPosition(this.psWeaponBtn2, { x: 2, y: 1 });
-    }
-    if (this.psWeaponBtn3.dataset.psWeaponId) {
-      this.applyMobileButtonPosition(this.psWeaponBtn3, { x: 2, y: 2 });
-    }
-    if (this.psWeaponBtn4.dataset.psWeaponId) {
-      this.applyMobileButtonPosition(this.psWeaponBtn4, { x: 2, y: 3 });
-    }
-    // (only Town has five: the last goes in the middle column, above the bomb)
-    if (this.psWeaponBtn5.dataset.psWeaponId) {
-      this.applyMobileButtonPosition(this.psWeaponBtn5, { x: 1, y: blockInGrid ? 3 : 2 });
-    }
-    // The bow: its own column, left of the weapon buttons
-    this.applyMobileButtonPosition(this.psBowBtn, { x: 3, y: 0 });
-    // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
-    this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: blockInGrid ? 1 : 0 });
-    // Bomb sits above the bubble (the jump/gyro column and weapon buttons stay clear)
-    this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: blockInGrid ? 2 : 1 });
-    // (Town's broom: on top of the weapon column)
-    this.applyMobileButtonPosition(this.psBroomBtn, { x: 2, y: 4 });
-    this.applyMobileButtonPosition(this.psBoostBtn, { x: 2, y: 5 });
+    if (this.punchButton.style.display !== 'none') this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+    this.applyMobileButtonPosition(this.psBowBtn, { x: 2, y: 0 });
+    this.applyMobileButtonPosition(this.psShieldBtn, { x: 1, y: 1 });
+    this.applyMobileButtonPosition(this.psWeaponBtn1, { x: 1, y: 2 });
+    // (Town's broom: the weapon column)
+    this.applyMobileButtonPosition(this.psBroomBtn, { x: 2, y: 1 });
+    this.applyMobileButtonPosition(this.psBoostBtn, { x: 2, y: 2 });
   }
 
   setupEventListeners() {

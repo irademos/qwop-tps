@@ -3035,10 +3035,135 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   opacity: 0.5;
 }
 /* The bubble's hand is held out (body.bubble-cast): no bow / shield while it lasts */
-body.bubble-cast .ps-bow-btn,
-body.bubble-cast .ps-weapon-btn[data-ps-weapon-id="shield"] {
+body.bubble-cast .ps-bow-part,
+body.bubble-cast .ps-shield-part {
   opacity: 0.35;
   filter: grayscale(0.8);
+}
+/* ── The gesture buttons (controls.js initializeActionButtons) ─────────────────────
+   Bow / Bomb and Shield / Bubble: two parts stacked — the slide-up one small on top (↑),
+   the tap / hold one below. The weapon button: a tap takes what it says, held a wheel of
+   the weapons shows round it as a d-pad (.ps-pad) and sliding picks one */
+.ps-combo-btn {
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+.ps-combo-part {
+  display: block;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ps-combo-part.ps-combo-alt {
+  order: -1;
+  font-size: 10px;
+  opacity: 0.85;
+}
+.ps-combo-part.ps-combo-alt::before {
+  content: '↑ ';
+  opacity: 0.7;
+}
+.ps-bomb-part.ps-bomb-empty,
+.ps-bubble-part.ps-bubble-empty,
+.ps-bow-part.ps-bow-empty {
+  opacity: 0.45;
+}
+.ps-bow-btn.ps-bomb-aiming {
+  background: rgba(249, 115, 22, 0.92) !important;
+  border-color: #fff !important;
+  box-shadow: 0 0 16px rgba(251, 146, 60, 0.85);
+}
+.ps-shield-btn {
+  background: rgba(14, 165, 233, 0.45) !important;
+  color: #fff !important;
+  border: 1px solid rgba(186, 230, 253, 0.7) !important;
+}
+.ps-shield-btn.ps-shield-on {
+  border-color: #fff !important;
+  box-shadow: 0 0 14px rgba(125, 211, 252, 0.7);
+}
+.ps-shield-btn:has(.ps-bubble-active) {
+  background: rgba(125, 211, 252, 0.9) !important;
+  color: #063a57 !important;
+}
+.ps-wheel-btn {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+/* (more than one to pick from: four dots in the corners say it can be held and slid) */
+.ps-wheel-btn.ps-wheel-more::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) top center / 6px 6px no-repeat,
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) bottom center / 6px 6px no-repeat,
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) center left / 6px 6px no-repeat,
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) center right / 6px 6px no-repeat;
+  opacity: 0.55;
+}
+.ps-pad {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 1200;
+  pointer-events: none;
+  display: none;
+  --pad-reach: 48px;
+  --pad-chip: 58px;
+}
+.ps-pad.is-on { display: block; }
+/* Each option a button attached to the held one's side, like a d-pad's arms */
+.ps-pad-chip {
+  position: absolute;
+  width: var(--pad-chip);
+  height: var(--pad-chip);
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4px;
+  box-sizing: border-box;
+  border-radius: var(--radius-md);
+  background: var(--surface-hud);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.08s var(--ease), background-color 0.1s;
+}
+.ps-pad-chip.is-up    { left: 0; top: calc(-1 * (var(--pad-reach) + var(--pad-chip) / 2)); }
+.ps-pad-chip.is-down  { left: 0; top: calc(var(--pad-reach) + var(--pad-chip) / 2); }
+.ps-pad-chip.is-left  { top: 0; left: calc(-1 * (var(--pad-reach) + var(--pad-chip) / 2)); }
+.ps-pad-chip.is-right { top: 0; left: calc(var(--pad-reach) + var(--pad-chip) / 2); }
+.ps-pad-chip.is-current { opacity: 0.5; }
+.ps-pad-chip.is-default { border-color: var(--accent, #f5c451); }
+.ps-pad-chip.is-cancel { color: #fca5a5; border-color: rgba(248, 113, 113, 0.6); }
+.ps-pad-chip.is-pick {
+  background: var(--accent, #f5c451);
+  color: #1b1405;
+  transform: translate(-50%, -50%) scale(1.12);
+}
+.ps-pad-chip.is-cancel.is-pick { background: #ef4444; color: #fff; }
+/* While a gesture button is held: the other buttons step out of the way (visibility only —
+   the layout doesn't move under the finger) */
+body.ps-pad-open .action-button:not(.ps-pad-owner),
+body.ps-pad-open #jump-button,
+body.ps-pad-open #gyro-button {
+  visibility: hidden;
 }
 /* The crosshair (the middle of the screen = where the arrow goes): a dot and four ticks that
    close in as the string comes back (--spread), the distance in metres beside it */
@@ -3686,8 +3811,6 @@ body.classic-mode .sword-combo-hint, body.story-cut .sword-combo-hint { display:
 /* ── Multiplayer mode: lobby, duel countdown / winner, find-location (src/multiplayer/duelMode.js) ── */
 /* Duels are sword only: hide the bubble, bomb and weapon-switch buttons (battles,
    body.match-loadout, keep them: they fill up from the arena's pickups) */
-body.multiplayer-mode:not(.match-loadout) #ps-bubble-btn,
-body.multiplayer-mode:not(.match-loadout) #ps-bomb-btn,
 body.multiplayer-mode:not(.match-loadout) .ps-weapon-btn {
   display: none !important;
 }
@@ -4512,8 +4635,6 @@ body.classic-mode #combo-meter,
 body.classic-mode #joystick-container,
 body.classic-mode #jump-button,
 body.classic-mode #gyro-button,
-body.classic-mode #ps-bubble-btn,
-body.classic-mode #ps-bomb-btn,
 body.classic-mode .ps-weapon-btn {
   display: none !important;
 }
@@ -5436,8 +5557,7 @@ body.story-mode #ammo-display,
 body.story-mode #coin-popup,
 body.story-mode #ps-kill-counter,
 body.story-mode #combo-meter,
-body.story-mode #ps-bubble-btn,
-body.story-mode #ps-bomb-btn,
+body.story-mode #ps-shield-btn,
 body.story-mode #ps-bow-btn,
 body.story-mode #ps-broom-btn,
 body.story-mode #ps-boost-btn,
