@@ -3,19 +3,27 @@
 // At the fishing spot (one for now — the shore spot nearest the middle, `places.fishSpot`), or
 // anywhere out in the canoe (T.fishAnywhere — townCanoe.js: the rod comes out there too, the
 // water round it — T.fishWater — is what a cast lands on, and it may drift FISH_CANOE_DRIFT):
-//   • cast: swing the rod forward — the harder, the farther the bobber flies (FISH_CAST_*)
-//   • wait: the bobber floats; a nibble first sometimes (pulling on it scares the fish off)
-//   • bite: the bobber goes under (the phone buzzes) — pull the rod back within FISH_HOOK_S
-//   • fight: the fish runs (line goes out; reeling or pulling now strains the line — too much
-//     and it snaps) then tires at the surface (⬆ Pull! — a good pull brings it in a long way);
-//     1–3 good pulls by its size (FISH_SIZES) wear it out
-//   • reel it in: crank the reel (the phone's Block bar turns into one, or the on-screen reel /
-//     hold R) until it's at the bank
-// Without a gyro the cast / pull are buttons (acts). The game's player-local rod tip is
-// sampled each frame; a cast / pull is its travel within FISH_GESTURE_S.
-// The HUD says nothing while it goes well: only after FISH_HINT_AFTER mistakes (scared it off,
-// too slow, snapped, lost it) does it show ⬆ Pull the rod! / 🌀 Reel in! at those moments, until
-// a fish is landed.
+//   • bubbles: while the rod's out, bubbles rise on the water within a cast (createFishBubbles —
+//     moving on every FISH_BUBBLE_S); a bobber within FISH_BUBBLE_HIT_R of them bites in
+//     FISH_BUBBLE_BITE_S with no nibbling, and a bigger fish (FISH_SIZES `bw`)
+//   • cast: swing the rod forward — the harder, the farther the bobber flies (FISH_CAST_*); the
+//     swing's sideways travel aims it (back-left → out-right lands to the right, back-right →
+//     out-left to the left — FISH_AIM_GAIN, up to FISH_AIM_MAX)
+//   • wait: the bobber floats; a nibble first sometimes (a swipe on it scares the fish off)
+//   • bite: the bobber goes under (the phone buzzes) — swipe the rod within FISH_HOOK_S
+//   • fight: the fish swims — left, right or out (the HUD's 🐟 arrow, the bobber running that
+//     way): swipe the other way — right / left — or up for out, within its size's `swim` s. A good
+//     counter turns it and brings it in (FISH_PULL_KEEP); the wrong way or too late strains the
+//     line (FISH_WRONG_TENSION / FISH_LATE_TENSION — at 1 it snaps); `pulls` good ones wear it out
+//   • reel it in: worn out, the camera closes in on the rod's reel (FISH_REEL_CAM_FOV) and the rod
+//     holds still (ctx.setReelHold) — circling the phone (or twisting it) cranks the reel
+//     (bootstrapGameApp.js measures it into ctx.takeReel); no gyro: the on-screen reel / hold R.
+//     Left too long (FISH_REEL_IDLE_S) it gets its breath back and swims again
+// Without a gyro the cast / swipes are buttons (acts: Cast — aimed at the bubbles, roughly —,
+// Pull, ⬅ / ⬆ / ➡). The game's player-local rod tip is sampled each frame; a cast / swipe is its
+// travel within FISH_GESTURE_S.
+// The HUD shows the fish's way while it swims and the reel's instruction; only after
+// FISH_HINT_AFTER mistakes does it also say which way to swipe, until a fish is landed.
 //
 // On foot in Town (T.castAhead) a cast goes straight out in front from wherever the player
 // stands (castAheadTarget — a dock's end, a bank, a lake shore); with no open water along the line
@@ -42,28 +50,25 @@
 // takes it away (T.loseFish(text) — a pirate's bomb rocks the canoe).
 
 import * as THREE from 'three';
-import { createFishingRig } from '../items/fishingRod.js';
+import { createFishBubbles, createFishingRig } from '../items/fishingRod.js';
 import {
-  FISH_CANCEL_DIST, FISH_CANOE_DRIFT, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER,
-  FISH_HOOK_S, FISH_KEY_REEL, FISH_LAND_DIST, FISH_LINE_MAX, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S, FISH_PULL_KEEP,
-  FISH_PULL_SWING, FISH_PULL_TENSION, FISH_REEL_M, FISH_RUN_S, FISH_RUN_SPEED, FISH_SETTLE_S, FISH_SIZES,
-  FISH_MIN_DEPTH, FISH_SPOT_RADIUS, FISH_TENSION_DECAY, FISH_TENSION_PER_TURN, FISH_TIRED_S, FISH_WAIT_S, NAV_CELL,
-  dist2, el, rand,
+  FISH_AIM_GAIN, FISH_AIM_MAX, FISH_BUBBLE_BITE_S, FISH_BUBBLE_HIT_R, FISH_BUBBLE_S, FISH_CANCEL_DIST,
+  FISH_CANOE_DRIFT, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER, FISH_HOOK_S,
+  FISH_KEY_REEL, FISH_LAND_DIST, FISH_LATE_TENSION, FISH_LINE_MAX, FISH_MIN_DEPTH, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S,
+  FISH_PULL_KEEP, FISH_PULL_SWING, FISH_REEL_CAM_FOV, FISH_REEL_IDLE_S, FISH_REEL_M, FISH_RUN_SPEED, FISH_SETTLE_S,
+  FISH_SIDE_SPEED, FISH_SIZES, FISH_SPOT_RADIUS, FISH_SWIPE_SIDE, FISH_TENSION_DECAY, FISH_TURN_S, FISH_WAIT_S,
+  FISH_WRONG_TENSION, NAV_CELL, dist2, el, rand,
 } from './townConfig.js';
 
 const TURN = Math.PI * 2;
-
-// The hint at each moment once the player's been getting it wrong (the HUD, the phone's reel);
-// the cue itself is the phone's buzz either way
-const HINTS = {
-  bite: 'Pull the rod!',
-  pull: 'Pull the rod!',
-  reel: 'Reel in!',
-};
+// The swipe that counters each way the fish swims (its way as the player sees it)
+const COUNTER = { left: 'right', right: 'left', out: 'up' };
+const ARROW = { left: '⬅', right: '➡', out: '⬆', up: '⬆' };
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownFishing(T, ctx) {
-  // ── HUD: a hint once they're struggling, and an on-screen reel (no phone) ──
+  // ── HUD: the fish's way while it swims, the reel's instruction, hints once they're struggling,
+  // and an on-screen reel (no gyro) ──
   const meter = el('div', 'town-fishing ui-panel hidden');
   const cueEl = el('div', 'town-fishing-cue');
   meter.append(cueEl);
@@ -119,8 +124,18 @@ export function installTownFishing(T, ctx) {
     const p = T.playerPos();
     return dist2(p.x, p.z, s.x, s.z) < (T.fishSpotReach ?? FISH_SPOT_RADIUS * FISH_SPOT_RADIUS);
   };
-  // Where the bobber lands: the water nearest `dist` m in front of the player
   const _fwd = new THREE.Vector3();
+  // The player's facing on the ground, turned `aim` rad to their right
+  const facing = (aim = 0) => {
+    ctx.getPlayerModel()?.getWorldDirection(_fwd);
+    const l = Math.hypot(_fwd.x, _fwd.z) || 1;
+    const fx = _fwd.x / l;
+    const fz = _fwd.z / l;
+    // (right of the facing = (−fz, fx): the model faces +Z, its right is −X)
+    const c = Math.cos(aim);
+    const s = Math.sin(aim);
+    return { x: fx * c - fz * s, z: fz * c + fx * s };
+  };
   // Open water at (x, z): the surface over the ground there (not a dock's deck / a bridge over it)
   const openWater = (x, z) => {
     const wy = ctx.getWaterY(x, z);
@@ -128,16 +143,20 @@ export function installTownFishing(T, ctx) {
     const gy = ctx.getGroundY(x, z);
     return !Number.isFinite(gy) || gy < wy - 0.05;
   };
-  // Straight out in front (T.castAhead): the first open water from `dist` back toward the player
-  // (a short cast from the bank still lands on it), else on past it; { at, dry } — dry: no water
-  // along the line, the bobber lands `dist` out on the ground and comes back in
-  const castAheadTarget = (dist) => {
+  // Water a bobber can come down on (and bubbles rise from)
+  const fishable = (x, z) => {
+    if (ahead()) return openWater(x, z);
+    const nav = T.layout?.nav;
+    return !!(T.fishWater?.(x, z) ?? (nav && nav.isWater(nav.indexAt(x, z))));
+  };
+  // Straight out (T.castAhead), `aim` rad to the right of the facing: the first open water from
+  // `dist` back toward the player (a short cast from the bank still lands on it), else on past
+  // it; { at, dry } — dry: no water along the line, the bobber lands `dist` out on the ground and
+  // comes back in
+  const castAheadTarget = (dist, aim) => {
     const p = T.playerPos();
-    ctx.getPlayerModel()?.getWorldDirection(_fwd);
-    const l = Math.hypot(_fwd.x, _fwd.z) || 1;
-    const fx = _fwd.x / l;
-    const fz = _fwd.z / l;
-    const at = (d) => ({ x: p.x + fx * d, z: p.z + fz * d });
+    const f = facing(aim);
+    const at = (d) => ({ x: p.x + f.x * d, z: p.z + f.z * d });
     let hit = null;
     for (let d = dist; d >= 1.5 && !hit; d -= 0.5) { const q = at(d); if (openWater(q.x, q.z)) hit = q; }
     for (let d = dist + 0.5; d <= FISH_CAST_DIST[1] && !hit; d += 0.5) { const q = at(d); if (openWater(q.x, q.z)) hit = q; }
@@ -146,12 +165,12 @@ export function installTownFishing(T, ctx) {
     const gy = ctx.getGroundY(q.x, q.z);
     return { at: new THREE.Vector3(q.x, Number.isFinite(gy) ? gy : p.y ?? 0, q.z), dry: true };
   };
-  const castTarget = (dist) => {
+  // (the spot / the canoe: the water nearest where the cast was aimed)
+  const castTarget = (dist, aim) => {
     const p = T.playerPos();
-    const nav = T.layout.nav;
-    ctx.getPlayerModel()?.getWorldDirection(_fwd);
-    const aimX = p.x + _fwd.x * dist;
-    const aimZ = p.z + _fwd.z * dist;
+    const f = facing(aim);
+    const aimX = p.x + f.x * dist;
+    const aimZ = p.z + f.z * dist;
     let best = null;
     let bestD = Infinity;
     const r = FISH_CAST_REACH;
@@ -159,7 +178,7 @@ export function installTownFishing(T, ctx) {
       for (let dx = -r; dx <= r; dx += NAV_CELL / 2) {
         const x = p.x + dx;
         const z = p.z + dz;
-        if (dx * dx + dz * dz < 1.5 * 1.5 || !(T.fishWater?.(x, z) ?? nav.isWater(nav.indexAt(x, z)))) continue;
+        if (dx * dx + dz * dz < 1.5 * 1.5 || !fishable(x, z)) continue;
         const d = dist2(x, z, aimX, aimZ);
         if (d < bestD) { bestD = d; best = { x, z }; }
       }
@@ -169,7 +188,43 @@ export function installTownFishing(T, ctx) {
     return new THREE.Vector3(best.x, y, best.z);
   };
 
-  // ── The rod tip's motion (player-local), for casts and pulls ──
+  // ── Bubbles where the fish are (within a cast, in front of the player) ──
+  let bubbleFx = null;
+  const bubblesFx = () => (bubbleFx ??= createFishBubbles(ctx.scene));
+  let bub = null;          // { x, y, z, until, fromX, fromZ }
+  let bubbleTryAt = -99;
+  const dropBubbles = () => { bub = null; bubbleFx?.hide(); };
+  const findBubbleSpot = () => {
+    const p = T.playerPos();
+    for (let i = 0; i < 24; i++) {
+      const f = facing(rand(-FISH_AIM_MAX, FISH_AIM_MAX) * 0.85);
+      const d = rand(FISH_CAST_DIST[0] + 0.5, FISH_CAST_DIST[1] - 0.5);
+      const x = p.x + f.x * d;
+      const z = p.z + f.z * d;
+      if (!fishable(x, z)) continue;
+      const y = ctx.getWaterY(x, z);
+      if (y == null) continue;
+      return { x, y, z };
+    }
+    return null;
+  };
+  const updateBubbles = (dt) => {
+    const want = ctx.isRodEquipped() && atSpot() && !ctx.isPlayerDead() && !T.sequence && !T.jail
+      && (!T.fishing || T.fishing.phase === 'cast');
+    if (!want) { if (bub && !T.fishing) dropBubbles(); bubbleFx?.update(dt); return; }
+    const p = T.playerPos();
+    // (moved on: after a while, or the player's walked / drifted well away from where they were)
+    if (bub && !T.fishing && (T.simT > bub.until || dist2(p.x, p.z, bub.fromX, bub.fromZ) > 4 * 4)) dropBubbles();
+    if (!bub && T.simT - bubbleTryAt > 1) {
+      bubbleTryAt = T.simT;
+      const s = findBubbleSpot();
+      if (s) bub = { ...s, until: T.simT + rand(...FISH_BUBBLE_S), fromX: p.x, fromZ: p.z };
+    }
+    if (bub) bubblesFx().place(bub.x, bub.y, bub.z);
+    bubbleFx?.update(dt);
+  };
+
+  // ── The rod tip's motion (player-local), for casts and swipes ──
   const tipHistory = []; // { t, x, y, z }
   const _w = new THREE.Vector3();
   const sampleTip = () => {
@@ -183,26 +238,44 @@ export function installTownFishing(T, ctx) {
     tipHistory.push({ t: T.simT, x: _w.x, y: _w.y, z: _w.z });
     while (tipHistory.length && T.simT - tipHistory[0].t > FISH_GESTURE_S) tipHistory.shift();
   };
-  // How far the tip went forward / back-or-up within the window (m)
+  // How far the tip went within the window (m): forward, back-or-up, sideways (+: to the
+  // player's left — local +X), and sideways since the forward swing began (the cast's aim)
   const swing = () => {
-    if (tipHistory.length < 2) return { fwd: 0, back: 0 };
+    if (tipHistory.length < 2) return { fwd: 0, back: 0, side: 0, aimSide: 0 };
     const cur = tipHistory[tipHistory.length - 1];
-    let minZ = cur.z; let maxZ = cur.z; let minY = cur.y;
+    let minZ = cur.z; let maxZ = cur.z; let minY = cur.y; let minX = cur.x; let maxX = cur.x;
+    let fromX = cur.x;
     for (const h of tipHistory) {
-      minZ = Math.min(minZ, h.z);
+      if (h.z < minZ) { minZ = h.z; fromX = h.x; }
       maxZ = Math.max(maxZ, h.z);
       minY = Math.min(minY, h.y);
+      minX = Math.min(minX, h.x);
+      maxX = Math.max(maxX, h.x);
     }
-    return { fwd: cur.z > 0.2 ? cur.z - minZ : 0, back: Math.max(maxZ - cur.z, cur.y - minY) };
+    const toLeft = cur.x - minX;
+    const toRight = maxX - cur.x;
+    return {
+      fwd: cur.z > 0.2 ? cur.z - minZ : 0,
+      back: Math.max(maxZ - cur.z, cur.y - minY),
+      side: toLeft > toRight ? toLeft : -toRight,
+      aimSide: cur.x - fromX,
+    };
   };
   let gestureAt = -1; // (one gesture at a time: the window starts afresh after each)
-  const takeGesture = () => {
+  // { kind: 'cast', power, aim } with the line in; { kind: 'left' | 'right' | 'up' } with it out
+  const takeGesture = (lineOut) => {
     if (T.simT - gestureAt < FISH_GESTURE_S) return null;
     const s = swing();
-    if (s.back >= FISH_PULL_SWING && s.back > s.fwd) return { kind: 'pull' };
-    if (s.fwd >= FISH_CAST_SWING[0]) {
-      return { kind: 'cast', power: THREE.MathUtils.clamp((s.fwd - FISH_CAST_SWING[0]) / (FISH_CAST_SWING[1] - FISH_CAST_SWING[0]), 0, 1) };
+    if (!lineOut) {
+      if (s.fwd < FISH_CAST_SWING[0] || s.fwd < s.back) return null;
+      const power = THREE.MathUtils.clamp((s.fwd - FISH_CAST_SWING[0]) / (FISH_CAST_SWING[1] - FISH_CAST_SWING[0]), 0, 1);
+      // (sideways while it went forward: toward the player's right is −X)
+      const aim = THREE.MathUtils.clamp(Math.atan2(-s.aimSide * FISH_AIM_GAIN, s.fwd), -FISH_AIM_MAX, FISH_AIM_MAX);
+      return { kind: 'cast', power, aim };
     }
+    const side = Math.abs(s.side);
+    if (side >= FISH_SWIPE_SIDE && side > s.back * 0.8) return { kind: s.side > 0 ? 'left' : 'right' };
+    if (s.back >= FISH_PULL_SWING) return { kind: 'up' };
     return null;
   };
   const used = () => { gestureAt = T.simT; tipHistory.length = 0; };
@@ -210,9 +283,10 @@ export function installTownFishing(T, ctx) {
   // ── The line ──
   // T.fishing (null: the line's not out):
   //   { phase: 'cast' | 'wait' | 'bite' | 'fight', x, z (where the player cast from),
-  //     dir {x, z}, d (m of line out), t (s in this phase), left (s: until the bite / to hook it),
-  //     nibble (s left of one), settleAt, fish: { size, stamina, mode: 'run' | 'tired' | 'beaten',
-  //     left, tension, side } }
+  //     dir {x, z} (out along the line), d (m of line out), t (s in this phase), left (s: until
+  //     the bite / to hook it), nibble (s left of one), settleAt, onBubbles,
+  //     fish: { size, stamina, mode: 'swim' | 'turn' | 'beaten', way: 'left' | 'right' | 'out',
+  //     left, lat (m off to the side), tension, idle, golden } }
   let rig = null;
   const fishingRig = () => (rig ??= createFishingRig(ctx.scene));
   let lastCue = null;
@@ -235,7 +309,8 @@ export function installTownFishing(T, ctx) {
   };
 
   let awayHintAt = -99;
-  const cast = (power) => {
+  // power 0…1 (how far), aim rad to the right of the facing
+  const cast = (power, aim = 0) => {
     if (T.fishing || !ctx.isRodEquipped() || T.sequence || ctx.isPlayerDead()) return false;
     if (!atSpot()) {
       if (T.simT - awayHintAt > 5) { awayHintAt = T.simT; say(T.fishAwayText ?? 'Fish at the fishing spot by the water.'); }
@@ -247,22 +322,51 @@ export function installTownFishing(T, ctx) {
     const dist = FISH_CAST_DIST[0] + (FISH_CAST_DIST[1] - FISH_CAST_DIST[0]) * power;
     let at;
     let dry = false;
-    if (ahead()) ({ at, dry } = castAheadTarget(dist));
-    else at = castTarget(dist);
+    if (ahead()) ({ at, dry } = castAheadTarget(dist, aim));
+    else at = castTarget(dist, aim);
     if (!at) { say('No water in reach — face the water.'); return false; }
     const p = T.playerPos();
     const d = Math.max(0.5, Math.hypot(at.x - p.x, at.z - p.z));
+    const quest = !!(T.questFish?.quick || T.questFish?.golden);
+    const onBubbles = !dry && !!bub && dist2(at.x, at.z, bub.x, bub.z) < FISH_BUBBLE_HIT_R * FISH_BUBBLE_HIT_R;
+    const quick = quest || onBubbles;
     T.fishing = {
       phase: 'cast', dry, x: p.x, z: p.z, dir: { x: (at.x - p.x) / d, z: (at.z - p.z) / d }, d, t: 0,
-      left: T.questFish?.quick || T.questFish?.golden ? rand(2.5, 4.5) : rand(...FISH_WAIT_S), nibble: 0,
-      nibbled: !(T.questFish?.quick || T.questFish?.golden) && Math.random() < FISH_NIBBLE_CHANCE,
-      settleAt: T.simT + FISH_SETTLE_S, fish: null,
+      left: onBubbles ? rand(...FISH_BUBBLE_BITE_S) : quest ? rand(2.5, 4.5) : rand(...FISH_WAIT_S), nibble: 0,
+      nibbled: !quick && Math.random() < FISH_NIBBLE_CHANCE,
+      settleAt: T.simT + FISH_SETTLE_S, fish: null, onBubbles,
     };
     fishingRig().cast(rod, at);
     return true;
   };
-  // A pull on the rod: hooks a bite, scares off a nibbler, tires (or strains) a hooked fish
-  const pull = () => {
+  // Without a gyro (the Cast act): at the bubbles if they're in front, roughly; else straight out
+  const castAuto = () => {
+    if (!bub) return cast(0.55, 0);
+    const p = T.playerPos();
+    const f = facing();
+    const dx = bub.x - p.x;
+    const dz = bub.z - p.z;
+    const d = Math.hypot(dx, dz) || 1;
+    // (the bubbles' bearing: + to the right — right of the facing = (−fz, fx))
+    const aim = Math.atan2(dx * -f.z + dz * f.x, dx * f.x + dz * f.z);
+    if (Math.abs(aim) > FISH_AIM_MAX) return cast(0.55, 0);
+    const power = THREE.MathUtils.clamp((d + rand(-1.2, 1.2) - FISH_CAST_DIST[0]) / (FISH_CAST_DIST[1] - FISH_CAST_DIST[0]), 0, 1);
+    return cast(power, aim + rand(-0.15, 0.15));
+  };
+
+  // The fish picks a way to swim (not back the way it was already pulled off to, too far)
+  const swimOff = (fish, f) => {
+    const ways = ['left', 'right', 'out'].filter((w) => w !== fish.way
+      && !(w === 'left' && fish.lat > Math.min(2.5, f.d * 0.4))
+      && !(w === 'right' && fish.lat < -Math.min(2.5, f.d * 0.4)));
+    fish.way = ways[Math.floor(Math.random() * ways.length)] ?? 'out';
+    fish.mode = 'swim';
+    fish.left = fish.size.swim;
+    rig?.splash?.();
+  };
+  // A swipe on the rod (or a button without a gyro): 'left' | 'right' | 'up' — hooks a bite,
+  // scares off a nibbler, counters (or not) a swimming fish
+  const swipe = (way) => {
     const f = T.fishing;
     if (!f || T.simT < f.settleAt) return;
     if (f.phase === 'wait' && f.nibble > 0) {
@@ -272,34 +376,97 @@ export function installTownFishing(T, ctx) {
       miss();
       say('Scared it off.');
     } else if (f.phase === 'bite') {
-      const size = pickSize();
+      const size = pickSize(f.onBubbles);
       const golden = !!T.questFish?.golden;
       f.phase = 'fight';
       f.t = 0;
-      f.fish = { size, stamina: golden ? Infinity : size.pulls, mode: 'run', left: rand(...FISH_RUN_S), tension: 0, side: Math.random() < 0.5 ? -1 : 1, golden };
+      f.fish = { size, stamina: golden ? Infinity : size.pulls, mode: 'turn', way: null, left: 0.5, lat: 0, tension: 0, idle: 0, golden };
       rig?.hook();
       if (golden) rig?.golden(true);
+      if (f.onBubbles) say(`Off the bubbles — ${size.label}!`);
       T.questNote('fishHooked', { golden });
     } else if (f.phase === 'fight') {
       const fish = f.fish;
-      if (fish.mode === 'tired') {
+      if (fish.mode !== 'swim') return;
+      if (way === COUNTER[fish.way]) {
+        // Turned it: it comes in a way, and turns to swim off again — or it's worn out
         fish.stamina -= 1;
         f.d = Math.max(FISH_LAND_DIST + 0.4, f.d * FISH_PULL_KEEP);
-        fish.tension = Math.max(0, fish.tension - 0.3);
-        if (fish.stamina <= 0) fish.mode = 'beaten';
-        else { fish.mode = 'run'; fish.left = rand(...FISH_RUN_S); fish.side = -fish.side; }
-      } else if (fish.mode === 'run') {
-        fish.tension += FISH_PULL_TENSION;
+        fish.lat *= 0.5;
+        fish.tension = Math.max(0, fish.tension - 0.25);
+        ctx.playSfx?.('splash', rig?.bobberPosition());
+        if (fish.stamina <= 0) { fish.mode = 'beaten'; fish.idle = 0; } else { fish.mode = 'turn'; fish.left = FISH_TURN_S; }
+      } else {
+        miss();
+        fish.tension += FISH_WRONG_TENSION;
       }
     }
   };
-  const pickSize = () => {
-    let r = Math.random() * FISH_SIZES.reduce((sum, s) => sum + s.w, 0);
-    return FISH_SIZES.find((s) => (r -= s.w) < 0) ?? FISH_SIZES[0];
+  const pickSize = (onBubbles) => {
+    const w = (s) => (onBubbles ? s.bw : s.w);
+    let r = Math.random() * FISH_SIZES.reduce((sum, s) => sum + w(s), 0);
+    return FISH_SIZES.find((s) => (r -= w(s)) < 0) ?? FISH_SIZES[0];
   };
 
+  // ── The close-up on the reel while it's wound in (after the player controls posed the camera) ──
+  const cam = { on: false, easing: false, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 60 };
+  const _cp = new THREE.Vector3();
+  const _cl = new THREE.Vector3();
+  const _cm = new THREE.Matrix4();
+  const _cq = new THREE.Quaternion();
+  const _up = new THREE.Vector3(0, 1, 0);
+  const updateReelCam = (dt, want) => {
+    const camera = ctx.camera;
+    if (!camera) return;
+    const crank = want ? ctx.getRodModel()?.getObjectByName('rod-crank') : null;
+    const k = 1 - Math.exp(-6 * dt);
+    if (crank) {
+      if (!cam.on && !cam.easing) { cam.pos.copy(camera.position); cam.quat.copy(camera.quaternion); cam.fov = camera.fov; }
+      cam.on = true;
+      cam.easing = false;
+      crank.getWorldPosition(_cl);
+      // (over the shoulder, beside the reel: the reel close in front, the line running out past it)
+      const f = facing();
+      _cp.set(_cl.x - f.x * 0.36 + f.z * 0.24, _cl.y + 0.2, _cl.z - f.z * 0.36 - f.x * 0.24);
+      _cl.x += f.x * 0.3;
+      _cl.z += f.z * 0.3;
+      _cl.y -= 0.02;
+      _cm.lookAt(_cp, _cl, _up);
+      _cq.setFromRotationMatrix(_cm);
+      cam.pos.lerp(_cp, k);
+      cam.quat.slerp(_cq, k);
+      cam.fov += (FISH_REEL_CAM_FOV - cam.fov) * k;
+    } else if (cam.on || cam.easing) {
+      // Easing back to where the controls put the camera this frame
+      cam.on = false;
+      cam.easing = true;
+      cam.pos.lerp(camera.position, k * 1.5);
+      cam.quat.slerp(camera.quaternion, Math.min(1, k * 1.5));
+      cam.fov += (camera.fov - cam.fov) * k * 1.5;
+      if (cam.pos.distanceTo(camera.position) < 0.03) { cam.easing = false; return; }
+    } else return;
+    camera.position.copy(cam.pos);
+    camera.quaternion.copy(cam.quat);
+    camera.fov = cam.fov;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+  };
+  let reelHold = false;
+  const setReelHold = (on) => {
+    if (on === reelHold) return;
+    reelHold = on;
+    ctx.setReelHold?.(on);
+  };
+  const reelPhase = () => T.fishing?.phase === 'fight' && T.fishing.fish.mode === 'beaten';
+
   // Put away at once (leaving Town, arrests): no reeling in
-  const stopFishingRig = () => { rig?.golden(false); rig?.stop(); };
+  const stopFishingRig = () => {
+    rig?.golden(false);
+    rig?.stop();
+    dropBubbles();
+    setReelHold(false);
+    cam.on = cam.easing = false;
+  };
 
   const _fishAt = { x: 0, z: 0 };
   const updateFishing = (dt) => {
@@ -310,16 +477,19 @@ export function installTownFishing(T, ctx) {
     }
     if (ctx.isRodEquipped()) sampleTip();
     else tipHistory.length = 0;
-    // (the reel's turns: phone + on-screen + R — taken every frame, so none pile up)
+    updateBubbles(dt);
+    // (the reel's turns: phone (circled / twisted, or its touch reel) + on-screen + R — taken
+    // every frame, so none pile up)
     const reeled = ctx.takeReel() + screenReel + (keyReel ? FISH_KEY_REEL * TURN * dt : 0);
     screenReel = 0;
     const turns = reeled / TURN;
 
-    const gesture = ctx.hasGyro() && ctx.isRodEquipped() ? takeGesture() : null;
+    const gyro = ctx.hasGyro() && ctx.isRodEquipped();
+    const gesture = gyro && !reelPhase() ? takeGesture(!!T.fishing) : null;
     if (!T.fishing && gesture?.kind === 'cast' && T.calmNow() && !T.stalls.focused()
       && !T.jobTalk.isOpen()) {
       used();
-      cast(gesture.power);
+      cast(gesture.power, gesture.aim);
     }
 
     const f = T.fishing;
@@ -331,10 +501,12 @@ export function installTownFishing(T, ctx) {
       if (dist2(p.x, p.z, f.x, f.z) > reach || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
         if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.golden(false); rig?.stop(); }
         else { if (f.fish) say('It got away.'); finish(); }
+        setReelHold(false);
+        updateReelCam(dt, false);
         refreshHud();
         return;
       }
-      if (gesture?.kind === 'pull') { used(); pull(); }
+      if (gesture && gesture.kind !== 'cast') { used(); swipe(gesture.kind); }
       f.t += dt;
       if (f.phase === 'cast') {
         if (rig?.isOut()) {
@@ -342,6 +514,7 @@ export function installTownFishing(T, ctx) {
           if (f.dry) { finish(); say('No water there — cast out over the water.'); refreshHud(); return; }
           f.phase = 'wait';
           f.t = 0;
+          if (f.onBubbles) { say('Right on the bubbles!'); dropBubbles(); }
         }
       } else if (f.phase === 'wait') {
         // Reeling in a waiting line just brings the bobber back
@@ -361,32 +534,45 @@ export function installTownFishing(T, ctx) {
           f.t = 0;
           f.left = rand(...FISH_WAIT_S);
           f.nibbled = Math.random() < FISH_NIBBLE_CHANCE;
+          f.onBubbles = false;
           miss();
           say('It stole the bait.');
         }
       } else if (f.phase === 'fight') {
         const fish = f.fish;
-        if (fish.mode === 'run') {
-          // It takes line; reeling against it strains the line
-          f.d += FISH_RUN_SPEED * dt;
-          fish.tension += turns * FISH_TENSION_PER_TURN;
+        if (fish.mode === 'swim') {
+          // It takes line its way: out along the line, or off to one side
+          if (fish.way === 'out') f.d += FISH_RUN_SPEED * dt;
+          else {
+            f.d += FISH_RUN_SPEED * 0.35 * dt;
+            fish.lat += (fish.way === 'left' ? 1 : -1) * FISH_SIDE_SPEED * dt;
+          }
           fish.left -= dt;
-          if (fish.left <= 0) { fish.mode = 'tired'; fish.left = FISH_TIRED_S; }
+          // (not countered in time: it pulls hard, and turns off another way)
+          if (fish.left <= 0) { miss(); fish.tension += FISH_LATE_TENSION; swimOff(fish, f); }
           load = 0.85;
-        } else if (fish.mode === 'tired') {
-          f.d -= turns * FISH_REEL_M * 0.6;
+        } else if (fish.mode === 'turn') {
           fish.left -= dt;
-          // (no pull in time: it gets its breath back)
-          if (fish.left <= 0) { miss(); fish.mode = 'run'; fish.left = rand(...FISH_RUN_S); fish.side = -fish.side; }
-          load = 0.4;
+          if (fish.left <= 0) swimOff(fish, f);
+          load = 0.45;
         } else {
+          // Worn out: wound in by the reel; left too long it gets its breath back
           f.d -= turns * FISH_REEL_M;
+          fish.lat *= Math.max(0, 1 - turns * 0.5);
+          fish.idle = turns > 0.01 ? 0 : fish.idle + dt;
+          if (fish.idle > FISH_REEL_IDLE_S) {
+            miss();
+            fish.stamina = 1;
+            swimOff(fish, f);
+            say('It got its breath back!');
+          }
           load = 0.5;
         }
         fish.tension = Math.max(0, fish.tension - FISH_TENSION_DECAY * dt);
         load = Math.min(1, load + fish.tension * 0.3);
         // (until it's worn out it won't come right in)
         if (fish.mode !== 'beaten') f.d = Math.max(FISH_LAND_DIST + 0.4, f.d);
+        fish.lat = THREE.MathUtils.clamp(fish.lat, -Math.min(3.5, f.d * 0.6), Math.min(3.5, f.d * 0.6));
         // (the golden fish: on the line till the job takes it away — no snapping, no running off)
         if (fish.golden) { fish.tension = Math.min(fish.tension, 0.8); f.d = Math.min(f.d, FISH_LINE_MAX * 0.6); }
         if (fish.tension >= 1) {
@@ -408,62 +594,102 @@ export function installTownFishing(T, ctx) {
         }
       }
     }
-    // Where the bobber is: along the cast; a hooked fish swings from side to side as it runs
+    // Where the bobber is: along the cast, a hooked fish off to the side it swam
     if (T.fishing && rig) {
       const g = T.fishing;
-      const sway = g.fish && g.fish.mode !== 'beaten' ? Math.sin(g.t * 0.9) * Math.min(2, g.d * 0.25) * g.fish.side : 0;
-      _fishAt.x = g.x + g.dir.x * g.d - g.dir.z * sway;
-      _fishAt.z = g.z + g.dir.z * g.d + g.dir.x * sway;
+      const lat = g.fish ? g.fish.lat : 0;
+      // (its left: the line's direction turned left — (dz, −dx))
+      _fishAt.x = g.x + g.dir.x * g.d + g.dir.z * lat;
+      _fishAt.z = g.z + g.dir.z * g.d - g.dir.x * lat;
     }
     rig?.update(dt, { bite, load, crank: reeled, fish: T.fishing && T.fishing.phase !== 'cast' ? _fishAt : null });
+    // The reel: the rod holds still for a gyro to crank it, and the camera closes in on it
+    const reeling = reelPhase();
+    setReelHold(reeling && gyro);
+    updateReelCam(dt, reeling);
     refreshHud();
   };
 
   // ── What it says right now (the HUD, the phone's reel) ──
-  // { line: the line's out, cue, hint (only once they've been getting it wrong) } or null
+  // { line: the line's out, cue, text (shown), hint (only once they've been getting it wrong) } or null
   const status = () => {
     const f = T.fishing;
     if (!f) return null;
     let cue = f.phase;
+    let text = '';
+    let hint = '';
+    const gyro = ctx.hasGyro();
     if (f.phase === 'wait' && f.nibble > 0) cue = 'nibble';
-    if (f.phase === 'fight') cue = f.fish.mode === 'run' ? 'run' : f.fish.mode === 'tired' ? 'pull' : 'reel';
-    return { line: true, cue, hint: misses >= FISH_HINT_AFTER ? HINTS[cue] ?? '' : '' };
+    if (f.phase === 'bite') hint = gyro ? 'Swipe the rod!' : 'Pull!';
+    if (f.phase === 'fight') {
+      const fish = f.fish;
+      if (fish.mode === 'swim') {
+        cue = fish.way;
+        text = `🐟 ${ARROW[fish.way]}`;
+        hint = `Swipe ${ARROW[COUNTER[fish.way]]}`;
+      } else if (fish.mode === 'turn') {
+        cue = 'turn';
+      } else {
+        cue = 'reel';
+        text = gyro ? 'Circle the phone to reel in!' : 'Reel in!';
+      }
+    }
+    return { line: true, cue, text, hint: misses >= FISH_HINT_AFTER ? hint : '' };
   };
   let hudKey = '';
   const refreshHud = () => {
     const s = status();
+    const gyro = ctx.hasGyro();
+    const shown = s ? [s.text, s.hint].filter(Boolean).join('  ·  ') : '';
     // (the DOM only when something shows differently)
-    const k = s ? `${s.cue}|${s.hint}|${ctx.isPhoneConnected()}` : '';
+    const k = s ? `${s.cue}|${shown}|${gyro}` : '';
     if (k === hudKey) return;
     hudKey = k;
-    meter.classList.toggle('hidden', !s?.hint);
-    // (the on-screen reel when there's no phone — it has its own)
-    reelEl.classList.toggle('hidden', !s || ctx.isPhoneConnected());
+    meter.classList.toggle('hidden', !shown);
+    // (the on-screen reel only without a gyro to circle, while it's worn out / the line waits)
+    reelEl.classList.toggle('hidden', !s || gyro || !(s.cue === 'reel' || s.cue === 'wait'));
     document.body.classList.toggle('town-reeling', !!s);
-    if (s?.hint) {
-      cueEl.textContent = s.hint;
+    if (shown) {
+      cueEl.textContent = shown;
       meter.dataset.cue = s.cue;
     }
     // A new cue: the phone hears it now (it buzzes), not on its next status tick
     const key = s ? s.cue : null;
     if (key !== lastCue) { lastCue = key; ctx.refreshPhone?.(); }
   };
-  // For the phone: the reel while the line's out
+  // For the phone: its reel panel while the line's out (gyro: it's a display — circle the phone
+  // itself, not its touch reel)
   const fishingHud = () => {
     const s = status();
     if (!s) return null;
-    return { reel: true, cue: s.cue, text: s.hint };
+    return { reel: true, cue: s.cue, text: [s.text, s.hint].filter(Boolean).join('\n'), gyroReel: true };
+  };
+  // The act the first day's fishing goal rings (townQuests.js goalHighlight)
+  const fishActKey = () => {
+    const fish = T.fishing?.fish;
+    if (fish?.mode === 'swim') return fish.way === 'out' ? 'fishpull' : `fish${COUNTER[fish.way]}`;
+    return T.fishing ? 'fishpull' : 'fishcast';
   };
 
-  // ── Acts (townActs.js): only without a gyro — Cast / Pull with the rod out at the spot ──
+  // ── Acts (townActs.js): only without a gyro — Cast / Pull, then ⬅ ⬆ ➡ with the rod out ──
   const fishingActs = (calm) => {
     const out = [];
     if (ctx.hasGyro()) return out;
-    if (T.fishing) {
-      out.push({ key: 'fishpull', label: 'Pull', onClick: pull });
+    const f = T.fishing;
+    if (f) {
+      if (f.phase === 'fight') {
+        if (f.fish.mode === 'beaten') return out;
+        out.push(
+          { key: 'fishleft', label: '⬅', onClick: () => swipe('left') },
+          { key: 'fishpull', label: '⬆', onClick: () => swipe('up') },
+          { key: 'fishright', label: '➡', onClick: () => swipe('right') },
+        );
+        return out;
+      }
+      out.push({ key: 'fishpull', label: 'Pull', onClick: () => swipe('up') });
       return out;
     }
-    if (calm && atSpot() && ctx.isRodEquipped()) out.push({ key: 'fishcast', label: 'Cast', onClick: () => cast(0.55) });
+    if (calm && atSpot() && ctx.isRodEquipped()) out.push({ key: 'fishcast', label: 'Cast', onClick: castAuto });
     return out;
   };
   const hideFishingHud = () => {
@@ -474,7 +700,10 @@ export function installTownFishing(T, ctx) {
     document.body.classList.remove('town-reeling');
     reelPointer = null;
     keyReel = false;
+    dropBubbles();
+    setReelHold(false);
+    cam.on = cam.easing = false;
   };
 
-  Object.assign(T, { fishingActs, fishingHud, hideFishingHud, loseFish, stopFishingRig, updateFishing });
+  Object.assign(T, { fishActKey, fishingActs, fishingHud, hideFishingHud, loseFish, stopFishingRig, updateFishing });
 }

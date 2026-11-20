@@ -177,6 +177,9 @@ export function createSeaStart(ctx, config) {
     getGroundY: ctx.getGroundY,
     hasGyro: ctx.hasGyro,
     takeReel: ctx.takeReel,
+    setReelHold: ctx.setReelHold,
+    camera: ctx.camera,
+    playSfx: (kind, at) => ctx.playSfx?.(kind, at),
     isPhoneConnected: ctx.isPhoneConnected,
     refreshPhone: ctx.refreshPhone,
   });

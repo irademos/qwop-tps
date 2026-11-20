@@ -259,6 +259,8 @@ export function createFishingRig(scene) {
       t = 0;
     },
     stop: hide,
+    // A splash where the hooked fish is (it turns to swim off another way)
+    splash() { if (phase === 'fight') doSplash(bobber.position, true); },
     // The fish on the line is the golden one (on) — or not any more (it got away)
     golden(on) {
       gold = !!on;
@@ -371,6 +373,82 @@ export function createFishingRig(scene) {
       for (const root of [bobber, splash, line, goldFish]) {
         root.traverse((o) => { o.geometry?.dispose?.(); o.material?.dispose?.(); });
       }
+    },
+  };
+}
+
+const BUBBLE_COUNT = 22;
+const BUBBLE_SPREAD = 0.6;    // m round the middle they come up
+const BUBBLE_LIFE = [0.6, 1.4]; // s each one rises before it pops
+
+/**
+ * Bubbles rising where the fish are (Town fishing — townFishing.js: a bobber cast on them gets a
+ * quick bite from a bigger fish). `place(x, y, z)` (y = the water's surface) / `hide()`;
+ * `update(dt)` every frame; they fade in when placed and out when hidden.
+ */
+export function createFishBubbles(scene) {
+  const group = new THREE.Group();
+  group.visible = false;
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xeaf6ff, transparent: true, opacity: 0.8, roughness: 0.1, metalness: 0.1,
+    emissive: 0x9cc8e0, emissiveIntensity: 0.35, depthWrite: false,
+  });
+  const geo = new THREE.SphereGeometry(1, 8, 6);
+  const bubbles = [];
+  for (let i = 0; i < BUBBLE_COUNT; i++) {
+    const m = new THREE.Mesh(geo, mat);
+    m.userData = { t: Math.random() * BUBBLE_LIFE[1], life: 1, x: 0, z: 0, r: 0.03 };
+    bubbles.push(m);
+    group.add(m);
+  }
+  // A faint foamy ring on the surface where they come up
+  const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.72, 28).rotateX(-Math.PI / 2), ringMat);
+  group.add(ring);
+  scene.add(group);
+  let fade = 0;
+  let want = false;
+  let t = 0;
+  const respawn = (b) => {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * BUBBLE_SPREAD;
+    b.userData.x = Math.cos(a) * r;
+    b.userData.z = Math.sin(a) * r;
+    b.userData.t = 0;
+    b.userData.life = BUBBLE_LIFE[0] + Math.random() * (BUBBLE_LIFE[1] - BUBBLE_LIFE[0]);
+    b.userData.r = 0.05 + Math.random() * 0.06;
+  };
+  bubbles.forEach(respawn);
+  return {
+    place(x, y, z) {
+      group.position.set(x, y, z);
+      want = true;
+      if (!group.visible) { fade = 0; group.visible = true; }
+    },
+    hide() { want = false; },
+    visible: () => group.visible && want,
+    update(dt) {
+      if (!group.visible) return;
+      fade = THREE.MathUtils.clamp(fade + (want ? dt / 0.6 : -dt / 0.4), 0, 1);
+      if (fade <= 0 && !want) { group.visible = false; return; }
+      t += dt;
+      for (const b of bubbles) {
+        const u = b.userData;
+        u.t += dt;
+        if (u.t >= u.life) respawn(b);
+        const k = u.t / u.life;
+        // (up out of the water, wobbling, swelling, then gone)
+        b.position.set(u.x + Math.sin(u.t * 9 + u.x * 20) * 0.03, -0.04 + k * 0.2, u.z);
+        b.scale.setScalar(u.r * (0.6 + k * 0.6) * (k > 0.9 ? (1 - k) * 10 : 1));
+      }
+      mat.opacity = 0.8 * fade;
+      ringMat.opacity = (0.35 + Math.sin(t * 2.5) * 0.1) * fade;
+      ring.scale.setScalar(1 + Math.sin(t * 1.7) * 0.12);
+      ring.position.y = 0.01;
+    },
+    dispose() {
+      scene.remove(group);
+      geo.dispose(); mat.dispose(); ring.geometry.dispose(); ringMat.dispose();
     },
   };
 }

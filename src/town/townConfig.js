@@ -160,9 +160,12 @@ export const HOSE_LENGTH = 16;              // m the hose reaches from the tap
 export const HOSE_GRAB_DIST = 1.8;          // m from the tap: 🚿 Grab the hose
 export const HOSE_SPEED = 6.5;              // m/s the water leaves the nozzle
 export const HOSE_SPLASH_R = 0.55;          // m round where the water lands: the dirt piles there get it
-// Fishing (townFishing.js): the rod is bought at the shop and held like the sword; swing
-// it forward to cast, wait for a bite, pull it back to hook the fish, then wear it out — pull
-// when it tires, ease off while it runs — and crank the reel to bring it in
+// Fishing (townFishing.js): the rod is bought at the shop and held like the sword. Bubbles rise
+// where the fish are: swing the rod forward to cast — the harder, the farther; swung across
+// (back-left → out-right, or back-right → out-left) it lands that way — and a bobber on the
+// bubbles gets a quick bite from a bigger fish. Pull to hook it; then it swims: left → swipe
+// right, right → swipe left, out → swipe up; each counter wears it down. Worn out, the camera
+// closes in on the reel and circling the phone (or twisting it) winds it in.
 export const FISH_SPOT_RADIUS = 6;          // m — fish from this close to the fishing spot (one for now)
 export const FISH_MIN_DEPTH = 0.3;           // m of water a cast straight out in front must land on (Town on foot — T.castAhead)
 export const FISH_CAST_DIST = [3, 9];       // m — the gentlest cast … the hardest
@@ -175,26 +178,35 @@ export const FISH_WAIT_S = [4, 11];         // s until a bite
 export const FISH_NIBBLE_CHANCE = 0.55;     // a nibble first (pulling on it scares the fish off)
 export const FISH_NIBBLE_S = 1.4;
 export const FISH_HOOK_S = 1.1;             // s to pull after the bobber goes under
-// How hard a hooked fish fights: pulls = good pulls to tire it out, n = fish it's worth
+// pulls = swims to counter before it's worn out, swim = s to counter each one, n = fish it's
+// worth, w = how often it bites (bw: on the bubbles — bigger ones there)
 export const FISH_SIZES = [
-  { label: 'a little one', pulls: 1, n: 1, w: 5 },
-  { label: 'a fine fish', pulls: 2, n: 1, w: 4 },
-  { label: 'a big one', pulls: 3, n: 2, w: 2 },
+  { label: 'a little one', pulls: 2, swim: 1.9, n: 1, w: 5, bw: 1 },
+  { label: 'a fine fish', pulls: 3, swim: 1.6, n: 1, w: 4, bw: 3 },
+  { label: 'a big one', pulls: 4, swim: 1.35, n: 2, w: 2, bw: 4 },
 ];
-export const FISH_RUN_S = [1.3, 2.6];       // s it swims off, pulling line out…
-export const FISH_TIRED_S = 1.5;            // …then tires at the surface: the moment to pull
-export const FISH_RUN_SPEED = 1.1;          // m/s of line it takes while running
-export const FISH_PULL_KEEP = 0.6;          // a good pull brings it in to this share of the line out
-export const FISH_REEL_M = 0.7;             // m of line wound in per turn of the reel
-export const FISH_TENSION_PER_TURN = 0.4;   // reeling against a running fish strains the line…
-export const FISH_PULL_TENSION = 0.45;      // …so does pulling on it
+export const FISH_RUN_SPEED = 1.1;          // m/s of line it takes swimming out (a third of it swimming sideways)
+export const FISH_SIDE_SPEED = 1.3;         // m/s it swims off to one side
+export const FISH_TURN_S = 0.65;            // s it turns after a good counter before it swims again
+export const FISH_PULL_KEEP = 0.75;         // a good counter brings it in to this share of the line out
+export const FISH_SWIPE_SIDE = 0.4;         // m sideways of the rod tip: a swipe left / right
+export const FISH_WRONG_TENSION = 0.45;     // swiping the wrong way strains the line…
+export const FISH_LATE_TENSION = 0.35;      // …so does letting it swim the whole way
+export const FISH_REEL_IDLE_S = 9;          // s worn out with no reeling: it gets its breath back
+export const FISH_AIM_MAX = 0.7;            // rad — a cast swung across lands up to this far to the side
+export const FISH_AIM_GAIN = 1.6;           // the swing's sideways travel × this vs its forward travel → the angle
+export const FISH_BUBBLE_S = [11, 18];      // s bubbles rise in one place before they move on
+export const FISH_BUBBLE_HIT_R = 1.4;       // m — a bobber this close to them is on the bubbles
+export const FISH_BUBBLE_BITE_S = [1, 2.4]; // s until the bite there
+export const FISH_REEL_CAM_FOV = 48;        // the close-up on the reel
+export const FISH_REEL_M = 0.9;             // m of line wound in per turn of the reel (a circle of the phone)
 export const FISH_TENSION_DECAY = 0.3;      // per s
 export const FISH_LINE_MAX = 14;            // m — it takes all the line: gone
 export const FISH_LAND_DIST = 1.4;          // m — reeled in this close: landed
 export const FISH_KEY_REEL = 1.6;           // turns / s holding R (no phone)
 export const FISH_CANCEL_DIST = 1.2;        // m — walking off reels in
 export const FISH_CANOE_DRIFT = 4;          // m — fishing from the canoe: drifting this far reels in
-export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, snapped, lost) before the HUD says Pull / Reel in
+export const FISH_HINT_AFTER = 3;           // mistakes (scared off, too slow, wrong way, snapped, lost) before the HUD says which way to swipe
 
 // Canoe (townCanoe.js): moored by the fishing spot; standing in it the oar comes out (held by
 // its handle, pointing down — the phone up holds it straight down) and the blade moving through

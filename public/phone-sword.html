@@ -292,6 +292,13 @@
       text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
     }
     #reel.cue-pull, #reel.cue-bite { animation: reel-cue 0.45s ease-in-out infinite; }
+    /* …the phone itself is the rod (the game's gyro fishing): the reel is just a display — which
+       way the fish swims, then "circle the phone" while it's reeled in (circling / twisting the
+       phone cranks it) */
+    body.reel-gyro #reel { pointer-events: none; }
+    body.reel-gyro #reel-handle { display: none; }
+    body.reel-gyro #reel-text { left: 8%; right: 8%; font-size: 1.15rem; white-space: pre-line; }
+    body.reel-gyro #reel.cue-left, body.reel-gyro #reel.cue-right, body.reel-gyro #reel.cue-out { animation: reel-cue 0.45s ease-in-out infinite; }
     @keyframes reel-cue { 50% { box-shadow: 0 0 0 8px rgba(250, 204, 21, 0.7), 0 8px 32px rgba(0, 0, 0, 0.5); } }
     /* Block with a slot on either side */
     #block-row {
@@ -588,7 +595,7 @@ Boost</button>
     reelEl.addEventListener('pointerup', endReel);
     reelEl.addEventListener('pointercancel', endReel);
     // A buzz for each fishing cue the game sends (a bite, the fish running, time to pull…)
-    const FISH_BUZZ = { bite: [70, 40, 70, 40, 140], run: [40], pull: [90], landed: [150, 60, 150], snap: [320], lost: [200] };
+    const FISH_BUZZ = { bite: [70, 40, 70, 40, 140], run: [40], pull: [90], left: [40, 30, 40], right: [40, 30, 40], out: [40, 30, 40], reel: [90], landed: [150, 60, 150], snap: [320], lost: [200] };
     let fishCue = null;
 
     // ── Joystick (angle in radians, 0 = right, π/2 = up; force 0–1) ────────
@@ -744,6 +751,7 @@ Boost</button>
       const reeling = !!st.reelMode;
       if (reeling && !document.body.classList.contains('reel-mode') && pressMode) releaseBar();
       document.body.classList.toggle('reel-mode', reeling);
+      document.body.classList.toggle('reel-gyro', reeling && !!st.reelGyro);
       if (!reeling) reelPointer = null;
       const cue = reeling ? st.fishCue || null : null;
       if (cue !== fishCue && cue && FISH_BUZZ[cue] && navigator.vibrate) navigator.vibrate(FISH_BUZZ[cue]);
@@ -751,6 +759,7 @@ Boost</button>
       reelText.textContent = reeling ? st.fishText || '' : '';
       // (it pulses only with a hint showing)
       ['bite', 'pull'].forEach((c) => reelEl.classList.toggle(`cue-${c}`, cue === c && !!reelText.textContent));
+      ['left', 'right', 'out'].forEach((c) => reelEl.classList.toggle(`cue-${c}`, cue === c));
       // Town: 🗡 Sword out / ✋ Hands (nothing in hand)
       btnSword.classList.toggle('shown', !!st.canUnequip);
       const unarmed = st.equipped === 'none';
