@@ -298,7 +298,7 @@ export function installTownBook(T, ctx) {
     const P = T.layout.places;
     // Houses (the player's own outlined gold)
     const myHouses = [...new Set([T.myHome?.() ?? -1, ...(T.myHomes?.() ?? [])])].filter((i) => i >= 0).map((i) => P.homes[i]).filter(Boolean);
-    for (const h of T.layout.buildings) {
+    for (const h of [...T.layout.buildings, ...(T.layout.extraBuildings ?? [])]) {
       const r = Math.max(4, h.radius * 0.72 * scale);
       const own = myHouses.some((m) => Math.hypot(m.x - h.x, m.z - h.z) < h.radius + 4);
       g.fillStyle = C.house;

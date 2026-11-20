@@ -418,12 +418,15 @@ export function installTownLayout(T, ctx) {
     // Every tree in town can be chopped down (townTrees.js; it grows back)
     const choppable = trees.map((t) => ({ x: t.x, z: t.z, id: t.id, object: t.object }));
     // (the houses, shops included: out of their reach at night the player carries a lantern)
-    const houses = [...buildings, ...extraHouses].map((b) => ({ x: b.x, z: b.z, radius: b.radius }));
+    // (not the extra houses out in the woods — far from the town's houses and lamps, the lantern
+    // stays out round them; they're `extraBuildings`, drawn on the town book's map)
+    const houses = buildings.map((b) => ({ x: b.x, z: b.z, radius: b.radius }));
+    const extraBuildings = extraHouses.map((b) => ({ x: b.x, z: b.z, radius: b.radius }));
     const props = buildProps(places);
     // (the felled trees' stumps: the pack's own stump model, wherever it was placed)
     const stump = ctx.getMapObjects({ minX: -1e5, maxX: 1e5, minZ: -1e5, maxZ: 1e5 }).find((o) => STUMP_RE.test(o.file));
     T.buildTrees(props.group, choppable, stump?.object ?? null);
-    return { nav, drive, places, trees: choppable, buildings: houses, props };
+    return { nav, drive, places, trees: choppable, buildings: houses, extraBuildings, props };
   };
 
   // ── Props: the shops, campfire, jail cell, fields ──
