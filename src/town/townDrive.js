@@ -14,6 +14,8 @@
 // `via` = waypoints ([{ x, z, r? }]) the route goes through first, in order — each dropped once
 // the player is within its r (VIA_R) of it, or well past it (under half its distance from the goal);
 // T.updateDrive(dt) each frame; T.driveRoute() the route now (the town book could draw it).
+// `water: true` — out on the water in the canoe (the fisher's jobs — beats/sea.js): the route is
+// straight there (through any `via`), the arrows floating on the surface.
 
 import * as THREE from 'three';
 
@@ -298,7 +300,7 @@ export function installTownDrive(T, ctx) {
       let start = { x: p.x, z: p.z };
       path = [start];
       for (const g of legs) {
-        const leg = drive?.route(start, { x: g.x, z: g.z, r: g.r ?? VIA_R }) ?? [start, { x: g.x, z: g.z }];
+        const leg = (!target.water && drive?.route(start, { x: g.x, z: g.z, r: g.r ?? VIA_R })) || [start, { x: g.x, z: g.z }];
         path.push(...leg.slice(1));
         start = path[path.length - 1];
       }
@@ -334,7 +336,7 @@ export function installTownDrive(T, ctx) {
   const driveTo = (t) => {
     if (!t) { target = null; path = null; hide(); return; }
     if (target && t.x === target.x && t.z === target.z) return;
-    target = { x: t.x, z: t.z, r: t.r ?? 4, via: t.via ?? [] };
+    target = { x: t.x, z: t.z, r: t.r ?? 4, via: t.via ?? [], water: !!t.water };
     viaAt = 0;
     planAt = 0;
   };
@@ -364,9 +366,11 @@ export function installTownDrive(T, ctx) {
       const d = pr.d + 2 + k * ARROW_GAP + phase;
       if (d > total - 1) { a.visible = false; continue; }
       const q = at(d);
-      const y = T.groundAt(q.x, q.z);
+      // (on the water: on its surface, level)
+      const surf = target.water ? ctx.getWaterY(q.x, q.z) : null;
+      const y = surf ?? T.groundAt(q.x, q.z);
       const ahead = at(d + 0.8);
-      const pitch = -Math.atan2(T.groundAt(ahead.x, ahead.z) - y, 0.8);
+      const pitch = surf != null ? 0 : -Math.atan2(T.groundAt(ahead.x, ahead.z) - y, 0.8);
       a.position.set(q.x, y + ARROW_LIFT, q.z);
       a.rotation.set(pitch, q.yaw, 0);
       // (fading in near the player, out far ahead)

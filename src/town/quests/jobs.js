@@ -12,12 +12,13 @@
 //   from: when it opens — { day?: n (the town's day n or later), hours?: [from, to] (its givers
 //   only come in those hours), after?: '<branch id>' | '<job id>' (once that's done) };
 //   none: as soon as the first day's done (or skipped)
-// Job: { id, title, waitS?, failWaitS?, restartAt?, quiet?, beats: [...] }
+// Job: { id, title, waitS?, failWaitS?, restartAt?, quiet?, downText?, beats: [...] }
 //   quiet: the bandit camp leaves the player be while the job's under way (from a `board` on — no
-//   warnings / hold-ups)
+//   warnings / hold-ups); downText: what the feed says when the player goes down mid-job (it fails)
 // Beats (townQuests.js BEATS — see there for every param):
-//   seek    { who, anyTime?, talkFrom?, arrive? }  — the giver (a role) comes to find the player (❗ over them);
-//           arrive: a place they come in by when they're far off (the wizard from his mountain → 'entrance')
+//   seek    { who, anyTime?, talkFrom?, arrive?, queue? }  — the giver (a role) comes to find the player (❗ over them);
+//           arrive: a place they come in by when they're far off (the wizard from his mountain → 'entrance');
+//           queue: a seek part way through (back for another go — restartAt) waits its turn like the first
 //   talk    { who, lines: [[who, text]…], choices?: [{ label, then? }], reward?, reach? }
 //           who: whose talk it is (a role, or an actor's id); lines' who: a role, an actor's id or
 //           'you'. A choice's `then`: 'later' (back in a while), 'fail', 'goto:<label>'; none → on.
@@ -43,6 +44,19 @@
 //   ambush  { count, from, allies, onAlly, text } — that many bandits come at the player; allies
 //           (roles) fight beside them; done once they're all down, failed if an ally or the player goes down
 //   pay     { from, coins, memory } — the reward
+//   canoeCrew { who }         — they climb into the canoe's bow, and the player gets in too
+//   paddle  { to, r, stop?, text } — glowing arrows on the water to a place (the oar out); done once the
+//           canoe's within r — stop: it's stopped there and the rod comes out
+//   fishHere { golden?, text } — a fish caught there (quick bites); golden: the golden fish hooked
+//           (it won't come in — the next beat takes it away)
+//   ship    { mode }          — the pirate ship: 'park' (out on the horizon, waiting)
+//   pirates { who, bombers, archers } — in comes the ship, a bomb shakes the golden fish off, then
+//           the chase: `who` paddles, the crew (bomb throwers and archers, one at a time) attack, the
+//           player knocks their bombs / arrows back; done once they're all down (townPirates.js)
+//   say     { who, lines }    — `who` says these out loud (and in the feed), one after another — no
+//           talk box, no buttons; the job goes straight on
+//   pilotHome { who, text }   — `who` paddles the canoe home to its mooring
+//   canoeLand { who }         — the player and `who` ashore, the canoe moored
 //   wait    { until? } — the runner's own: nothing happens till a talk / action moves on
 // Any beat: talks: { <role>: talk } — what that townsperson says if talked to while it's the beat
 // (open-ended — talk to someone whenever); entry: the tracker's line.
@@ -50,7 +64,8 @@
 //   release { who, linger? }    — the townsperson back to their day (linger: s round where they are first)
 // Places (`to` / `from` / `at`): 'wizard' (his stall up the mountain), 'camp' (the bandit camp), 'town'
 // (by the shop, where the cart's parked), 'cart', 'entrance' (the newcomers' way into town),
-// 'fishSpot' (the fishing spot, where the canoe's moored).
+// 'fishSpot' (the fishing spot, where the canoe's moored), 'sea1' / 'sea2' (out on the water past
+// it — townPirates.js' sea plan: part way out, and the far side of a ring of open water).
 // Text: {name} = the player's name, {<role>} = that townsperson's first name, {<role>.dad} /
 // .father / .he / .him / .his / .man / .sir = the word for them (Dad or Mum…; capitalised as written).
 
@@ -243,6 +258,56 @@ const FISHER_JOBS = [
         choices: [{ label: 'Thank you' }],
       },
       { do: 'pay', from: 'fisher', coins: 0, memory: 'The wood for the canoe' },
+      { do: 'release', who: 'fisher' },
+    ],
+  },
+  // ── After the canoe: out with the fisher after the golden fish — and the pirates ──
+  {
+    id: 'goldenFish', title: 'The golden fish', waitS: 90, failWaitS: 45, restartAt: 'retry',
+    downText: 'You went down — {fisher} got you both back to shore somehow. {fisher.He}\'ll want another go.',
+    beats: [
+      { do: 'seek', who: 'fisher' },
+      {
+        do: 'talk', who: 'fisher', reward: 'Out in the canoe with {fisher}',
+        lines: [
+          ['fisher', '{name}! I\'ve been dying to take her out. And now I can go after the golden fish.'],
+          ['fisher', 'My grandad saw her once, out past the docks — scales like a new coin, big as your arm. Nobody\'s ever landed her.'],
+          ['fisher', 'Come out with me? You paddle, I\'ll keep watch. Bring a rod — here, take one if you need it.'],
+        ],
+        choices: [{ label: 'Let\'s find her', then: ['give:rod', 'goto:crew'] }, { label: 'Later', then: ['later'] }],
+      },
+      // (back for another go — after 'Later', or a go that went wrong: restartAt)
+      { do: 'seek', label: 'retry', who: 'fisher', queue: true },
+      {
+        do: 'talk', who: 'fisher', reward: 'Out in the canoe with {fisher}',
+        lines: [['fisher', 'Ready to go after the golden fish, {name}? She\'s out there somewhere — I can feel it.']],
+        choices: [{ label: 'Let\'s go', then: ['give:rod'] }, { label: 'Later', then: ['later'] }],
+      },
+      { do: 'canoeCrew', label: 'crew', checkpoint: true, who: 'fisher' },
+      // (the pirate ship: off its anchor, out on the horizon past the fishing grounds, waiting — townPirates.js)
+      { do: 'ship', mode: 'park' },
+      // (out on the water: no talk box, no buttons — he just says it, and the arrows go on)
+      { do: 'say', who: 'fisher', lines: ['In we get! Follow the arrows out — the herring run just past the docks.', 'She might be swimming with them. Keep your eyes peeled.'] },
+      { do: 'paddle', to: 'sea1', r: 5, stop: true, text: 'Paddle out to the first fishing spot' },
+      { do: 'say', who: 'fisher', lines: ['Here\'ll do. Cast over the side and let\'s see what bites.'] },
+      { do: 'fishHere', text: 'Catch a fish', talks: { fisher: { lines: [['fisher', 'Cast over the side — a swing forward. Pull when the bobber goes under, reel when it tires.']] } } },
+      { do: 'say', who: 'fisher', lines: ['A herring! A fine one — but not her.', 'She keeps further out, where the water\'s deep. Oar out — follow the arrows.'] },
+      { do: 'paddle', to: 'sea2', r: 5, stop: true, text: 'Paddle further out' },
+      { do: 'say', who: 'fisher', lines: ['This is it. Grandad\'s spot.', 'That ship\'s been sat on the horizon all morning. Never mind it. Cast out — gently now.'] },
+      { do: 'fishHere', golden: true, text: 'Fish for the golden fish' },
+      { do: 'pirates', who: 'fisher', bombers: 3, archers: 2 },
+      { do: 'pilotHome', who: 'fisher', text: '{fisher} paddles you back to shore' },
+      { do: 'canoeLand', who: 'fisher' },
+      {
+        do: 'talk', who: 'fisher', reach: 14, reward: 'Reward: 🪙 60',
+        lines: [
+          ['fisher', 'Pirates! In our bay! Wait till the sheriff hears.'],
+          ['fisher', 'And she got away… but I saw her, {name}. We both did. Golden as anything.'],
+          ['fisher', 'Here — sixty coins, for the sword work. I\'d have been fish food out there without you. We\'ll go after her again one day.'],
+        ],
+        choices: [{ label: 'Any time' }],
+      },
+      { do: 'pay', from: 'fisher', coins: 60, memory: 'The pirates and the golden fish' },
       { do: 'release', who: 'fisher' },
     ],
   },

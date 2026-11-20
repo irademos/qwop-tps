@@ -188,6 +188,7 @@ export class BombThrowerEnemy {
    * @param {(direction: THREE.Vector3, falloff: number) => void} [options.onBlastPlayer]
    *                          – throws the player back when caught in a blast
    * @param {string}        [options.characterUrl] – character GLB (default glbCharacterConfig.url)
+   * @param {number}        [options.bombDamage] – health segments its blast takes from the player (BOMB_EXPLOSION_DAMAGE)
    */
   constructor(scene, rapier, rapierWorld, options = {}) {
     this.scene       = scene;
@@ -201,6 +202,7 @@ export class BombThrowerEnemy {
     this.speedScale = options.speedScale ?? 1.0;
     this._getBlastTargets = options.getBlastTargets ?? null;
     this._onBlastPlayer   = options.onBlastPlayer ?? null;
+    this.bombDamage = options.bombDamage ?? BOMB_EXPLOSION_DAMAGE;
     // Tutorial controls: never walks; throws only while `throwsHeld` is false; `aimAt()`
     // (if it returns a point) replaces aiming at the player
     this.stationary = !!options.stationary;
@@ -211,6 +213,16 @@ export class BombThrowerEnemy {
     // Showdown / Endless: set by the game while another enemy has its ranged turn (no throws meanwhile)
     this.throwsPaused = false;
     this.aimAt      = options.aimAt ?? null;
+    // Optional () → THREE.Vector3: its bombs home in on this through their flight, arriving there
+    // when the lob would have (a Town job's pirates — at the player's sword, wherever the canoe's
+    // got to); deflectRadius: how far from the sword's tip one is knocked back (the game's 0.5)
+    this.homing = options.homing ?? null;
+    this.deflectRadius = options.deflectRadius ?? null;
+    // Its bombs are knocked back only by a swing of a gyro sword, not by a blade held still in
+    // their way (bootstrapGameApp.js's deflect check)
+    this.deflectSwing = !!options.deflectSwing;
+    // ms after the throw its bombs go through the map (thrown from behind a ship's rail)
+    this.ignoreMapMs = options.ignoreMapMs ?? 0;
     this._characterUrl = options.characterUrl ?? glbCharacterConfig.url;
 
     // Throw state
@@ -348,6 +360,7 @@ export class BombThrowerEnemy {
     }
 
     const vel = computeBombLobVelocity(origin, targetPos);
+    const flightMs = (Math.hypot(targetPos.x - origin.x, targetPos.z - origin.z) / BOMB_SPEED) * 1000;
     const mesh = createBombMesh(this._bombGltf);
     mesh.name = 'EnemyBomb';
     mesh.position.copy(origin);
@@ -360,6 +373,10 @@ export class BombThrowerEnemy {
       deflected: false,
       deflectedAt: 0,
       thrower: this,
+      homing: this.homing,
+      arriveAt: Date.now() + flightMs,
+      deflectRadius: this.deflectRadius,
+      deflectSwing: this.deflectSwing,
     };
     this._bombs.push(bomb);
 
@@ -546,6 +563,14 @@ export class BombThrowerEnemy {
           bomb.vel.copy(_homeDir.normalize().multiplyScalar(BOMB_DEFLECT_SPEED));
         }
       } else {
+        // Homing (a target that moves): the lob re-aimed at it for the time left, so it still
+        // arrives on time
+        const left = (bomb.arriveAt - now) / 1000;
+        const to = bomb.homing && left > 0.06 ? bomb.homing() : null;
+        if (to) {
+          const p = bomb.mesh.position;
+          bomb.vel.set((to.x - p.x) / left, (to.y - p.y + 0.5 * BOMB_GRAVITY * left * left) / left, (to.z - p.z) / left);
+        }
         // Apply gravity
         bomb.vel.y -= BOMB_GRAVITY * dt;
       }
@@ -568,7 +593,7 @@ export class BombThrowerEnemy {
 
       // Buildings / walls (map geometry): explode just in front of the surface it hit
       // (not in the tutorial: a tree / wall in the way would stall the deflect lesson)
-      const wallHit = this._tutorial ? null : raycastMapSegment(_bombPrevPos, bomb.mesh.position);
+      const wallHit = this._tutorial || age < this.ignoreMapMs ? null : raycastMapSegment(_bombPrevPos, bomb.mesh.position);
       if (wallHit) {
         bomb.mesh.position.copy(wallHit.point).addScaledVector(wallHit.normal, 0.15);
         this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls, bomb.deflected);
@@ -667,7 +692,7 @@ export class BombThrowerEnemy {
     const distToPlayer = pos.distanceTo(targetModel.position);
     if (distToPlayer <= BOMB_EXPLOSION_RADIUS) {
       if (typeof window.localHealth === 'number') {
-        window.localHealth = Math.max(0, window.localHealth - BOMB_EXPLOSION_DAMAGE);
+        window.localHealth = Math.max(0, window.localHealth - this.bombDamage);
       }
       const dir = _blastDirection(pos, targetModel.position, bomb.vel);
       if (this._onBlastPlayer) {
