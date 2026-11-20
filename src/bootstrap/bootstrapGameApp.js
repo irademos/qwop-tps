@@ -7848,7 +7848,7 @@ async function initCore(runtimeContext) {
     // Town fishing, the line out: the bar is a reel (cranked round on the phone's screen)
     const fishing = town?.isActive() ? town.fishingHud() : seaStart?.isActive() ? seaStart.fishingHud()
       : story?.isActive() ? story.fishingHud() : null;
-    if (fishing?.reel) return { ...status, reelMode: true, reelGyro: !!fishing.gyroReel, fishCue: fishing.cue, fishText: fishing.text };
+    if (fishing?.reel) return { ...status, reelMode: true, reelShow: !!fishing.show, fishCue: fishing.cue, fishText: fishing.text };
     // Town, something grabbed (the hose): the bar is its mode (💧 Water — held), 🗡/✋ drops it
     if (town?.isActive() && town.holding()) return { ...status, holding: true, heldBar: town.heldBar() };
     const interact = _phoneInteract();
@@ -7924,63 +7924,11 @@ async function initCore(runtimeContext) {
   };
   // Town fishing: the phone's reel (radians cranked, not yet taken by town.takeReel)
   const _phoneReel = { last: null, pending: 0 };
-  // Town fishing, a worn-out fish on the line (townFishing.js ctx.setReelHold): the rod holds still
-  // and the phone cranks the reel — circled round (the blade's way tracing a cone: the angle swept
-  // round its middle) or twisted about its long side, whichever turned more each frame — into
-  // _phoneReel.pending, as the phone's touch reel did
-  const GYRO_REEL_MIN_R = 0.12;   // rad off the circle's middle before the sweep counts
-  const GYRO_REEL_TAU_S = 0.45;   // s the circle's middle follows the phone's way over
-  const GYRO_REEL_MAX_STEP = 1.2; // rad a frame at most (a jump isn't a crank)
-  const _gyroReel = { on: false, mean: null, prevAng: null, prevQ: null, t: 0 };
-  const _grB = new THREE.Vector3();
-  const _grE1 = new THREE.Vector3();
-  const _grE2 = new THREE.Vector3();
-  const _grQ = new THREE.Quaternion();
-  const _grDQ = new THREE.Quaternion();
-  const _setGyroReel = (on) => {
-    _gyroReel.on = !!on;
-    _gyroReel.mean = null;
-    _gyroReel.prevAng = null;
-    _gyroReel.prevQ = null;
-  };
-  const _gyroReelCrank = (q, nowSec) => {
-    const g = _gyroReel;
-    const dt = Math.min(0.1, Math.max(0, nowSec - g.t));
-    g.t = nowSec;
-    _grQ.copy(q).multiply(_phoneSwordBaseQ);
-    _grB.set(0, 0, 1).applyQuaternion(_grQ);
-    // Circling: the angle of the blade's way round the (slowly following) middle of its circle
-    let circle = 0;
-    if (!g.mean) g.mean = _grB.clone();
-    else g.mean.lerp(_grB, 1 - Math.exp(-dt / GYRO_REEL_TAU_S)).normalize();
-    const m = g.mean;
-    _grE1.set(0, 1, 0).cross(m);
-    if (_grE1.lengthSq() < 1e-4) _grE1.set(1, 0, 0).cross(m);
-    _grE1.normalize();
-    _grE2.copy(m).cross(_grE1);
-    const off = _grB.clone().addScaledVector(m, -_grB.dot(m));
-    if (off.length() > GYRO_REEL_MIN_R) {
-      const ang = Math.atan2(off.dot(_grE2), off.dot(_grE1));
-      if (g.prevAng !== null) {
-        let d = ang - g.prevAng;
-        if (d > Math.PI) d -= Math.PI * 2;
-        if (d < -Math.PI) d += Math.PI * 2;
-        circle = Math.abs(d);
-      }
-      g.prevAng = ang;
-    } else g.prevAng = null;
-    // Twisting: the turn about the blade's own axis since last frame
-    let twist = 0;
-    if (g.prevQ) {
-      _grDQ.copy(g.prevQ).invert().multiply(_grQ);
-      if (_grDQ.w < 0) { _grDQ.x = -_grDQ.x; _grDQ.y = -_grDQ.y; _grDQ.z = -_grDQ.z; _grDQ.w = -_grDQ.w; }
-      twist = Math.abs(2 * Math.atan2(_grDQ.z, _grDQ.w));
-      if (twist < 0.01) twist = 0;
-    } else g.prevQ = new THREE.Quaternion();
-    g.prevQ.copy(_grQ);
-    const crank = Math.max(circle, twist);
-    if (crank > 0 && crank < GYRO_REEL_MAX_STEP) _phoneReel.pending += crank;
-  };
+  // Fishing: the camera turns once toward where a cast's bobber will land (ctx.turnCameraTo —
+  // eased in the game loop, by the Town talk camera's block, until it's there or FISH_CAM_TURN_S is up)
+  const FISH_CAM_TURN_S = 0.9;
+  let _fishCamTurn = null; // { x, z, until }
+  const _turnCameraTo = (x, z) => { _fishCamTurn = { x, z, until: performance.now() + FISH_CAM_TURN_S * 1000 }; };
   // Sends the phone its status now (if it changed) — fishing cues can't wait for the timer
   let _phoneSwordStatusNow = null;
   // The phone currently driving the sword. A reconnecting phone (its browser was closed) opens
@@ -10111,7 +10059,7 @@ async function initCore(runtimeContext) {
   const _resetForMenu = () => {
     playerControls?.swimReset?.();   // (swimming's out-of-breath sequence — _swimReset)
     giant.release();
-    _setGyroReel(false);
+    _fishCamTurn = null;
     cancelBowDraw();
     releaseBombAim(true);
     hitFeel.cancel();
@@ -11557,8 +11505,8 @@ async function initCore(runtimeContext) {
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
     // The phone controller's reel: radians cranked since the last call
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
-    // A worn-out fish being reeled in: the rod holds still and the phone's circles crank the reel
-    setReelHold: (on) => _setGyroReel(on),
+    // A cast: the camera turns once toward where the bobber will land
+    turnCameraTo: _turnCameraTo,
     // A phone controller (it shows its own reel) — not "Use This Device", which needs the on-screen one
     isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
     // Something grabbed / dropped: the Block bar (here and on the phone) becomes / stops being its mode
@@ -11715,7 +11663,6 @@ async function initCore(runtimeContext) {
   // before the map's in. Its numbers for the island: MAPS.islandTown.seaStart
   seaStart = createSeaStart({
     scene,
-    camera,
     getMapWater: () => (_activeMapKey === DEFAULT_MAP ? _activeMap?.water ?? null : null),
     waterDepth: _waterDepthAt,
     getGroundY: (x, z) => getTerrainHeight(x, z),
@@ -11730,8 +11677,8 @@ async function initCore(runtimeContext) {
     getPlayerModel: () => playerModel,
     getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
-    // A worn-out fish being reeled in: the rod holds still and the phone's circles crank the reel
-    setReelHold: (on) => _setGyroReel(on),
+    // A cast: the camera turns once toward where the bobber will land
+    turnCameraTo: _turnCameraTo,
     isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
     refreshPhone: () => _phoneSwordStatusNow?.(),
     // 'rod' | 'oar' in hand, or null: nothing
@@ -11800,8 +11747,8 @@ async function initCore(runtimeContext) {
     getOarStroke: () => (isOarEquipped() ? _currentOarStroke() : null),
     getRodModel: () => (isRodEquipped() ? foamSword?.getRodModel?.() ?? null : null),
     takeReel: () => { const r = _phoneReel.pending; _phoneReel.pending = 0; return r; },
-    // A worn-out fish being reeled in: the rod holds still and the phone's circles crank the reel
-    setReelHold: (on) => _setGyroReel(on),
+    // A cast: the camera turns once toward where the bobber will land
+    turnCameraTo: _turnCameraTo,
     isPhoneConnected: () => !!(window.phoneSwordGyro?.connected && !window.phoneSwordGyro?.localDevice),
     refreshPhone: () => _phoneSwordStatusNow?.(),
     hasGyro: () => !!(window.phoneSwordGyro?.connected || window.phoneSwordGyro?.localDevice),
@@ -12248,16 +12195,6 @@ async function initCore(runtimeContext) {
           _psw.smoothQ.slerp(_phoneSwordGyroQ, 1 - Math.exp(-2 * Math.PI * _cutoffHz * _smoothDt));
         }
         _phoneSwordGyroQ.copy(_psw.smoothQ);
-        // Town fishing, reeling a worn-out fish in: the phone circled / twisted cranks the reel,
-        // and the rod eases to its resting pose and holds still meanwhile
-        if (_gyroReel.on && _rodActive) {
-          _gyroReelCrank(_phoneSwordGyroQ, nowSec);
-          _psw.reelHoldQ ??= _phoneSwordGyroQ.clone();
-          _psw.reelHoldQ.slerp(_pswNeutralQ, 1 - Math.exp(-8 * Math.max(0.005, _smoothDt)));
-          _phoneSwordGyroQ.copy(_psw.reelHoldQ);
-        } else {
-          _psw.reelHoldQ = null;
-        }
         // Frozen in ice: the sword is stuck where it was (the shaking still counts — speed above)
         if (isPlayerFrozen()) {
           _psw.frozenQ ??= _phoneSwordGyroQ.clone();
@@ -12968,6 +12905,14 @@ async function initCore(runtimeContext) {
         playerControls.yaw += wrapDeltaRad(Math.atan2(_dx, _dz) - playerControls.yaw) * Math.min(1, frameDelta * 4);
       }
       _aimCameraPitchAt(_townTalker, frameDelta);
+    }
+
+    // ── Fishing: the camera turns once toward where the cast's bobber lands (not after it) ──
+    if (_fishCamTurn && !_townTalker && playerControls && !playerDead) {
+      const _pp = playerModel.position;
+      const _err = wrapDeltaRad(Math.atan2(_fishCamTurn.x - _pp.x, _fishCamTurn.z - _pp.z) - playerControls.yaw);
+      if (performance.now() > _fishCamTurn.until || Math.abs(_err) < 0.01) _fishCamTurn = null;
+      else playerControls.yaw += _err * Math.min(1, frameDelta * 6);
     }
 
     // ── Town: with the sword / wand out, the camera turns toward whoever's coming at the player

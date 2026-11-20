@@ -231,9 +231,9 @@
     /* …and on it: Boost (higher + faster, uses mana) */
     #btn-boost { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
     #btn-boost.owned { display: block; }
-    /* Town fishing with the line out: the reel takes the joystick's place (and the Block bar
-       goes) — crank the handle round (clockwise) to wind the line in; the middle says Pull /
-       Reel in only once the player's been getting it wrong */
+    /* Town fishing, once the fish is worn out: the reel takes the joystick's place (and the Block
+       bar goes) — crank the handle round (clockwise) to wind the line in; the middle says Reel in
+       only once the player's been getting it wrong */
     #reel {
       display: none;
       position: relative;
@@ -292,13 +292,6 @@
       text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
     }
     #reel.cue-pull, #reel.cue-bite { animation: reel-cue 0.45s ease-in-out infinite; }
-    /* …the phone itself is the rod (the game's gyro fishing): the reel is just a display — which
-       way the fish swims, then "circle the phone" while it's reeled in (circling / twisting the
-       phone cranks it) */
-    body.reel-gyro #reel { pointer-events: none; }
-    body.reel-gyro #reel-handle { display: none; }
-    body.reel-gyro #reel-text { left: 8%; right: 8%; font-size: 1.15rem; white-space: pre-line; }
-    body.reel-gyro #reel.cue-left, body.reel-gyro #reel.cue-right, body.reel-gyro #reel.cue-out { animation: reel-cue 0.45s ease-in-out infinite; }
     @keyframes reel-cue { 50% { box-shadow: 0 0 0 8px rgba(250, 204, 21, 0.7), 0 8px 32px rgba(0, 0, 0, 0.5); } }
     /* Block with a slot on either side */
     #block-row {
@@ -747,19 +740,18 @@ Boost</button>
       btnBoost.classList.toggle('owned', !!st.onBroom);
       btnBoost.classList.toggle('equipped', !!st.boosting);
       btnBoost.textContent = `🚀 Boost\n🔮${st.mana ?? 0}`;
-      // The line out: the bar's a reel
-      const reeling = !!st.reelMode;
+      // The line out (its cues buzz); once it's time to reel in, the bar's a reel
+      const lineOut = !!st.reelMode;
+      const reeling = lineOut && !!st.reelShow;
       if (reeling && !document.body.classList.contains('reel-mode') && pressMode) releaseBar();
       document.body.classList.toggle('reel-mode', reeling);
-      document.body.classList.toggle('reel-gyro', reeling && !!st.reelGyro);
       if (!reeling) reelPointer = null;
-      const cue = reeling ? st.fishCue || null : null;
+      const cue = lineOut ? st.fishCue || null : null;
       if (cue !== fishCue && cue && FISH_BUZZ[cue] && navigator.vibrate) navigator.vibrate(FISH_BUZZ[cue]);
       fishCue = cue;
       reelText.textContent = reeling ? st.fishText || '' : '';
       // (it pulses only with a hint showing)
       ['bite', 'pull'].forEach((c) => reelEl.classList.toggle(`cue-${c}`, cue === c && !!reelText.textContent));
-      ['left', 'right', 'out'].forEach((c) => reelEl.classList.toggle(`cue-${c}`, cue === c));
       // Town: 🗡 Sword out / ✋ Hands (nothing in hand)
       btnSword.classList.toggle('shown', !!st.canUnequip);
       const unarmed = st.equipped === 'none';

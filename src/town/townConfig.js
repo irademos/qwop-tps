@@ -165,7 +165,7 @@ export const HOSE_SPLASH_R = 0.55;          // m round where the water lands: th
 // (back-left → out-right, or back-right → out-left) it lands that way — and a bobber on the
 // bubbles gets a quick bite from a bigger fish. Pull to hook it; then it swims: left → swipe
 // right, right → swipe left, out → swipe up; each counter wears it down. Worn out, the camera
-// closes in on the reel and circling the phone (or twisting it) winds it in.
+// comes up and is cranked in.
 export const FISH_SPOT_RADIUS = 6;          // m — fish from this close to the fishing spot (one for now)
 export const FISH_MIN_DEPTH = 0.3;           // m of water a cast straight out in front must land on (Town on foot — T.castAhead)
 export const FISH_CAST_DIST = [3, 9];       // m — the gentlest cast … the hardest
@@ -198,14 +198,6 @@ export const FISH_AIM_GAIN = 1.6;           // the swing's sideways travel × th
 export const FISH_BUBBLE_S = [11, 18];      // s bubbles rise in one place before they move on
 export const FISH_BUBBLE_HIT_R = 1.4;       // m — a bobber this close to them is on the bubbles
 export const FISH_BUBBLE_BITE_S = [1, 2.4]; // s until the bite there
-// The camera with the line out: behind and above the bobber, looking along the line (m)
-export const FISH_BOBBER_CAM = { back: 4.2, up: 2.2, fov: 55 };
-// …and the close-up on the reel once the fish is worn out (m from the crank; narrow = a portrait screen)
-export const FISH_REEL_CAM = {
-  back: 0.75, side: 0.4, up: 0.35, fov: 55,
-  backNarrow: 1.25, sideNarrow: 0.55, upNarrow: 0.55, fovNarrow: 68,
-  ahead: 0.7,
-};
 export const FISH_REEL_M = 0.9;             // m of line wound in per turn of the reel (a circle of the phone)
 export const FISH_TENSION_DECAY = 0.3;      // per s
 export const FISH_LINE_MAX = 14;            // m — it takes all the line: gone

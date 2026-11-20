@@ -11,14 +11,13 @@
 //     out-left to the left — FISH_AIM_GAIN, up to FISH_AIM_MAX)
 //   • wait: the bobber floats; a nibble first sometimes (a swipe on it scares the fish off)
 //   • bite: the bobber goes under (the phone buzzes) — swipe the rod within FISH_HOOK_S
-//   • the camera: with the line out it moves over to where the bobber landed (FISH_BOBBER_CAM)
+//   • the camera turns once toward where the bobber's going to land (ctx.turnCameraTo)
 //   • fight: the fish swims — left, right or out (the bobber running that way; the HUD's 🐟
 //     arrow only once they've been getting it wrong): swipe the other way — right / left — or up for out, within its size's `swim` s. A good
 //     counter turns it and brings it in (FISH_PULL_KEEP); the wrong way or too late strains the
 //     line (FISH_WRONG_TENSION / FISH_LATE_TENSION — at 1 it snaps); `pulls` good ones wear it out
-//   • reel it in: worn out, the camera closes in on the rod's reel (FISH_REEL_CAM) and the rod
-//     holds still (ctx.setReelHold) — circling the phone (or twisting it) cranks the reel
-//     (bootstrapGameApp.js measures it into ctx.takeReel); no gyro: the on-screen reel / hold R.
+//   • reel it in: worn out, the reel comes up — the phone's touch reel (its Block bar turns into
+//     one), or the on-screen reel without a phone / hold R — crank it until it's at the bank.
 //     Left too long (FISH_REEL_IDLE_S) it gets its breath back and swims again
 // Without a gyro the cast / swipes are buttons (acts: Cast — aimed at the bubbles, roughly —,
 // Pull, ⬅ / ⬆ / ➡). The game's player-local rod tip is sampled each frame; a cast / swipe is its
@@ -56,7 +55,7 @@ import {
   FISH_AIM_GAIN, FISH_AIM_MAX, FISH_BUBBLE_BITE_S, FISH_BUBBLE_HIT_R, FISH_BUBBLE_S, FISH_CANCEL_DIST,
   FISH_CANOE_DRIFT, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER, FISH_HOOK_S,
   FISH_KEY_REEL, FISH_LAND_DIST, FISH_LATE_TENSION, FISH_LINE_MAX, FISH_MIN_DEPTH, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S,
-  FISH_PULL_KEEP, FISH_PULL_SWING, FISH_BOBBER_CAM, FISH_REEL_CAM, FISH_REEL_IDLE_S, FISH_REEL_M, FISH_RUN_SPEED, FISH_SETTLE_S,
+  FISH_PULL_KEEP, FISH_PULL_SWING, FISH_REEL_IDLE_S, FISH_REEL_M, FISH_RUN_SPEED, FISH_SETTLE_S,
   FISH_SIDE_SPEED, FISH_SIZES, FISH_SPOT_RADIUS, FISH_SWIPE_SIDE, FISH_TENSION_DECAY, FISH_TURN_S, FISH_WAIT_S,
   FISH_WRONG_TENSION, NAV_CELL, dist2, el, rand,
 } from './townConfig.js';
@@ -338,6 +337,8 @@ export function installTownFishing(T, ctx) {
       settleAt: T.simT + FISH_SETTLE_S, fish: null, onBubbles, at: at.clone(),
     };
     fishingRig().cast(rod, at);
+    // (the camera turns once toward where it's going to land — no following it after)
+    if (!dry) ctx.turnCameraTo?.(at.x, at.z);
     return true;
   };
   // Without a gyro (the Cast act): at the bubbles if they're in front, roughly; else straight out
@@ -409,79 +410,6 @@ export function installTownFishing(T, ctx) {
     return FISH_SIZES.find((s) => (r -= w(s)) < 0) ?? FISH_SIZES[0];
   };
 
-  // ── The fishing camera (after the player controls posed it): with the line out it moves over
-  // to where the bobber landed — behind and above it, looking along the line — and once the fish
-  // is worn out it closes in on the reel over the shoulder; then it eases back ──
-  const cam = { on: false, easing: false, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), fov: 60, look: new THREE.Vector3() };
-  const _cp = new THREE.Vector3();
-  const _cl = new THREE.Vector3();
-  const _cm = new THREE.Matrix4();
-  const _cq = new THREE.Quaternion();
-  const _up = new THREE.Vector3(0, 1, 0);
-  // mode: 'bobber' | 'reel' | null
-  const updateFishCam = (dt, mode) => {
-    const camera = ctx.camera;
-    if (!camera) return;
-    const f = T.fishing;
-    const crank = mode === 'reel' ? ctx.getRodModel()?.getObjectByName('rod-crank') : null;
-    const k = 1 - Math.exp(-(mode === 'bobber' ? 3 : 6) * dt);
-    let fov = null;
-    if (crank) {
-      // (over the shoulder, beside the reel: the reel in front, the line running out past it —
-      // further back on a narrow (portrait) screen so the reel and the line both fit)
-      const narrow = camera.aspect < 1;
-      const back = narrow ? FISH_REEL_CAM.backNarrow : FISH_REEL_CAM.back;
-      const side = narrow ? FISH_REEL_CAM.sideNarrow : FISH_REEL_CAM.side;
-      const up = narrow ? FISH_REEL_CAM.upNarrow : FISH_REEL_CAM.up;
-      fov = narrow ? FISH_REEL_CAM.fovNarrow : FISH_REEL_CAM.fov;
-      crank.getWorldPosition(_cl);
-      const d = facing();
-      _cp.set(_cl.x - d.x * back + d.z * side, _cl.y + up, _cl.z - d.z * back - d.x * side);
-      _cl.x += d.x * FISH_REEL_CAM.ahead;
-      _cl.z += d.z * FISH_REEL_CAM.ahead;
-    } else if (mode === 'bobber' && f) {
-      // (where it lands while it's flying, then the bobber itself, smoothed)
-      const b = f.phase === 'cast' || !rig ? f.at : rig.bobberPosition();
-      if (!cam.on) cam.look.copy(b);
-      else cam.look.lerp(b, 1 - Math.exp(-4 * dt));
-      _cl.copy(cam.look);
-      _cp.set(_cl.x - f.dir.x * FISH_BOBBER_CAM.back, _cl.y + FISH_BOBBER_CAM.up, _cl.z - f.dir.z * FISH_BOBBER_CAM.back);
-      // (never down in the ground on the bank behind it)
-      const gy = ctx.getGroundY(_cp.x, _cp.z);
-      if (Number.isFinite(gy)) _cp.y = Math.max(_cp.y, gy + FISH_BOBBER_CAM.up * 0.7);
-      fov = FISH_BOBBER_CAM.fov;
-    }
-    if (fov != null) {
-      if (!cam.on && !cam.easing) { cam.pos.copy(camera.position); cam.quat.copy(camera.quaternion); cam.fov = camera.fov; }
-      cam.on = true;
-      cam.easing = false;
-      _cm.lookAt(_cp, _cl, _up);
-      _cq.setFromRotationMatrix(_cm);
-      cam.pos.lerp(_cp, k);
-      cam.quat.slerp(_cq, k);
-      cam.fov += (fov - cam.fov) * k;
-    } else if (cam.on || cam.easing) {
-      // Easing back to where the controls put the camera this frame
-      cam.on = false;
-      cam.easing = true;
-      const kb = 1 - Math.exp(-9 * dt);
-      cam.pos.lerp(camera.position, kb);
-      cam.quat.slerp(camera.quaternion, kb);
-      cam.fov += (camera.fov - cam.fov) * kb;
-      if (cam.pos.distanceTo(camera.position) < 0.03) { cam.easing = false; return; }
-    } else return;
-    camera.position.copy(cam.pos);
-    camera.quaternion.copy(cam.quat);
-    camera.fov = cam.fov;
-    camera.updateProjectionMatrix();
-    camera.updateMatrixWorld();
-  };
-  let reelHold = false;
-  const setReelHold = (on) => {
-    if (on === reelHold) return;
-    reelHold = on;
-    ctx.setReelHold?.(on);
-  };
   const reelPhase = () => T.fishing?.phase === 'fight' && T.fishing.fish.mode === 'beaten';
 
   // Put away at once (leaving Town, arrests): no reeling in
@@ -489,8 +417,6 @@ export function installTownFishing(T, ctx) {
     rig?.golden(false);
     rig?.stop();
     dropBubbles();
-    setReelHold(false);
-    cam.on = cam.easing = false;
   };
 
   const _fishAt = { x: 0, z: 0 };
@@ -526,8 +452,6 @@ export function installTownFishing(T, ctx) {
       if (dist2(p.x, p.z, f.x, f.z) > reach || ctx.isPlayerDead() || !ctx.isRodEquipped()) {
         if (!ctx.isRodEquipped() || ctx.isPlayerDead()) { T.fishing = null; rig?.golden(false); rig?.stop(); }
         else { if (f.fish) say('It got away.'); finish(); }
-        setReelHold(false);
-        updateFishCam(dt, null);
         refreshHud();
         return;
       }
@@ -628,10 +552,6 @@ export function installTownFishing(T, ctx) {
       _fishAt.z = g.z + g.dir.z * g.d - g.dir.x * lat;
     }
     rig?.update(dt, { bite, load, crank: reeled, fish: T.fishing && T.fishing.phase !== 'cast' ? _fishAt : null });
-    // The reel: the rod holds still for a gyro to crank it, and the camera closes in on it
-    const reeling = reelPhase();
-    setReelHold(reeling && gyro);
-    updateFishCam(dt, reeling ? 'reel' : T.fishing && !T.fishing.dry ? 'bobber' : null);
     refreshHud();
   };
 
@@ -656,7 +576,7 @@ export function installTownFishing(T, ctx) {
         cue = 'turn';
       } else {
         cue = 'reel';
-        text = gyro ? 'Circle the phone to reel in!' : 'Reel in!';
+        text = 'Reel in!';
       }
     }
     // (the fish's way, the reel's instruction and which way to swipe only once they've been
@@ -667,15 +587,14 @@ export function installTownFishing(T, ctx) {
   let hudKey = '';
   const refreshHud = () => {
     const s = status();
-    const gyro = ctx.hasGyro();
     const shown = s ? [s.text, s.hint].filter(Boolean).join('  ·  ') : '';
     // (the DOM only when something shows differently)
-    const k = s ? `${s.cue}|${shown}|${gyro}` : '';
+    const k = s ? `${s.cue}|${shown}|${ctx.isPhoneConnected()}` : '';
     if (k === hudKey) return;
     hudKey = k;
     meter.classList.toggle('hidden', !shown);
-    // (the on-screen reel only without a gyro to circle, while it's worn out / the line waits)
-    reelEl.classList.toggle('hidden', !s || gyro || !(s.cue === 'reel' || s.cue === 'wait'));
+    // (the on-screen reel only once it's time to reel in, and only without a phone — it has its own)
+    reelEl.classList.toggle('hidden', !s || s.cue !== 'reel' || ctx.isPhoneConnected());
     document.body.classList.toggle('town-reeling', !!s);
     if (shown) {
       cueEl.textContent = shown;
@@ -685,12 +604,11 @@ export function installTownFishing(T, ctx) {
     const key = s ? s.cue : null;
     if (key !== lastCue) { lastCue = key; ctx.refreshPhone?.(); }
   };
-  // For the phone: its reel panel while the line's out (gyro: it's a display — circle the phone
-  // itself, not its touch reel)
+  // For the phone: the line's out (its cues buzz), and its touch reel shows once it's time to reel in (show)
   const fishingHud = () => {
     const s = status();
     if (!s) return null;
-    return { reel: true, cue: s.cue, text: [s.text, s.hint].filter(Boolean).join('\n'), gyroReel: true };
+    return { reel: true, show: s.cue === 'reel', cue: s.cue, text: [s.text, s.hint].filter(Boolean).join('\n') };
   };
   // The act the first day's fishing goal rings (townQuests.js goalHighlight)
   const fishActKey = () => {
@@ -729,8 +647,6 @@ export function installTownFishing(T, ctx) {
     reelPointer = null;
     keyReel = false;
     dropBubbles();
-    setReelHold(false);
-    cam.on = cam.easing = false;
   };
 
   Object.assign(T, { fishActKey, fishingActs, fishingHud, hideFishingHud, loseFish, stopFishingRig, updateFishing });

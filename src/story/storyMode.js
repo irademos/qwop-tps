@@ -597,8 +597,7 @@ export function createStoryMode(ctx) {
     getGroundY: ctx.getGroundY,
     hasGyro: ctx.hasGyro,
     takeReel: ctx.takeReel,
-    setReelHold: ctx.setReelHold,
-    camera: ctx.camera,
+    turnCameraTo: ctx.turnCameraTo,
     isPhoneConnected: ctx.isPhoneConnected,
     refreshPhone: ctx.refreshPhone,
   });
