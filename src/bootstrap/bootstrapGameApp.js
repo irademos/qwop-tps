@@ -11588,6 +11588,43 @@ async function initCore(runtimeContext) {
   const LANTERN_FADE_S = 1.2;
   let _townLantern = null;
   let _townLanternLevel = 0;
+  // Town: random songs while a job is under way (town.jobActive — townQuests.js) — shuffled
+  // through TOWN_JOB_SONGS on the audio manager's music element, faded out when the job ends
+  const TOWN_JOB_SONGS = ['Songs/day3.ogg', 'Songs/day4.ogg', 'Songs/day5.ogg', 'Songs/day6.ogg'];
+  const TOWN_JOB_SONG_FADE_S = 2.5;
+  const _townJobSong = { on: false, pool: [], last: null, fade: 0, el: null };
+  const _townJobNextSong = () => {
+    const J = _townJobSong;
+    if (!J.pool.length) J.pool = TOWN_JOB_SONGS.filter((x) => x !== J.last || TOWN_JOB_SONGS.length === 1);
+    const song = J.pool.splice(Math.floor(Math.random() * J.pool.length), 1)[0];
+    J.last = song;
+    J.el = audioManager.getMusicElement();
+    J.el.pause();
+    J.el.src = `assets/audio/${song}`;
+    J.el.currentTime = 0;
+    J.el.volume = audioManager.musicVolume;
+    J.el.onended = () => { if (_townJobSong.on) _townJobNextSong(); };
+    audioManager.playMusic();
+  };
+  const _townJobSongStop = () => {
+    const J = _townJobSong;
+    J.on = false; J.fade = 0;
+    // (only while the element still plays ours — a Showdown stage may have taken it over since)
+    if (J.el && J.last && J.el.src.endsWith(J.last)) { J.el.onended = null; audioManager.stopMusic(); J.el.volume = audioManager.musicVolume; }
+  };
+  const _updateTownJobSongs = (dt) => {
+    const J = _townJobSong;
+    const want = !!town?.jobActive?.();
+    if (want && !J.on) { J.on = true; J.fade = 0; J.pool = []; _townJobNextSong(); return; }
+    if (want) { if (J.fade > 0 && J.el) { J.fade = 0; J.el.volume = audioManager.musicVolume; } return; }
+    if (!J.on) return;
+    // (the job's over — or Town left: fade out, then stop)
+    if (!town?.isActive()) { _townJobSongStop(); return; }
+    J.fade += dt;
+    if (J.el) J.el.volume = audioManager.musicVolume * Math.max(0, 1 - J.fade / TOWN_JOB_SONG_FADE_S);
+    if (J.fade >= TOWN_JOB_SONG_FADE_S) _townJobSongStop();
+  };
+
   const _updateTownLantern = (dt) => {
     const want = !!(playerModel && town?.wantsLantern() && !playerDead);
     const step = (Number.isFinite(dt) ? dt : 0) / LANTERN_FADE_S;
@@ -13400,6 +13437,7 @@ async function initCore(runtimeContext) {
     // Town mode: the townsfolk, the clock, the law
     town?.update(frameDelta);
     _updateTownLantern(frameDelta);
+    _updateTownJobSongs(frameDelta);
     // Birds flying past (Showdown / Town)
     if (playerModel) birds.update(frameDelta, playerModel.position, _birdsWanted());
     // Eye fish peeking out of the water near the player (Town, at night)

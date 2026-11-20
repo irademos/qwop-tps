@@ -1153,6 +1153,8 @@ export function createTownMode(ctx) {
     wantsLantern: () => !!(T.active && T.ready && T.lantern),
     // 0 day … 1 night (twilight in between)
     nightLevel: () => (T.active ? T.nightLevel : 0),
+    // A job under way (townQuests.js — not the first day's goals): songs play meanwhile
+    jobActive: () => !!(T.active && T.ready && T.questJobActive?.()),
     // In a house's room / the jail (under the map — no sky; the birds stay away)
     isIndoors: () => !!(T.active && (T.inRoom || T.jail)),
     // The phone's Block bar label while there's something to do (undefined: it stays Block; null:
