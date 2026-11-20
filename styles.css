@@ -3035,10 +3035,126 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   opacity: 0.5;
 }
 /* The bubble's hand is held out (body.bubble-cast): no bow / shield while it lasts */
-body.bubble-cast .ps-bow-btn,
-body.bubble-cast .ps-weapon-btn[data-ps-weapon-id="shield"] {
+body.bubble-cast .ps-bow-part,
+body.bubble-cast .ps-shield-part {
   opacity: 0.35;
   filter: grayscale(0.8);
+}
+/* ── The gesture buttons (controls.js initializeActionButtons) ─────────────────────
+   Bow / Bomb and Shield / Bubble: two parts stacked — the slide-up one small on top (↑),
+   the tap / hold one below. The weapon button: a tap takes what it says, held a wheel of
+   the weapons shows round it (.ps-wheel-pop) and sliding picks one */
+.ps-combo-btn {
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+.ps-combo-part {
+  display: block;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ps-combo-part.ps-combo-alt {
+  order: -1;
+  font-size: 10px;
+  opacity: 0.85;
+}
+.ps-combo-part.ps-combo-alt::before {
+  content: '↑ ';
+  opacity: 0.7;
+}
+.ps-bomb-part.ps-bomb-empty,
+.ps-bubble-part.ps-bubble-empty,
+.ps-bow-part.ps-bow-empty {
+  opacity: 0.45;
+}
+.ps-bow-btn.ps-bomb-aiming {
+  background: rgba(249, 115, 22, 0.92) !important;
+  border-color: #fff !important;
+  box-shadow: 0 0 16px rgba(251, 146, 60, 0.85);
+}
+.ps-shield-btn {
+  background: rgba(14, 165, 233, 0.45) !important;
+  color: #fff !important;
+  border: 1px solid rgba(186, 230, 253, 0.7) !important;
+}
+.ps-shield-btn.ps-shield-on {
+  border-color: #fff !important;
+  box-shadow: 0 0 14px rgba(125, 211, 252, 0.7);
+}
+.ps-shield-btn:has(.ps-bubble-active) {
+  background: rgba(125, 211, 252, 0.9) !important;
+  color: #063a57 !important;
+}
+.ps-wheel-btn {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+/* (more than one to pick from: four dots in the corners say it can be held and slid) */
+.ps-wheel-btn.ps-wheel-more::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) top center / 6px 6px no-repeat,
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) bottom center / 6px 6px no-repeat,
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) center left / 6px 6px no-repeat,
+    radial-gradient(circle, currentColor 1.5px, transparent 2px) center right / 6px 6px no-repeat;
+  opacity: 0.55;
+}
+.ps-wheel-pop {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 1200;
+  pointer-events: none;
+  display: none;
+}
+.ps-wheel-pop.is-on { display: block; }
+.ps-wheel-pop::before {
+  content: '';
+  position: absolute;
+  left: -7px;
+  top: -7px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface-hud);
+  border: 1px solid var(--border-strong);
+}
+.ps-wheel-chip {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-hud);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+}
+.ps-wheel-chip.is-up    { left: 0;     top: -72px; }
+.ps-wheel-chip.is-down  { left: 0;     top: 72px; }
+.ps-wheel-chip.is-left  { left: -80px; top: 0; }
+.ps-wheel-chip.is-right { left: 80px;  top: 0; }
+.ps-wheel-chip.is-current { opacity: 0.5; }
+.ps-wheel-chip.is-default { border-color: var(--accent, #f5c451); }
+.ps-wheel-chip.is-pick {
+  background: var(--accent, #f5c451);
+  color: #1b1405;
+  transform: translate(-50%, -50%) scale(1.15);
 }
 /* The crosshair (the middle of the screen = where the arrow goes): a dot and four ticks that
    close in as the string comes back (--spread), the distance in metres beside it */
@@ -3686,8 +3802,6 @@ body.classic-mode .sword-combo-hint, body.story-cut .sword-combo-hint { display:
 /* ── Multiplayer mode: lobby, duel countdown / winner, find-location (src/multiplayer/duelMode.js) ── */
 /* Duels are sword only: hide the bubble, bomb and weapon-switch buttons (battles,
    body.match-loadout, keep them: they fill up from the arena's pickups) */
-body.multiplayer-mode:not(.match-loadout) #ps-bubble-btn,
-body.multiplayer-mode:not(.match-loadout) #ps-bomb-btn,
 body.multiplayer-mode:not(.match-loadout) .ps-weapon-btn {
   display: none !important;
 }
@@ -4512,8 +4626,6 @@ body.classic-mode #combo-meter,
 body.classic-mode #joystick-container,
 body.classic-mode #jump-button,
 body.classic-mode #gyro-button,
-body.classic-mode #ps-bubble-btn,
-body.classic-mode #ps-bomb-btn,
 body.classic-mode .ps-weapon-btn {
   display: none !important;
 }
@@ -5436,8 +5548,7 @@ body.story-mode #ammo-display,
 body.story-mode #coin-popup,
 body.story-mode #ps-kill-counter,
 body.story-mode #combo-meter,
-body.story-mode #ps-bubble-btn,
-body.story-mode #ps-bomb-btn,
+body.story-mode #ps-shield-btn,
 body.story-mode #ps-bow-btn,
 body.story-mode #ps-broom-btn,
 body.story-mode #ps-boost-btn,
