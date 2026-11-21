@@ -36,6 +36,7 @@ import { createOarModel, oarStrokeDuration, oarStrokePose } from '../items/oar.j
 import { CANOE_BOARD_DIST, CANOE_SHORE_DIST, dist2 } from './townConfig.js';
 
 const NO_STEER = { fwd: 0, turn: 0 };
+const ARMED_HELD = ['foamSword', 'magic_wand', 'pistol']; // (what may be in hand while armed)
 const SEAT_Z = 1.15;          // m along it (bow +): where a passenger kneels
 const PILOT_GRIP = { y: 0.62, z: 0.1, out: 0.3 }; // m: the passenger's top hand — over the floor, ahead of their knees, out over the side
 const PILOT_TURN_GAIN = 1.5;  // the steer: per rad off the heading…
@@ -169,17 +170,21 @@ export function installTownCanoe(T, ctx) {
       if (!canoe) return;
     }
     if (canoe.aboard && (ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom)) leave();
-    // (a job's fight from it: the sword stays in hand)
-    if (canoe.aboard && armed && !ctx.isPlayerDead() && ctx.heldWeapon?.() !== 'foamSword' && T.simT > (canoe.armAt ?? 0)) {
+    // (a job's fight from it — or the night octopus: the sword stays in hand, or the wand / the bow
+    // for a draw; nothing while a bomb's aimed / thrown or a draw's going on)
+    if (canoe.aboard && armed && !ctx.isPlayerDead() && !ARMED_HELD.includes(ctx.heldWeapon?.()) && !ctx.weaponBusy?.()
+      && T.simT > (canoe.armAt ?? 0)) {
       canoe.armAt = T.simT + 1;
       ctx.setCanoeWeapon?.('sword');
     }
     // (the rod out: no paddling, it comes to rest, the player facing over its side to fish)
     const rodOut = canoe.aboard && ctx.isRodEquipped();
-    if (canoe.aboard && canoe.facing !== (rodOut ? 'rod' : 'oar')) {
-      canoe.facing = rodOut ? 'rod' : 'oar';
+    // (or turned to face something over a side — the night octopus: T.canoeFaceSide)
+    const want = faceSide ? `side${faceSide}` : rodOut ? 'rod' : 'oar';
+    if (canoe.aboard && canoe.facing !== want) {
+      canoe.facing = want;
       const s = canoe.standPoint();
-      ctx.teleport(s.x, s.z, canoe.yaw + (rodOut ? -Math.PI / 2 : 0));
+      ctx.teleport(s.x, s.z, canoe.yaw + (faceSide ? faceSide * Math.PI / 2 : rodOut ? -Math.PI / 2 : 0));
     }
     if (pilot && canoe.aboard) {
       const steer = pilotSteer();
@@ -208,6 +213,7 @@ export function installTownCanoe(T, ctx) {
     if (!canoe) return;
     canoePassenger(null);
     armed = false;
+    faceSide = 0;
     leave();
     canoe.stop();
     Object.assign(canoe, { x: canoe.home.x, z: canoe.home.z, yaw: canoe.home.yaw });
@@ -232,6 +238,7 @@ export function installTownCanoe(T, ctx) {
   let passenger = null;  // the townsperson kneeling in the bow
   let pilot = null;      // { target: () => { x, z }, speed (m/s) } — the passenger paddles
   let armed = false;     // a job's fight from it: the sword in hand
+  let faceSide = 0;      // the player turned to face over its left (+1) / right (−1) side; 0: as usual
   let pOar = null;       // their oar (canoe-local, posed per stroke)
   let pStroke = null;    // { side, dir, strength, u, dur }
   const _seat = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
@@ -347,5 +354,6 @@ export function installTownCanoe(T, ctx) {
     canoeActs, canoeBuilt: () => built, fishAnywhere, fishWater, inCanoe, resetCanoe, setCanoeBuilt, updateCanoe,
     canoeStop, canoePassenger, canoeHasPassenger: () => !!passenger, canoePilot, canoeSeat, canoeRock, canoePose, canoeLand, moorCanoe,
     setCanoeArmed, canoeArmed: () => armed && !!canoe?.aboard,
+    canoeFaceSide: (side) => { faceSide = side ? Math.sign(side) : 0; },
   });
 }

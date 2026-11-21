@@ -1031,7 +1031,7 @@ export class PlayerControls {
     const story = !!appState?.isStoryMode?.();
     // (a job's fight from the canoe — the fisher's pirates: the sword, and nothing to switch to)
     const canoeArmed = inCanoe && !!appState?.isCanoeArmed?.();
-    const ids = canoeArmed ? [] : inCanoe ? (hasRod ? ['canoe_oar', 'fishing_rod'] : [])
+    const ids = canoeArmed ? (hasWand ? ['foamSword', 'magic_wand'] : []) : inCanoe ? (hasRod ? ['canoe_oar', 'fishing_rod'] : [])
       : [
         ...(hasSword ? ['foamSword'] : []),
         ...(hasWand && !story ? ['magic_wand'] : []),
@@ -1084,7 +1084,7 @@ export class PlayerControls {
   // The bow part of Bow / Bomb: owned and not in the canoe
   _bowShown() {
     const appState = appContext.uiState.appState ?? window.appState;
-    return !!appState?.ownsBow?.() && !appState?.isInCanoe?.();
+    return !!appState?.ownsBow?.() && (!appState?.isInCanoe?.() || !!appState?.isCanoeArmed?.());
   }
 
   // The shield part of Shield / Bubble: owned, not in Story or the canoe

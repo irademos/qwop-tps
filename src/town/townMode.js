@@ -82,6 +82,7 @@
 //   refreshButtons() (something grabbed / dropped: the Block bar is / stops being its mode — the hose's 💧 Water)
 //   getShip() → the map's pirate ship { holder, anchor, deck, model, box } | null, spawnBomber({ x, y, z, url,
 //   hearts, bombDamage }) → BombThrowerEnemy, setCanoeWeapon('sword' | 'oar' | 'rod'), spawnArcher({ x, y, z, url, hearts }) — the fisher's pirates (townPirates.js)
+//   getPlayerBlock() → { blocking, blade: [Vector3] }, blockFlash(), hurtPlayer(n), weaponBusy(), hasWeapon() — the night octopus (townOctopus.js)
 //   net (townNet.js, or null): start(), stop(), isOn(), ready(), isHost(), id(), hostId(),
 //   peerIds(), send(to, data), broadcast(data), loadRoomState(), saveRoomState(state),
 //   roomId(), canSave(), playerCount(), sendBounty(to, coins)
@@ -120,6 +121,7 @@ import { installTownGrab } from './townGrab.js';
 import { installTownFarming } from './townFarming.js';
 import { installTownCanoe } from './townCanoe.js';
 import { installTownPirates } from './townPirates.js';
+import { installTownOctopus } from './townOctopus.js';
 import { installTownCart } from './townCart.js';
 import { installTownDrive } from './townDrive.js';
 import { installTownTrees } from './townTrees.js';
@@ -816,6 +818,7 @@ export function createTownMode(ctx) {
     T.resetQuests(); // (a job's people, actors, bandits put away — it starts over at its checkpoint)
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     T.resetPirates(); // (the pirate ship back at its anchor — the fisher's golden fish)
+    T.resetOctopus(); // (the night octopus gone)
     T.resetCart();
     T.resetDrive();
     ctx.setIntroHighlight?.(null); // (the first day's ringed buttons)
@@ -931,6 +934,7 @@ export function createTownMode(ctx) {
     T.updateCanoe(dt);
     T.updateQuests(dt);
     T.updatePirates(dt);
+    T.updateOctopus(dt);
     T.updateDrive(dt);
     T.updateCooking(dt);
     T.updateFarm(dt);
@@ -956,6 +960,9 @@ export function createTownMode(ctx) {
   // them), or chops the tree / log it's in (townTrees.js). 'hit' = a townsperson, true = a chop.
   const trySwordHit = (tip, swingDir, swingId = null) => {
     if (!T.active || !T.ready || T.sequence || T.inRoom) return false;
+    // (the night octopus holding the canoe — townOctopus.js: only while it reels from a block)
+    const octo = T.octopusSwordHit(tip, swingId);
+    if (octo) return octo;
     for (const n of T.npcs) {
       // (someone in a job with the player — the wizard fighting beside them — isn't hit)
       if (!n.alive || !n.body || n.fighter || n.questing || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
@@ -1015,6 +1022,7 @@ export function createTownMode(ctx) {
   installTownRuins(T, ctx);
   installTownCanoe(T, ctx);
   installTownPirates(T, ctx);
+  installTownOctopus(T, ctx);
   installTownCart(T, ctx);
   installTownDrive(T, ctx);
   installTownBook(T, ctx);
@@ -1132,6 +1140,8 @@ export function createTownMode(ctx) {
       }
       // (a job's ambush — townQuests.js)
       for (const at of T.questThreats()) if (T.distToPlayer(at) < range) out.push(at);
+      // (the night octopus at the canoe — townOctopus.js)
+      for (const at of T.octopusThreats()) if (T.distToPlayer(at) < range) out.push(at);
       return out;
     },
     // Who's talking to the player in the talk box (their feet — the camera turns to them), or null
