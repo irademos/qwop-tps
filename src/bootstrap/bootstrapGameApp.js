@@ -11161,7 +11161,8 @@ async function initCore(runtimeContext) {
   // The joystick (on screen / the phone's) or WASD as { fwd, turn } (−1…1; turn > 0 = right) —
   // else, with the oar out, the phone's tilt (_oarTiltSteer)
   const _getSteer = () => {
-    if (!playerControls) return { fwd: 0, turn: 0 };
+    // (no paddling while someone's talking with the player in Town — the canoe halts)
+    if (!playerControls || town?.isTalking?.()) return { fwd: 0, turn: 0 };
     const f = playerControls.joystickForce;
     if (f > 0.1) return { fwd: Math.sin(playerControls.joystickAngle) * f, turn: Math.cos(playerControls.joystickAngle) * f };
     const k = playerControls.keysPressed;
@@ -11583,7 +11584,8 @@ async function initCore(runtimeContext) {
     },
     // A held item the gyro works (the sword / wand / rod / bow / shield, with a live gyro): the
     // phone's busy with it, so the broom holds still meanwhile (empty hands don't use the gyro)
-    isHolding: () => !!(window.phoneSwordGyro?.connected && _heldWeaponId()),
+    // (held still with a gyro item out, and while someone's talking with the player in Town)
+    isHolding: () => !!(window.phoneSwordGyro?.connected && _heldWeaponId()) || !!town?.isTalking?.(),
     // (put away: the phone's pose now is the new rest — no lurch from where the item left it)
     onHoldEnd: () => { _broomGyro.needRest = true; },
     onBoostEnd: (reason) => {

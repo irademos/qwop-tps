@@ -125,7 +125,8 @@ export function installTownCart(T, ctx) {
       waterDepth: ctx.waterDepth,
       getTilt: ctx.getRideTilt,
       getSteer: ctx.getSteer,
-      isHolding: ctx.isHoldingGyroItem,
+      // (held still with a gyro item out, and while someone's talking with the player)
+      isHolding: () => !!(ctx.isHoldingGyroItem?.() || T.jobTalk?.isOpen()),
       onHoldEnd: ctx.resetRideTilt,
       onBump: () => ctx.playSfx?.('thud', ctx.getPlayerPosition()),
     });
