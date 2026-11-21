@@ -4,8 +4,10 @@
 // under way or the line out), now and then (OCTO_CHECK_S, OCTO_CHANCE; OCTO_FIRST_S after
 // setting out, OCTO_COOLDOWN_S after the last one) an octopus (`octopus.glb` — clips Swim, Hurt,
 // Attack Left, Attack Right; faces +Z, origin at its underside) comes up out at sea and swims in
-// under the surface (Swim) to just off the canoe's bow, in front of the player (OCTO_DIST), where
-// it surfaces and holds the canoe (it stops — T.canoeStop each frame). The sword comes out
+// under the surface (Swim) to just off the canoe's left or right side, level with the player
+// (OCTO_DIST), where it surfaces and holds the canoe (it stops — T.canoeStop each frame); the
+// player turns to face it over that side (T.canoeFaceSide) and the camera turns to it
+// (ctx.turnCameraTo — again as each attack starts). The sword comes out
 // (T.setCanoeArmed — the wand and the bow / bombs may be used too).
 //
 // It attacks with a tentacle from its left or its right (Attack Left / Attack Right): a long
@@ -39,7 +41,7 @@ const OCTO_MIN_DEPTH = 2;          // m of water where it comes up
 const OCTO_SWIM_SPEED = 4.5;       // m/s swimming in
 const OCTO_FLEE_SPEED = 5;         // m/s swimming off
 const OCTO_FLEE_S = 6;             // s swimming off, then gone
-const OCTO_DIST = 1.9;             // m in front of the player it holds the canoe
+const OCTO_DIST = 1.9;             // m out from the player, off the canoe's side, it holds the canoe
 const OCTO_SURFACE_SINK = 0.25;    // × its height under the water line its origin sits, holding on
 const OCTO_DEEP_SINK = 1.6;        // m further down swimming in (rising over the last OCTO_RISE_DIST)
 const OCTO_RISE_DIST = 7;
@@ -49,7 +51,7 @@ const OCTO_ATTACK_RATE = 1.3;      // the attack clips' speed (3.71 s: ~2.6 s of
 const OCTO_STRIKE_AT = 3.4;        // s into an attack clip: the tentacle lands
 const OCTO_HURT_RATE = 1.4;        // the Hurt clip's speed (~2.65 s to strike back)
 const OCTO_FADE_S = 0.2;           // s crossfading clips
-const OCTO_HP = 5;                 // hits
+const OCTO_HP = 15;                // hits
 const OCTO_DAMAGE = 1;             // health segments an unblocked tentacle takes
 const OCTO_BLOCK_REACH = 1.0;      // m from where the tentacle lands the blade has to be
 const OCTO_BLOCK_MIN_ANGLE_DEG = PLAYER_BLOCK_MIN_ANGLE_DEG; // a blade this near the swing's line lets it through
@@ -88,12 +90,17 @@ export function installTownOctopus(T, ctx) {
   let toldHowTo = false;
 
   const waterY = (x, z) => ctx.getWaterY(x, z) ?? 0;
+  // Where it holds the canoe: off its left (+1) or right (−1) side (o.boatSide), level with the
+  // player (the canoe's local +X is its left)
   const canoeFront = () => {
     const c = T.canoePose?.();
     const p = ctx.getPlayerPosition();
     if (!c) return null;
-    return { x: p.x + Math.sin(c.yaw) * OCTO_DIST, z: p.z + Math.cos(c.yaw) * OCTO_DIST };
+    const s = o?.boatSide ?? 1;
+    return { x: p.x + Math.cos(c.yaw) * OCTO_DIST * s, z: p.z - Math.sin(c.yaw) * OCTO_DIST * s };
   };
+  // The camera turned to it (once — ctx.turnCameraTo eases it round)
+  const lookAtIt = () => ctx.turnCameraTo?.(o.x, o.z);
   const play = (key, { rate = 1, once = false } = {}) => {
     const a = o.actions[key];
     if (!a) return;
@@ -137,7 +144,7 @@ export function installTownOctopus(T, ctx) {
         if (clip) actions[key] = mixer.clipAction(clip);
       }
       o = { root, model, mixer, actions, action: null, state: 'approach', t: 0, x, z, yaw: Math.atan2(c.x - x, c.z - z), y: waterY(x, z) - OCTO_DEEP_SINK,
-        hp: OCTO_HP, side: 'left', struck: false, lastHitAt: -9, lastSwing: null, proxy: null };
+        hp: OCTO_HP, boatSide: Math.random() < 0.5 ? 1 : -1, side: 'left', struck: false, lastHitAt: -9, lastSwing: null, proxy: null };
       play('swim');
       place();
       return true;
@@ -156,6 +163,7 @@ export function installTownOctopus(T, ctx) {
     setState('flee');
     play('swim', { rate: 1.4 });
     arm(false);
+    T.canoeFaceSide?.(0);
     if (why) T.feedLine(why);
   };
   // (leaving Town)
@@ -315,6 +323,8 @@ export function installTownOctopus(T, ctx) {
       if (d < OCTO_RISE_DIST + 4) arm(true);
       if (d < 0.3) {
         setState('surface');
+        T.canoeFaceSide?.(o.boatSide); // (the player turns to face it over the side)
+        lookAtIt();
         ctx.playSfx?.('splash', headPos());
         T.canoeRock?.(headPos(), 0.35);
         if (!toldHowTo) {
@@ -341,6 +351,7 @@ export function installTownOctopus(T, ctx) {
         o.side = Math.random() < 0.5 ? 'left' : 'right';
         o.struck = false;
         setState('attack');
+        lookAtIt();
         play(o.side, { rate: OCTO_ATTACK_RATE, once: true });
       }
     } else if (o.state === 'attack') {

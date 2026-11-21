@@ -179,10 +179,12 @@ export function installTownCanoe(T, ctx) {
     }
     // (the rod out: no paddling, it comes to rest, the player facing over its side to fish)
     const rodOut = canoe.aboard && ctx.isRodEquipped();
-    if (canoe.aboard && canoe.facing !== (rodOut ? 'rod' : 'oar')) {
-      canoe.facing = rodOut ? 'rod' : 'oar';
+    // (or turned to face something over a side — the night octopus: T.canoeFaceSide)
+    const want = faceSide ? `side${faceSide}` : rodOut ? 'rod' : 'oar';
+    if (canoe.aboard && canoe.facing !== want) {
+      canoe.facing = want;
       const s = canoe.standPoint();
-      ctx.teleport(s.x, s.z, canoe.yaw + (rodOut ? -Math.PI / 2 : 0));
+      ctx.teleport(s.x, s.z, canoe.yaw + (faceSide ? faceSide * Math.PI / 2 : rodOut ? -Math.PI / 2 : 0));
     }
     if (pilot && canoe.aboard) {
       const steer = pilotSteer();
@@ -211,6 +213,7 @@ export function installTownCanoe(T, ctx) {
     if (!canoe) return;
     canoePassenger(null);
     armed = false;
+    faceSide = 0;
     leave();
     canoe.stop();
     Object.assign(canoe, { x: canoe.home.x, z: canoe.home.z, yaw: canoe.home.yaw });
@@ -235,6 +238,7 @@ export function installTownCanoe(T, ctx) {
   let passenger = null;  // the townsperson kneeling in the bow
   let pilot = null;      // { target: () => { x, z }, speed (m/s) } — the passenger paddles
   let armed = false;     // a job's fight from it: the sword in hand
+  let faceSide = 0;      // the player turned to face over its left (+1) / right (−1) side; 0: as usual
   let pOar = null;       // their oar (canoe-local, posed per stroke)
   let pStroke = null;    // { side, dir, strength, u, dur }
   const _seat = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
@@ -350,5 +354,6 @@ export function installTownCanoe(T, ctx) {
     canoeActs, canoeBuilt: () => built, fishAnywhere, fishWater, inCanoe, resetCanoe, setCanoeBuilt, updateCanoe,
     canoeStop, canoePassenger, canoeHasPassenger: () => !!passenger, canoePilot, canoeSeat, canoeRock, canoePose, canoeLand, moorCanoe,
     setCanoeArmed, canoeArmed: () => armed && !!canoe?.aboard,
+    canoeFaceSide: (side) => { faceSide = side ? Math.sign(side) : 0; },
   });
 }
