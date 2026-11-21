@@ -7813,6 +7813,8 @@ async function initCore(runtimeContext) {
       // Story: the sword (from the sacred tree) ↔ hands
       if (story?.isActive()) { story.toggleSword(); return; }
       // Town: 🗡 Sword out ↔ ✋ Hands (nothing in hand); something grabbed: drop it
+      // (the night octopus beaten: the sword stays out till the oar's picked — this button picks it)
+      if (town?.canoeArmedUntilOar?.() && !isOarEquipped()) { _equipByPlayer(OAR_ITEM_ID); playerControls?.refreshActionButtons?.(); return; }
       if (!_townLoadout || isOarAllowed()) return; // (in the canoe the oar stays in hand)
       if (town?.holding()) { town.dropHeld(); return; }
       if (_heldWeaponId()) _putWeaponsAway();
@@ -8575,6 +8577,7 @@ async function initCore(runtimeContext) {
     isInCanoe: () => isOarAllowed(),
     // (Town's canoe with a job's fight on — the fisher's pirates: the sword is all there is)
     isCanoeArmed: () => !!town?.canoeArmed?.(),
+    isCanoeArmedUntilOar: () => !!town?.canoeArmedUntilOar?.(),
     // Town's flying broom (bought from the wizard): owned / being ridden / on ↔ off
     hasBroom: () => !!_townLoadout?.hasBroom,
     isRidingBroom: () => !!_broomRide?.isRiding(),

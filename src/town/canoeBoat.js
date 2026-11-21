@@ -29,6 +29,8 @@ import {
 
 // Where the hull's water depth is checked (canoe-local m: across, along)
 const HULL_PROBES = [[0, 0], [0, CANOE_HALF_LENGTH - 0.3], [0, -(CANOE_HALF_LENGTH - 0.3)], [CANOE_HALF_WIDTH, 0], [-CANOE_HALF_WIDTH, 0]];
+const ROCK_FREQ = 5.2;   // rad/s: a knock's rocking, side to side (~0.8 Hz)
+const ROCK_DECAY = 1.1;  // /s: how fast it dies away
 
 // waterY(x, z): the water's surface there; waterDepth(x, z): m of water over the ground (0: dry)
 export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
@@ -41,6 +43,7 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     splashAt: 0,        // s (real clock): the next drops off a stroke
     roll: 0, pitch: 0,  // rad: its tilt (+ roll = the left side up — heeled to the right, + pitch = bow down)
     heelTo: 0, accel: 0, // this frame's paddling: the heel it wants, its push along it (m/s²)
+    rock: 0, rockPh: 0, // rad / rad: a knock's rocking side to side (amplitude, dying away — boat.knock)
   };
   // (world space: put beside the canoe in whatever holds it, the first time it moves)
   const splash = createWaterSplash();
@@ -71,7 +74,8 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
   const place = (t) => {
     boat.group.position.set(boat.x, waterY(boat.x, boat.z) + Math.sin(t * 1.7) * CANOE_BOB, boat.z);
     // (heading, then pitch, then roll — about the canoe's own axes)
-    boat.group.rotation.set(Math.sin(t * 1.1) * 0.015 + boat.pitch, boat.yaw, Math.sin(t * 1.3 + 1) * 0.02 + boat.roll, 'YXZ');
+    boat.group.rotation.set(Math.sin(t * 1.1) * 0.015 + boat.pitch, boat.yaw, Math.sin(t * 1.3 + 1) * 0.02 + boat.roll
+      + boat.rock * Math.sin(boat.rockPh), 'YXZ');
   };
   const stop = () => {
     boat.vx = 0;
@@ -230,6 +234,12 @@ export function createCanoeBoat({ waterY, waterDepth, x = 0, z = 0, yaw = 0 }) {
     c.pitch += (-c.accel * CANOE_PITCH_PER_ACCEL - c.pitch) * k;
     c.heelTo = 0;
     c.accel = 0;
+    // (a knock's rocking: side to side, dying away)
+    if (c.rock) {
+      c.rockPh += ROCK_FREQ * dt;
+      c.rock *= Math.exp(-ROCK_DECAY * dt);
+      if (Math.abs(c.rock) < 0.002) c.rock = 0;
+    }
     place(t);
     const holder = boat.group.parent;
     if (holder && splash.group.parent !== holder) holder.add(splash.group);

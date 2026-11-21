@@ -1031,7 +1031,9 @@ export class PlayerControls {
     const story = !!appState?.isStoryMode?.();
     // (a job's fight from the canoe — the fisher's pirates: the sword, and nothing to switch to)
     const canoeArmed = inCanoe && !!appState?.isCanoeArmed?.();
-    const ids = canoeArmed ? (hasWand ? ['foamSword', 'magic_wand'] : []) : inCanoe ? (hasRod ? ['canoe_oar', 'fishing_rod'] : [])
+    // (the night octopus beaten: the sword stays till the oar's picked — the oar offered)
+    const untilOar = canoeArmed && !!appState?.isCanoeArmedUntilOar?.();
+    const ids = canoeArmed ? [...(hasWand || untilOar ? ['foamSword'] : []), ...(hasWand ? ['magic_wand'] : []), ...(untilOar ? ['canoe_oar'] : [])] : inCanoe ? (hasRod ? ['canoe_oar', 'fishing_rod'] : [])
       : [
         ...(hasSword ? ['foamSword'] : []),
         ...(hasWand && !story ? ['magic_wand'] : []),
@@ -1045,7 +1047,7 @@ export class PlayerControls {
     const options = ids.map((id) => ({ id, dir: WHEEL_DIRS[id], label: WHEEL_LABELS[id] }));
     const others = options.filter((o) => o.id !== equippedId);
     // A tap: the sword — or, with the sword in hand, empty hands — else the first of the rest
-    const preferred = equippedId === 'foamSword' ? HANDS_ID : 'foamSword';
+    const preferred = untilOar ? 'canoe_oar' : equippedId === 'foamSword' ? HANDS_ID : 'foamSword';
     const def = others.find((o) => o.id === preferred) ?? others[0] ?? null;
     this._wheel = def ? { options, default: def, equipped: equippedId } : null;
     const wheel = this.psWeaponBtn1;

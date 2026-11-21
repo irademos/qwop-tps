@@ -1184,6 +1184,7 @@ export function createTownMode(ctx) {
     inCanoe: () => !!(T.active && T.ready && T.inCanoe()),
     // (a job's fight from the canoe — the fisher's pirates: the sword in hand there)
     canoeArmed: () => !!(T.active && T.ready && T.canoeArmed()),
+    canoeArmedUntilOar: () => !!(T.active && T.ready && T.canoeArmedUntilOar?.()),
     // (dev console)
     debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, goods, stalls: T.stalls, ctx, jobs: T.jobs, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
   };
