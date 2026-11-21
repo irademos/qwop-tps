@@ -7904,6 +7904,8 @@ async function initCore(runtimeContext) {
       onBroom: !!_broomRide?.isRiding(),
       boosting: !!_broomRide?.isBoosting(),
       canUnequip: !!_townLoadout,
+      // (the night octopus beaten: the 🗡/✋ button picks the oar back up — townOctopus.js)
+      oarBack: !!town?.canoeArmedUntilOar?.() && !isOarEquipped(),
       // (the shield held up from the wand: Block keeps saying Shield until it's let go)
       wandShieldHeld: _wandShieldHold,
       // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')

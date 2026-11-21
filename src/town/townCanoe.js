@@ -276,7 +276,8 @@ export function installTownCanoe(T, ctx) {
     const was = armed;
     armed = v;
     T.actsAt = 0;
-    if (!canoe?.aboard || (was && v)) return;
+    // (the buttons / the phone told: 'untilOar' brings the oar back onto the weapon button)
+    if (!canoe?.aboard || (was && v)) { ctx.refreshButtons?.(); return; }
     ctx.setCanoeWeapon?.(armed ? 'sword' : 'oar');
   };
   // Steering for the passenger: toward the target, easing off near it

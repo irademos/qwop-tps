@@ -756,7 +756,7 @@ Boost</button>
       btnSword.classList.toggle('shown', !!st.canUnequip);
       const unarmed = st.equipped === 'none';
       // (Town, something grabbed — the hose: it drops it)
-      btnSword.textContent = st.holding ? '✋\nDrop' : unarmed ? '🗡️\nSword' : '✋\nHands';
+      btnSword.textContent = st.oarBack ? '🛶\nOar' : st.holding ? '✋\nDrop' : unarmed ? '🗡️\nSword' : '✋\nHands';
       btnSword.disabled = unarmed && st.hasSword === false && !st.holding;
       layoutRowButtons();
       // The bar: Interact (village / talk / calibration popup), Fire (gun), Sword (shield),
