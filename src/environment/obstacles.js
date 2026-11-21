@@ -21,7 +21,8 @@ export function setMapObstacles(list = []) {
 
 // A prop's obstacles under `key` (null / [] takes them away): columns as above, or boxes
 // { box: true, x, z, hx, hz, yaw, y0, y1 } — centred on (x, z), half-sizes hx / hz along the
-// box's own x / z, turned `yaw` (three.js rotation.y)
+// box's own x / z, turned `yaw` (three.js rotation.y). Any of them can carry an `owner` tag, so
+// that thing's own checks can skip it (pushOutOfObstacles' `ignore` — the cart's own box)
 export function setPropObstacles(key, list) {
   if (list?.length) propLists.set(key, list);
   else if (!propLists.delete(key)) return;
@@ -130,13 +131,14 @@ export function slideStep(x, z, y, stepX, stepZ, radius) {
 }
 
 // A walker of radius `radius` at (x, z), height y, moved out of any trunk it is inside.
-// Returns null when it is clear, else the spot to put it.
-export function pushOutOfObstacles(x, z, y, radius) {
+// Returns null when it is clear, else the spot to put it. `ignore`: an `owner` tag to skip.
+export function pushOutOfObstacles(x, z, y, radius, ignore = null) {
   if (!grid.size) return null;
   const cols = near(x, z, y);
   if (!cols?.length) return null;
   let moved = false;
   for (const o of cols) {
+    if (ignore && o.owner === ignore) continue;
     if (o.box) {
       const HX = o.hx + radius;
       const HZ = o.hz + radius;

@@ -23,7 +23,7 @@
 // ask for a load (the `cartGoods` beat — the wizard's logs) and take it (`unloadGoods`).
 
 import * as THREE from 'three';
-import { createCartRide } from '../items/cart.js';
+import { createCartRide, CART_HALF_WIDTH, CART_FRONT, CART_BACK } from '../items/cart.js';
 import { buildItemMesh } from '../village/villageMode.js';
 import { createWoodLog } from '../items/woodLog.js';
 import { GOODS, GOOD_IDS } from './townEconomy.js';
@@ -36,6 +36,7 @@ const RETURN_S = 60;
 const RETURN_AWAY = 12;     // m the player is from both (so it doesn't vanish / pop up in view)
 const RETURN_MOVED = 3;     // m from its parking spot before it counts as left somewhere
 const CART_SOUND_FULL_SPEED = 4.5; // m/s — the rolling sound at full volume (its top speed is 5.4)
+const CART_SOLID_H = 1.1;   // m — how high the parked cart's box stands over the ground (a collider: the player bumps into it)
 const BRING_RINGS = [1.75, 2.3, 3, 4, 5.5]; // m from the player the cart's brought round to (bringCart — Get in within CART_ACT_DIST)
 // (the item model a crate of a good shows — villageMode.js buildItemMesh)
 const CRATE_ITEM = { fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'veg' };
@@ -329,8 +330,33 @@ export function installTownCart(T, ctx) {
     const level = Math.min(1, rollSpeed / CART_SOUND_FULL_SPEED);
     ctx.cartRolling?.(level < 0.04 ? 0 : level, { x: c.x, y: ctx.getGroundY(c.x, c.z) ?? T.playerPos().y, z: c.z });
   };
+  // The parked cart is solid (obstacles.js — the player bumps into it / slides round it, a Rapier
+  // box for enemies; tagged `owner: 'cart'` so its own fits() skips it): a box round its bed,
+  // none while it's ridden or tipped over. Re-sent (T.refreshObstacles — townRuins.js) only when
+  // it has moved, so not every frame.
+  let solidSig = null;
+  const cartObstacles = () => {
+    if (!ride || ride.isRiding() || ride.isFlipped()) return [];
+    const c = ride.pose();
+    const g = ctx.getGroundY(c.x, c.z);
+    if (!Number.isFinite(g)) return [];
+    const lz = (CART_FRONT - CART_BACK) / 2; // (the bed's middle, ahead of the axles' middle)
+    return [{
+      box: true, owner: 'cart',
+      x: c.x + Math.sin(c.yaw) * lz, z: c.z + Math.cos(c.yaw) * lz,
+      hx: CART_HALF_WIDTH, hz: (CART_FRONT + CART_BACK) / 2, yaw: c.yaw,
+      y0: g - 1, y1: g + CART_SOLID_H,
+    }];
+  };
+  const syncSolid = () => {
+    const o = cartObstacles()[0];
+    const sig = o ? `${o.x.toFixed(2)},${o.z.toFixed(2)},${o.yaw.toFixed(2)}` : '';
+    if (sig === solidSig) return;
+    solidSig = sig;
+    T.refreshObstacles?.();
+  };
   const cartBeforeControls = (dt) => {
-    if (ride) rollSound(dt);
+    if (ride) { rollSound(dt); syncSolid(); }
     if (!ride) {
       if (!setupTried && T.active && T.ready && T.layout) { setupTried = true; setup(); }
       return;
@@ -381,6 +407,7 @@ export function installTownCart(T, ctx) {
   const resetCart = () => {
     ctx.cartRolling?.(0);
     lastPos = null; rollSpeed = 0;
+    solidSig = null; // (Town's exit takes the props' obstacles away; re-sent on the next visit)
     if (!ride) return;
     leave({ step: false });
     if (home) ride.place(home.x, home.z, home.yaw);
@@ -397,5 +424,5 @@ export function installTownCart(T, ctx) {
   const cartPose = () => (ride ? ride.pose() : null);
   const cartFlipped = () => !!ride?.isFlipped();
 
-  Object.assign(T, { cartHas, takeFromCart, restoreCart, cartSnapshot, openCartStore, cartStoreCount: storeCount, lockCart, knockCart, cartSeat, cartPose, cartFlipped, bringCart, cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
+  Object.assign(T, { cartHas, takeFromCart, restoreCart, cartSnapshot, openCartStore, cartStoreCount: storeCount, lockCart, knockCart, cartSeat, cartPose, cartFlipped, bringCart, cartActs, cartBeforeControls, cartAfterControls, inCart, resetCart, cartObstacles, cartRide: () => ride }); // (cartRide: dev console — town.debug().T.cartRide())
 }

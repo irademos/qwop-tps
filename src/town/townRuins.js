@@ -135,10 +135,10 @@ export function installTownRuins(T, ctx) {
   };
   const ruinObstacles = () => [...shown.values()].flatMap((s) => s.obstacles);
   // The town's solid props (obstacles.js — the player walks round them; a Rapier body for
-  // enemies): the market stalls + the wizard's, and the ruins' heaps
+  // enemies): the market stalls + the wizard's, the ruins' heaps and the parked cart (townCart.js)
   const refreshObstacles = () => {
     if (!T.layout) return;
-    ctx.setPropObstacles?.([...T.stalls.obstacleBoxes(), ...ruinObstacles()]);
+    ctx.setPropObstacles?.([...T.stalls.obstacleBoxes(), ...ruinObstacles(), ...(T.cartObstacles?.() ?? [])]);
   };
 
   Object.assign(T, { ruinBuilding, rebuildBuilding, isRuined, updateRuins, ruinsSnapshot, restoreRuins, handleRuinNet, resetRuins, ruinObstacles, refreshObstacles });
