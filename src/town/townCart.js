@@ -35,7 +35,7 @@ const PARK_CLEARANCE = 1.1; // m from the cart's middle to a placed thing's boun
 const RETURN_S = 60;
 const RETURN_AWAY = 12;     // m the player is from both (so it doesn't vanish / pop up in view)
 const RETURN_MOVED = 3;     // m from its parking spot before it counts as left somewhere
-const CART_SOUND_FULL_SPEED = 4.5; // m/s — the rolling sound at full volume (its top speed is 5.4)
+const CART_SOUND_FULL_SPEED = 7; // m/s — the rolling sound at full volume (its top speed is 8.5)
 const CART_SOLID_H = 1.1;   // m — how high the parked cart's box stands over the ground (a collider: the player bumps into it)
 const BRING_RINGS = [1.75, 2.3, 3, 4, 5.5]; // m from the player the cart's brought round to (bringCart — Get in within CART_ACT_DIST)
 // (the item model a crate of a good shows — villageMode.js buildItemMesh)

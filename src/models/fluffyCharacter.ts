@@ -619,6 +619,33 @@ class LagSkeletons {
     this.shared.fluffFurLength.value = s.furLength
   }
 
+  // The root moved again after the springs stepped this frame (the player placed by Town's
+  // cart / broom after their rig was animated): carry the springs along by all of it, so the
+  // lagged skeleton isn't drawn a frame behind the body — at speed that jittered
+  followRoot() {
+    if (!this.prevRootInit) return
+    const { prevRoot, carryM, carryQ, pp, pq, ps, np, nq, ns } = this
+    this.root.updateMatrixWorld(true)
+    const rootM = this.root.matrixWorld
+    rootM.decompose(np, nq, ns)
+    prevRoot.decompose(pp, pq, ps)
+    if (pp.distanceToSquared(np) < 1e-12 && Math.abs(pq.dot(nq)) > 1 - 1e-10) return
+    carryM.copy(rootM).multiply(this.tmpInv.copy(prevRoot).invert())
+    carryQ.copy(pq).invert().premultiply(nq)
+    const tp = this.tp, ts = this.ts
+    this.states.forEach((st, bone) => {
+      if (!st.init) return
+      st.pos.applyMatrix4(carryM)
+      st.vel.applyQuaternion(carryQ)
+      st.quat.premultiply(carryQ)
+      st.angVel.applyQuaternion(carryQ)
+      bone.matrixWorld.decompose(tp, this.tq, ts)
+      this.proxies.get(bone)!.matrixWorld.compose(st.pos, st.quat, ts)
+    })
+    this.lagSkeletons.forEach(l => l.update())
+    prevRoot.copy(rootM)
+  }
+
   dispose() { this.lagSkeletons.forEach(l => l.dispose()) }
 }
 
@@ -862,6 +889,11 @@ export class FluffyCharacter {
   /** Fur / fluffy secondary motion; reads the bones' final pose for this frame. */
   stepFluff(dt: number) {
     this.lag?.step(this.paused ? 0 : dt, this.settings)
+  }
+
+  /** The character was moved after stepFluff this frame: the springs carried along (LagSkeletons.followRoot). */
+  followRoot() {
+    this.lag?.followRoot()
   }
 
   dispose() {
