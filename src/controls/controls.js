@@ -1947,6 +1947,22 @@ export class PlayerControls {
     }
   }
   
+  // The camera is placed above from the body's spot before this frame's movement (processMovement
+  // runs after it), and the cart / broom place the body after that again — a frame behind, which
+  // at speed wobbles with the frame time (the cart jittering back and forth). Called once
+  // everything has placed the body: the camera moved along by however far it went since.
+  followPlayerModel() {
+    if (!this._camAnchorSet || !this.playerModel) return;
+    this._camAnchorSet = false;
+    const pm = this.playerModel.position;
+    const dx = pm.x - this._camAnchor.x, dy = pm.y - this._camAnchor.y, dz = pm.z - this._camAnchor.z;
+    if (!Number.isFinite(dx + dy + dz) || dx * dx + dy * dy + dz * dz > 25) return; // (a teleport)
+    this.camera.position.x += dx;
+    this.camera.position.y += dy;
+    this.camera.position.z += dz;
+    this.camera.updateMatrixWorld();
+  }
+
   update() {
     if (!this.keys) {
       this.keys = new Set();
@@ -2070,6 +2086,10 @@ export class PlayerControls {
       this._keepCameraUnder();
       this.camera.lookAt(lookPoint);
     }
+    // (where the body was when the camera was placed — followPlayerModel)
+    if (!this._camAnchor) this._camAnchor = new THREE.Vector3();
+    this._camAnchor.copy(this.playerModel.position);
+    this._camAnchorSet = true;
     if (this.playerModel) {
       // Hiding / fading touches the body only: floating hands/arms and the sword are direct
       // playerGroup children

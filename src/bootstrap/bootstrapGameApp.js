@@ -12064,6 +12064,8 @@ async function initCore(runtimeContext) {
     _updateSwim(frameDelta);
     _broomRide?.afterControls();
     town?.cartAfterControls();
+    // (the camera moved along with where the body ended up this frame — no lag at speed)
+    playerControls.followPlayerModel?.();
     updateBloodEffects(frameDelta);
     updateBulletImpacts(frameDelta);
     updateExplosionEffects(frameDelta);

@@ -70,7 +70,7 @@ export const CART_BACK = (MODEL_MID_Z - MODEL_BED_BACK_Z) * CART_SCALE;   // m b
 const WHEEL_R = MODEL_WHEEL_R * CART_SCALE;
 const STAND_Z = 0.05;                        // m: where the rider crouches, ahead of the middle
 
-const MAX_SPEED = 10.8;                      // m/s at full tilt
+const MAX_SPEED = 8.5;                       // m/s at full tilt
 const BACK_SPEED = 0.45;                     // × MAX_SPEED backing up
 const ACCEL = 1.5;                           // 1/s — how fast the speed follows the tilt
 const BRAKE = 3.5;                           // 1/s — slowing (no tilt, or the other way)
