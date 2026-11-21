@@ -189,7 +189,10 @@ export function installTownCanoe(T, ctx) {
       const s = canoe.standPoint();
       ctx.teleport(s.x, s.z, canoe.yaw + (faceSide ? faceSide * Math.PI / 2 : rodOut ? -Math.PI / 2 : 0));
     }
-    if (pilot && canoe.aboard) {
+    // (someone talking with the player in the talk box: it comes to rest till the talk's over)
+    const talking = canoe.aboard && T.jobTalk?.isOpen();
+    if (talking) { canoe.paddle(dt, null, NO_STEER); canoe.settle(dt); }
+    else if (pilot && canoe.aboard) {
       const steer = pilotSteer();
       canoe.paddle(dt, pOar, steer, pilotStroke(dt, steer));
     } else if (rodOut) { canoe.paddle(dt, null, NO_STEER); canoe.settle(dt); }

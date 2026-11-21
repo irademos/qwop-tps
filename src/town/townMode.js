@@ -1144,6 +1144,8 @@ export function createTownMode(ctx) {
       for (const at of T.octopusThreats()) if (T.distToPlayer(at) < range) out.push(at);
       return out;
     },
+    // Someone talking with the player in the talk box — the canoe / broom / cart halt meanwhile
+    isTalking: () => !!(T.active && T.ready && T.jobTalk.isOpen()),
     // Who's talking to the player in the talk box (their feet — the camera turns to them), or null
     talkFocus: () => {
       if (!T.active || !T.ready || !T.jobTalk.isOpen()) return null;
