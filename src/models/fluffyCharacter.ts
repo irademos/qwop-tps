@@ -40,6 +40,10 @@ export interface FluffySettings {
   shellsHairOnly: boolean // shell fur on painted hair only, not the body
 }
 
+// Caps on how much of the character's whole-body motion the springs may lag
+const MAX_LAG_SPEED = 0.35 // m/s of movement
+const MAX_LAG_TURN = 1.2   // rad/s of turning
+
 export const DEFAULT_FLUFFY: FluffySettings = {
   enabled: false, softness: 0.5, bounce: 0.4, amount: 0.8, flutter: 0.3, fuzz: 0.5, movementLag: 0.15,
   shells: 0, furLength: 0.06, shellsHairOnly: false,
@@ -525,18 +529,30 @@ class LagSkeletons {
   private carryM = new THREE.Matrix4(); private tmpInv = new THREE.Matrix4(); private carryQ = new THREE.Quaternion()
   private pp = new THREE.Vector3(); private pq = new THREE.Quaternion(); private ps = new THREE.Vector3()
   private np = new THREE.Vector3(); private nq = new THREE.Quaternion(); private ns = new THREE.Vector3()
+  private lagVec = new THREE.Vector3(); private lagQ = new THREE.Quaternion()
 
   // Move the spring states along with the character's whole-body motion (walking,
   // turning) so only `movementLag` of it shows up as lag; the animation's own
   // motion relative to the body still drives the full wobble.
-  private carryWithRoot(s: FluffySettings) {
+  // The lagged share of the body's motion is capped (per second), so running fast,
+  // riding, being carried or a slow frame can't drag the springs far behind the
+  // skeleton and stretch the mesh — at a walk it still shows as a little lag.
+  private carryWithRoot(s: FluffySettings, dt: number) {
     const { prevRoot, carryM, carryQ, pp, pq, ps, np, nq, ns } = this
     const rootM = this.root.matrixWorld
     if (this.prevRootInit) {
-      const carry = 1 - THREE.MathUtils.clamp(s.movementLag ?? 0, 0, 1)
+      const lag = THREE.MathUtils.clamp(s.movementLag ?? 0, 0, 1)
       prevRoot.decompose(pp, pq, ps)
       rootM.decompose(np, nq, ns)
-      np.lerpVectors(pp, np, carry); nq.slerpQuaternions(pq, nq, carry); ns.lerpVectors(ps, ns, carry)
+      // Translation: lag = share of the move, at most MAX_LAG_SPEED × dt
+      const lagVec = this.lagVec.subVectors(np, pp).multiplyScalar(lag)
+      const maxMove = MAX_LAG_SPEED * Math.max(dt, 0)
+      if (lagVec.lengthSq() > maxMove * maxMove) lagVec.setLength(maxMove)
+      np.sub(lagVec)
+      // Rotation: the same, at most MAX_LAG_TURN × dt
+      const turn = pq.angleTo(nq)
+      const lagTurn = Math.min(turn * lag, MAX_LAG_TURN * Math.max(dt, 0))
+      if (turn > 1e-6) nq.copy(this.lagQ.copy(pq).slerp(nq, 1 - lagTurn / turn))
       carryM.compose(np, nq, ns).multiply(this.tmpInv.copy(prevRoot).invert())
       carryQ.copy(pq).invert().premultiply(nq)
       this.states.forEach((st) => {
@@ -555,8 +571,10 @@ class LagSkeletons {
     const { tp, ts, tq, err, dq, acc, e, axis } = this
     // Bones were just moved by the animation / pose
     this.root.updateMatrixWorld(true)
-    this.carryWithRoot(s)
-    dt = Math.min(dt, 1 / 20)
+    this.carryWithRoot(s, dt)
+    // Simulate the whole frame (up to 1/8 s, at 120 Hz substeps) so the springs
+    // keep up with the skeleton on slow frames instead of falling behind
+    dt = Math.min(dt, 1 / 8)
     const k = THREE.MathUtils.lerp(700, 18, s.softness)
     const c = 2 * THREE.MathUtils.lerp(1.1, 0.12, s.bounce) * Math.sqrt(k)
     const substeps = Math.max(1, Math.ceil(dt * 120))
