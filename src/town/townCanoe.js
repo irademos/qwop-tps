@@ -129,6 +129,7 @@ export function installTownCanoe(T, ctx) {
     ctx.holdStill(false);
     if (!T.jail && !T.inRoom) ctx.setPositionConstraint(null);
     ctx.setOar(false);
+    if (armed === 'untilOar') { armed = false; faceSide = 0; }
     T.actsAt = 0;
   };
   // Dry ground to step out onto: the town's walkable grid, or (past it) a ring of ground samples
@@ -170,6 +171,8 @@ export function installTownCanoe(T, ctx) {
       if (!canoe) return;
     }
     if (canoe.aboard && (ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom)) leave();
+    // (armed until the oar's picked: once it's in hand, done — and facing the bow again)
+    if (armed === 'untilOar' && ctx.heldWeapon?.() === 'canoe_oar') { armed = false; faceSide = 0; }
     // (a job's fight from it — or the night octopus: the sword stays in hand, or the wand / the bow
     // for a draw; nothing while a bomb's aimed / thrown or a draw's going on)
     if (canoe.aboard && armed && !ctx.isPlayerDead() && !ARMED_HELD.includes(ctx.heldWeapon?.()) && !ctx.weaponBusy?.()
@@ -265,11 +268,17 @@ export function installTownCanoe(T, ctx) {
     pStroke = null;
     if (pOar) pOar.visible = !!pilot;
   };
+  // on: true (the sword in hand till set back off), false (the oar back), or 'untilOar' (the
+  // sword stays till the player picks the oar themselves — the night octopus beaten)
   const setCanoeArmed = (on) => {
-    if (armed === !!on) return;
-    armed = !!on;
-    if (canoe?.aboard) ctx.setCanoeWeapon?.(armed ? 'sword' : 'oar');
+    const v = on === 'untilOar' ? on : !!on;
+    if (armed === v) return;
+    const was = armed;
+    armed = v;
     T.actsAt = 0;
+    // (the buttons / the phone told: 'untilOar' brings the oar back onto the weapon button)
+    if (!canoe?.aboard || (was && v)) { ctx.refreshButtons?.(); return; }
+    ctx.setCanoeWeapon?.(armed ? 'sword' : 'oar');
   };
   // Steering for the passenger: toward the target, easing off near it
   const pilotSteer = () => {
@@ -318,7 +327,9 @@ export function installTownCanoe(T, ctx) {
     const d = Math.hypot(dx, dz) || 1;
     // (canoe-local across: + = its left)
     const across = (dx / d) * Math.cos(canoe.yaw) - (dz / d) * Math.sin(canoe.yaw);
-    canoe.roll += (across >= 0 ? -1 : 1) * ROCK_ROLL * k;
+    // (heeled away from it, then rocking side to side, dying away — canoeBoat.js)
+    canoe.rock = (across >= 0 ? -1 : 1) * Math.min(ROCK_ROLL * 1.4, Math.abs(canoe.rock) * 0.5 + ROCK_ROLL * k);
+    canoe.rockPh = 0;
     canoe.vx += (dx / d) * ROCK_PUSH * k;
     canoe.vz += (dz / d) * ROCK_PUSH * k;
     canoe.w += (Math.random() - 0.5) * 0.8 * k;
@@ -356,7 +367,8 @@ export function installTownCanoe(T, ctx) {
   Object.assign(T, {
     canoeActs, canoeBuilt: () => built, fishAnywhere, fishWater, inCanoe, resetCanoe, setCanoeBuilt, updateCanoe,
     canoeStop, canoePassenger, canoeHasPassenger: () => !!passenger, canoePilot, canoeSeat, canoeRock, canoePose, canoeLand, moorCanoe,
-    setCanoeArmed, canoeArmed: () => armed && !!canoe?.aboard,
+    setCanoeArmed, canoeArmed: () => !!armed && !!canoe?.aboard,
+    canoeArmedUntilOar: () => armed === 'untilOar' && !!canoe?.aboard,
     canoeFaceSide: (side) => { faceSide = side ? Math.sign(side) : 0; },
   });
 }
