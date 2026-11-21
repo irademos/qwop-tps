@@ -3727,8 +3727,9 @@ async function initCore(runtimeContext) {
     } else if (!itemId || !inventoryState[itemId]) return;
     // (in Town's canoe the oar is all there is — and the rod, to fish from it; the sword too while
     // a job has the player fighting from it — the fisher's pirates, town.canoeArmed)
+    // (the night octopus too — townOctopus.js; then the wand and the bow as well)
     if (town?.inCanoe?.() && itemId !== OAR_ITEM_ID && itemId !== FISHING_ROD_ITEM_ID
-      && !(itemId === FOAM_SWORD_ITEM_ID && town?.canoeArmed?.())) return;
+      && !([FOAM_SWORD_ITEM_ID, MAGIC_WAND_ITEM_ID, 'pistol'].includes(itemId) && town?.canoeArmed?.())) return;
     // Town: the sword has to be bought (its inventory entry is also the wand's slot)
     if (_townLoadout && itemId === FOAM_SWORD_ITEM_ID && !_townLoadout.hasSword) return;
     // Multiplayer duels are sword only
@@ -7611,7 +7612,7 @@ async function initCore(runtimeContext) {
   const _bowDrawAmount = () => (_bowDraw.active ? THREE.MathUtils.clamp((performance.now() - _bowDraw.startMs) / (BOW_DRAW_S * 1000), 0, 1) : 0);
   const _ownsBow = () => (inventoryState.pistol?.count ?? 0) > 0;
   const _canDrawBow = () => !!playerControls?.enabled && !playerDead && !_gamePaused && !_classicMode && !story?.isActive()
-    && !_mpSwordOnly() && !town?.inCanoe?.() && _ownsBow() && !playerRoll && !playerBombThrow && !_bombAim.active
+    && !_mpSwordOnly() && !(town?.inCanoe?.() && !town?.canoeArmed?.()) && _ownsBow() && !playerRoll && !playerBombThrow && !_bombAim.active
     && !isPlayerFrozen() && !_wandShieldHold && !_bubbleHandOut() && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
     && !(_matchLoadout && !matchMode?.isFighting());
   // Back to what was in hand before the draw (nothing: empty hands — Town)
@@ -11476,6 +11477,24 @@ async function initCore(runtimeContext) {
       _refreshGearUI();
       _phoneSwordStatusNow?.();
     },
+    // The night octopus at the canoe (townOctopus.js): is the player blocking, and where's their
+    // blade (world points, guard → tip); the block's flash / sound; a tentacle that got through
+    getPlayerBlock: () => ({
+      blocking: !!window.phoneSwordGyro?.blocking && !window.isPlayerStaggered?.() && isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)
+        && !_wandActive && !_rodActive && !_oarActive,
+      blade: window.phoneSwordBladePoints ?? null,
+    }),
+    blockFlash: () => {
+      window._pswShowBlockFlash?.('player');
+      window.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
+    },
+    hurtPlayer: (n = 1) => {
+      if (playerDead) return;
+      window.localHealth = Math.max(0, statsState.health - n);
+      window._phoneBuzz?.('hit');
+    },
+    // A bow draw / bomb aim / throw / roll going on (the canoe's armed check leaves the hands be)
+    weaponBusy: () => _bowDraw.active || _bombAim.active || !!playerBombThrow || !!playerRoll,
     // The map's pirate ship (the floating prop with a deck — MAPS.islandTown.floating): { holder
     // (moved to sail it; its bow is local −X), anchor { position, yaw }, deck, model, box } or null
     getShip: () => (_voyage ? null : _activeMap?.ship ?? null),
