@@ -11632,7 +11632,8 @@ async function initCore(runtimeContext) {
   const LANTERN_FADE_S = 1.2;
   let _townLantern = null;
   let _townLanternLevel = 0;
-  // Town: random songs while a job is under way (town.jobActive — townQuests.js) — shuffled
+  // Town: random songs while a job is under way (town.jobSongs — townQuests.js `questSongs`; a
+  // quest / beat with `songs: false` plays none) — shuffled
   // through TOWN_JOB_SONGS on the audio manager's music element, faded out when the job ends
   const TOWN_JOB_SONGS = ['Songs/day3.ogg', 'Songs/day4.ogg', 'Songs/day5.ogg', 'Songs/day6.ogg'];
   const TOWN_JOB_SONG_FADE_S = 2.5;
@@ -11658,7 +11659,7 @@ async function initCore(runtimeContext) {
   };
   const _updateTownJobSongs = (dt) => {
     const J = _townJobSong;
-    const want = !!town?.jobActive?.();
+    const want = !!town?.jobSongs?.();
     if (want && !J.on) { J.on = true; J.fade = 0; J.pool = []; _townJobNextSong(); return; }
     // (the volume re-read every frame, so the Settings' Music / Master Volume apply mid-song)
     if (want) { J.fade = 0; if (J.el) J.el.volume = audioManager.musicLevel; return; }

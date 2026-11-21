@@ -877,6 +877,13 @@ export function installTownQuests(T, ctx) {
     questDone: (id) => started && questDone(id),
     // (a job under way — any branch but the first day, past its giver coming up: Town's job songs)
     questJobActive: () => started && branches.some((br) => br !== first && engaged(br)),
+    // (whether that job plays songs: a quest's `songs: false` — the long, everyday ones like
+    // gathering wood — keeps them off; a beat's own `songs` wins over its quest's)
+    questSongs: () => started && branches.some((br) => {
+      if (br === first || !engaged(br)) return false;
+      const b = br.runner.beat();
+      return (b?.songs ?? br.runner.quest()?.songs) !== false;
+    }),
     cartLoad: () => cartState.load,
     cartInUse: () => started && branches.some((br) => engaged(br) && !!br.runner.q()?.cast && Object.keys(br.runner.q().cast).length > 0),
     // (the sword / wand's camera auto-aim — townMode.js threats)

@@ -60,6 +60,8 @@
 //   wait    { until? } — the runner's own: nothing happens till a talk / action moves on
 // Any beat: talks: { <role>: talk } — what that townsperson says if talked to while it's the beat
 // (open-ended — talk to someone whenever); entry: the tracker's line.
+// songs: false on a quest (or a beat) — no job songs while it's under way (the long, everyday
+// jobs: gathering wood, deliveries); a beat's own `songs` wins over its quest's.
 //   unload  {}                  — the cart's load handed over
 //   release { who, linger? }    — the townsperson back to their day (linger: s round where they are first)
 // Places (`to` / `from` / `at`): 'wizard' (his stall up the mountain), 'camp' (the bandit camp), 'town'
@@ -75,7 +77,7 @@ const WIZARD_URL = 'wizard';  // (an actor's url: a glbCharacterConfig key + 'Ur
 const WIZARD_JOBS = [
   // ── Day 2: the farmer's veg up the mountain to the wizard ──
   {
-    id: 'veg', title: 'Veg for the wizard', waitS: 40,
+    id: 'veg', title: 'Veg for the wizard', waitS: 40, songs: false,
     beats: [
       { do: 'seek', who: 'farmer' },
       {
@@ -92,7 +94,7 @@ const WIZARD_JOBS = [
     ],
   },
   {
-    id: 'wizardPay', title: 'Veg for the wizard', waitS: 0,
+    id: 'wizardPay', title: 'Veg for the wizard', waitS: 0, songs: false,
     beats: [
       { do: 'cart', load: 'veg', checkpoint: true },
       { do: 'seek', who: 'wizard', anyTime: true, talkFrom: 6 },
@@ -176,7 +178,7 @@ const WIZARD_JOBS = [
   },
   // ── Day 3: the bandits' revenge — the wizard's cabin torn down; fifteen logs up the mountain ──
   {
-    id: 'wizardCabin', title: 'Logs for the wizard\'s cabin', waitS: 75,
+    id: 'wizardCabin', title: 'Logs for the wizard\'s cabin', waitS: 75, songs: false,
     beats: [
       // (out of sight: his cabin a heap of dirt and logs — townRuins.js)
       { do: 'ruin', key: 'wizardCabin', on: true },
@@ -226,7 +228,7 @@ const WIZARD_JOBS = [
 // ── The fisher: a canoe ──
 const FISHER_JOBS = [
   {
-    id: 'canoe', title: 'A canoe for the fisher', waitS: 70,
+    id: 'canoe', title: 'A canoe for the fisher', waitS: 70, songs: false,
     beats: [
       { do: 'seek', who: 'fisher' },
       {

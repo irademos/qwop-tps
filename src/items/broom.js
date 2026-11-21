@@ -24,8 +24,13 @@ import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 // waiting a moment after the player turns it by hand, and draws back with the speed
 // (CAM_BACK + CAM_BACK_PER_SPEED — controls.js `ride.camDist`). The joystick / WASD lean it the same way (the only way
 // without a gyro). The player's controls stand still meanwhile (`holdStill`, `ride` —
-// controls.js): this moves them. It rises quickly but comes down gently: after going up it holds
-// that height SINK_HOLD_S, then sinks, speeding up to at most SINK_MAX_SPEED.
+// controls.js): this moves them. Going over something (a house, a hill) it climbs gradually: it
+// looks CLIMB_LOOK_AHEAD s along its drift and climbs just fast enough to be over each spot by the
+// time it gets there (×CLIMB_MARGIN, at most CLIMB_MAX_SPEED, eased by CLIMB_ACCEL), its nose
+// tipping up with the climb — the angle of its climb against its drift (CLIMB_PITCH_SOFT keeps a
+// slow drift's small rise gentle), up to CLIMB_MAX_PITCH (90°) climbing straight up a wall; it
+// comes down gently: after going up it holds that height SINK_HOLD_S, then sinks, speeding up to
+// at most SINK_MAX_SPEED.
 // Boost (setBoost — while the Boost button / the phone's / Shift is held): it flies forward by
 // itself, BOOST_SPEED× faster, the sideways lean steering; the fore / aft lean is height then —
 // leaning back climbs, forward dives (BOOST_CLIMB_RATE, up to BOOST_MAX_LIFT over the hover
@@ -59,8 +64,15 @@ const LEAN_SIDE = 0.22;                    // rad sideways at full sideways tilt
 const LEAN_RATE = 6;                       // 1/s easing the lean
 const TILT_DEAD = 0.1;                     // sin of the tilt — under this, no lean
 const TILT_FULL = 0.5;                     // full lean (~30°)
-const LOOK_AHEAD = [0.6, 1.4];             // s of drift ahead whose ground it rises for
-const RISE_RATE = 5;                       // 1/s easing up to the hover height
+const LOOK_AHEAD = [0.6, 1.4];             // s of drift ahead whose ground it keeps over (boosting)
+const RISE_RATE = 5;                       // 1/s — under the hover height right here: back up this fast
+const CLIMB_LOOK_AHEAD = [0.3, 0.6, 1, 1.5, 2, 2.6, 3.2]; // s of drift ahead it climbs for
+const CLIMB_MARGIN = 1.2;                  // × the climb speed each of those needs
+const CLIMB_MAX_SPEED = 7;                 // m/s
+const CLIMB_ACCEL = 3;                     // 1/s easing the climb speed
+const CLIMB_PITCH_SOFT = 1.2;              // m/s added to the drift in the nose-up angle
+const CLIMB_MAX_PITCH = Math.PI / 2;       // rad — nose straight up at most
+const CLIMB_PITCH_RATE = 3;                // 1/s easing the nose up / back down
 const SINK_HOLD_S = 0.5;                   // s at the same height before sinking back down
 const SINK_RATE = 0.8;                     // 1/s easing down
 const SINK_ACCEL = 0.8;                    // m/s² — how fast the sinking speeds up
@@ -270,7 +282,7 @@ export function createBroomRide(ctx) {
   let riding = false;
   let broom = null;            // the model under the rider (loaded on the first ride)
   let loading = false;
-  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, dt: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, leanP: 0, leanR: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 };
+  const st = { x: 0, z: 0, y: 0, vx: 0, vz: 0, yaw: 0, t: 0, dt: 0, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, climb: 0, climbV: 0, leanP: 0, leanR: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 };
   let trail = null;            // the boost's purple streams (made on the first boost)
   let boosting = false;
   let boostPaid = 0;           // s of boost paid for (BOOST_MANA_PER_S a second, ahead)
@@ -298,7 +310,7 @@ export function createBroomRide(ctx) {
     const c = ctx.getControls();
     if (riding || !c) return false;
     riding = true;
-    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, leanP: 0, leanR: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 });
+    Object.assign(st, { x: c.playerX, z: c.playerZ, y: c.playerY, vx: 0, vz: 0, yaw: c.yaw, camYaw: null, manualAt: -Infinity, bank: 0, pitch: 0, climb: 0, climbV: 0, leanP: 0, leanR: 0, sinkAt: 0, sinkV: 0, backDir: null, backRoundAt: null, camDist: 0 });
     ride.camDist = 0;
     boosting = false;
     ride.y = st.y;
@@ -392,12 +404,13 @@ export function createBroomRide(ctx) {
       else if (boosting) { boosting = false; ctx.onBoostEnd?.('hold'); }
     }
     if (holding) {
-      Object.assign(st, { vx: 0, vz: 0, backDir: null, sinkAt: st.t + SINK_HOLD_S, sinkV: 0 });
+      Object.assign(st, { vx: 0, vz: 0, backDir: null, sinkAt: st.t + SINK_HOLD_S, sinkV: 0, climbV: 0 });
       st.yaw = wrap(st.yaw + wrap(c.yaw - st.yaw) * ease(HOLD_TURN_RATE, dt));
       st.y = Math.max(st.y, floorAt(st.x, st.z) + 0.1);
       const k0 = ease(4, dt);
       st.bank -= st.bank * k0;
       st.pitch -= st.pitch * k0;
+      st.climb -= st.climb * k0;
       const lk0 = ease(LEAN_RATE, dt);
       st.leanP -= st.leanP * lk0;
       st.leanR -= st.leanR * lk0;
@@ -473,11 +486,28 @@ export function createBroomRide(ctx) {
       st.y += (target - st.y) * ease(BOOST_HEIGHT_RATE, dt);
       st.sinkAt = st.t + SINK_HOLD_S;
       st.sinkV = 0;
+      st.climbV = 0;
     } else {
-      const target = floor + BROOM_HOVER;
-      if (target >= st.y - 0.02) {
-        // Up (or level): quickly — then held there a moment before sinking
-        st.y += Math.max(0, target - st.y) * ease(RISE_RATE, dt);
+      // Something ahead to go over: climb just fast enough to be over each spot ahead by the time
+      // it's there (the nearest sets the pace once close) — gradually, not at the last moment
+      const here = floorAt(st.x, st.z) + BROOM_HOVER;
+      let wantV = Math.max(0, (here - st.y) * RISE_RATE);
+      let far = here;
+      for (const s of CLIMB_LOOK_AHEAD) {
+        const f = floorAt(st.x + st.vx * s, st.z + st.vz * s) + BROOM_HOVER;
+        far = Math.max(far, f);
+        if (f > st.y) wantV = Math.max(wantV, (f - st.y) / s * CLIMB_MARGIN);
+      }
+      wantV = Math.min(CLIMB_MAX_SPEED, wantV);
+      st.climbV += (wantV - st.climbV) * ease(wantV > st.climbV ? CLIMB_ACCEL : CLIMB_ACCEL * 2, dt);
+      const target = Math.max(here, far);
+      if (st.climbV > 0.02 && st.y < target) {
+        // Up: climbing — then held there a moment before sinking
+        st.y = Math.min(target, st.y + st.climbV * dt);
+        st.sinkAt = st.t + SINK_HOLD_S;
+        st.sinkV = 0;
+      } else if (target >= st.y - 0.02) {
+        // Level
         st.sinkAt = st.t + SINK_HOLD_S;
         st.sinkV = 0;
       } else if (st.t >= st.sinkAt) {
@@ -492,6 +522,10 @@ export function createBroomRide(ctx) {
     const ahead = st.vx * sy + st.vz * cy;
     st.bank += (-side * BANK - st.bank) * ease(4, dt);
     st.pitch += (ahead * PITCH - st.pitch) * ease(4, dt);
+    // (nose up climbing over something: the climb's angle against the drift, up to straight up)
+    const climbing = !boosting && st.climbV > 0.05;
+    const wantClimb = climbing ? Math.min(CLIMB_MAX_PITCH, Math.atan2(st.climbV, speed + CLIMB_PITCH_SOFT)) : 0;
+    st.climb += (wantClimb - st.climb) * ease(CLIMB_PITCH_RATE, dt);
     // (the rider leaning with the tilt: a little forward / sideways, well back)
     const lk = ease(LEAN_RATE, dt);
     st.leanP += ((iz >= 0 ? iz * LEAN_FWD : iz * LEAN_BACK) - st.leanP) * lk;
@@ -534,6 +568,14 @@ export function createBroomRide(ctx) {
         hipsMeasured = true;
       }
     }
+    // Nose up climbing over something: tipped back about the seat (not the feet)
+    if (Math.abs(st.climb) > 1e-4) {
+      const seat0 = pm.localToWorld(_v.copy(hips));
+      pm.rotation.x = st.pitch - st.climb;
+      pm.updateMatrixWorld(true);
+      pm.position.add(seat0.sub(pm.localToWorld(_v2.copy(hips))));
+      pm.updateMatrixWorld(true);
+    }
     // The broom: under the hips, as the broom flies (the rider's lean left out)
     pm.getWorldQuaternion(_q);
     if (trail) {
@@ -550,7 +592,7 @@ export function createBroomRide(ctx) {
     }
     // The rider leaning with the tilt, about the hips (they stay on the seat)
     const seat = pm.localToWorld(_v.copy(hips));
-    pm.rotation.x = st.pitch + st.leanP;
+    pm.rotation.x = st.pitch - st.climb + st.leanP;
     pm.rotation.z = st.bank + st.leanR;
     pm.updateMatrixWorld(true);
     pm.position.add(seat.sub(pm.localToWorld(_v2.copy(hips))));
