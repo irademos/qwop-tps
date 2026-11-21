@@ -11243,8 +11243,18 @@ async function initCore(runtimeContext) {
     } else if (kind === 'unsheath') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.5);
     else audioManager?.playSound(kind, { at });
   };
+  // The cart rolling (townCart.js — level 0…1 by its speed, `at` = where it is): one loop,
+  // louder and a little higher-pitched the faster it goes
+  let _cartLoop = null;
+  const _cartRolling = (level, at = null) => {
+    if (!audioManager) return;
+    if (!(level > 0)) { _cartLoop?.set(0); return; }
+    _cartLoop ??= audioManager.createLoop('SFX/Foley/cart_rolling.ogg');
+    _cartLoop.set(0.55 * Math.sqrt(level), 0.8 + 0.35 * level, at);
+  };
   town = createTownMode({
     net: townNet,
+    cartRolling: _cartRolling,
     scene,
     renderer,
     camera,

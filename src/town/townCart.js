@@ -35,6 +35,7 @@ const PARK_CLEARANCE = 1.1; // m from the cart's middle to a placed thing's boun
 const RETURN_S = 60;
 const RETURN_AWAY = 12;     // m the player is from both (so it doesn't vanish / pop up in view)
 const RETURN_MOVED = 3;     // m from its parking spot before it counts as left somewhere
+const CART_SOUND_FULL_SPEED = 4.5; // m/s — the rolling sound at full volume (its top speed is 5.4)
 const BRING_RINGS = [1.75, 2.3, 3, 4, 5.5]; // m from the player the cart's brought round to (bringCart — Get in within CART_ACT_DIST)
 // (the item model a crate of a good shows — villageMode.js buildItemMesh)
 const CRATE_ITEM = { fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'veg' };
@@ -315,7 +316,21 @@ export function installTownCart(T, ctx) {
 
   // Each frame before the controls (bootstrapGameApp.js): out when Town can't have it any more,
   // else it rolls (and carries the player)
+  // The rolling sound: louder and higher the faster it goes (its pose's move this frame), none
+  // tipped over (ctx.cartRolling → the game's looping cart sound)
+  let lastPos = null, rollSpeed = 0;
+  const rollSound = (dt) => {
+    const c = ride.pose();
+    let v = 0;
+    if (lastPos && dt > 0) v = Math.hypot(c.x - lastPos.x, c.z - lastPos.z) / dt;
+    lastPos = { x: c.x, z: c.z };
+    if (!(v < 20) || ride.isFlipped()) v = 0; // (a teleport / place, or tipped over)
+    rollSpeed += (v - rollSpeed) * Math.min(1, dt * 8);
+    const level = Math.min(1, rollSpeed / CART_SOUND_FULL_SPEED);
+    ctx.cartRolling?.(level < 0.04 ? 0 : level, { x: c.x, y: ctx.getGroundY(c.x, c.z) ?? T.playerPos().y, z: c.z });
+  };
   const cartBeforeControls = (dt) => {
+    if (ride) rollSound(dt);
     if (!ride) {
       if (!setupTried && T.active && T.ready && T.layout) { setupTried = true; setup(); }
       return;
@@ -364,6 +379,8 @@ export function installTownCart(T, ctx) {
 
   // Leaving Town: out of it, and back at its parking spot for next time
   const resetCart = () => {
+    ctx.cartRolling?.(0);
+    lastPos = null; rollSpeed = 0;
     if (!ride) return;
     leave({ step: false });
     if (home) ride.place(home.x, home.z, home.yaw);

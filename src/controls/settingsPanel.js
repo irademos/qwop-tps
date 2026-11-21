@@ -531,12 +531,13 @@ function normalizeCredits(entries) {
       const author = typeof entry.author === 'string' ? entry.author.trim() : '';
       const license = typeof entry.license === 'string' ? entry.license.trim() : '';
       if (!title || !author || !license) return null; // source is optional
+      const label = typeof entry.licenseLabel === 'string' ? entry.licenseLabel.trim() : '';
       return {
         title,
         source,
         author,
         license,
-        licenseLabel: license.includes('/4.0') ? 'CC BY 4.0' : license
+        licenseLabel: label || (license.includes('/4.0') ? 'CC BY 4.0' : license)
       };
     })
     .filter(Boolean);

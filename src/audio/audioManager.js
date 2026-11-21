@@ -24,6 +24,9 @@ export function distanceGain(d, { ref = DISTANCE_FALLOFF.ref, rolloff = DISTANCE
   return g * edge;
 }
 
+// createLoop: a loop not set() for this long fades out by itself
+const LOOP_IDLE_MS = 250;
+
 const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'keydown', 'click'];
 // Events that count as a user gesture for starting <audio> (Safari doesn't take touchstart / pointerdown)
 const MEDIA_GESTURE_EVENTS = ['click', 'touchend', 'keydown'];
@@ -534,6 +537,62 @@ export class AudioManager {
 
     source.start(0);
     return source;
+  }
+
+  // A looping sound whose loudness / pitch is set every frame (the cart rolling): returns
+  // { set(volume, rate = 1, at), stop() }. Each set() eases toward its level; with no set() for
+  // LOOP_IDLE_MS (the game paused, the caller gone) it fades out by itself.
+  createLoop(path) {
+    let source = null, gain = null, panner = null, starting = false, idleTimer = 0, stopped = false;
+    const ramp = (param, v, tc = 0.08) => {
+      if (!param || !this.context) return;
+      param.setTargetAtTime(v, this.context.currentTime, tc);
+    };
+    const start = async () => {
+      if (starting || source || stopped) return;
+      starting = true;
+      await this.resumeAudioContext();
+      const buffer = await this.loadBuffer(path);
+      starting = false;
+      if (!buffer || !this.context || !this.sfxGain || stopped || source) return;
+      source = this.context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      gain = this.context.createGain();
+      gain.gain.value = 0;
+      source.connect(gain);
+      if (this.context.createStereoPanner) {
+        panner = this.context.createStereoPanner();
+        gain.connect(panner);
+        panner.connect(this.sfxGain);
+      } else gain.connect(this.sfxGain);
+      // (a random point in the clip, so it doesn't always start the same)
+      source.start(0, Math.random() * buffer.duration);
+    };
+    const handle = {
+      set: (volume, rate = 1, at = null) => {
+        stopped = false;
+        let v = Math.max(0, Math.min(1, volume));
+        if (at) v *= this.gainAt(at);
+        if (v > 0.005 && !source) start();
+        if (source) {
+          ramp(gain.gain, v);
+          ramp(source.playbackRate, Math.max(0.25, rate), 0.15);
+          if (panner) ramp(panner.pan, at ? this._panAt(at) : 0, 0.1);
+        }
+        clearTimeout(idleTimer);
+        if (v > 0.005) idleTimer = setTimeout(() => { if (gain) ramp(gain.gain, 0, 0.1); }, LOOP_IDLE_MS);
+      },
+      stop: () => {
+        stopped = true;
+        clearTimeout(idleTimer);
+        if (gain) ramp(gain.gain, 0, 0.05);
+        const s = source;
+        source = null; gain = null; panner = null;
+        if (s) setTimeout(() => { try { s.stop(); } catch { /* already stopped */ } }, 300);
+      },
+    };
+    return handle;
   }
 
   // Hurt vocals (NPC Sounds/ouch1-3), played at ~50% of the SFX volume:
