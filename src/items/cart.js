@@ -413,7 +413,7 @@ export function createCartRide(ctx) {
       }
     }
     if (ctx.waterDepth(p.x, p.z) > MAX_WADE) { blockedBy = 'water'; return false; }
-    if (pushOutOfObstacles(p.x, p.z, g + 0.4, TRUNK_PROBE_R)) { blockedBy = 'trunk'; return false; }
+    if (pushOutOfObstacles(p.x, p.z, g + 0.4, TRUNK_PROBE_R, 'cart')) { blockedBy = 'trunk'; return false; }
     return true;
   };
   const midGround = (x, z, yaw, mx) => {
@@ -668,7 +668,7 @@ export function createCartRide(ctx) {
       const g0 = groundAt(st.x, st.z);
       const g1 = groundAt(nx, nz);
       const blocked = !Number.isFinite(g1) || (Number.isFinite(g0) && g1 - g0 > MAX_STEP_UP)
-        || ctx.waterDepth(nx, nz) > MAX_WADE || pushOutOfObstacles(nx, nz, g1 + 0.4, TUMBLE_R * 0.6);
+        || ctx.waterDepth(nx, nz) > MAX_WADE || pushOutOfObstacles(nx, nz, g1 + 0.4, TUMBLE_R * 0.6, 'cart');
       if (blocked) {
         if (sp > 2) ctx.onBump?.();
         f.vx = 0;
