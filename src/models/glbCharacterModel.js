@@ -60,8 +60,10 @@ import { FluffyCharacter, preloadAnimation } from './fluffyCharacter.ts';
 import { stylizeObject, whenStyleReferenceReady } from '../environment/artStyle.js';
 import { addBlobShadow } from '../environment/blobShadows.js';
 
-// Every clip is an action in one GLB, named after the Mixamo FBX it came from
-const ANIM = '/models/animations/animations.glb#';
+// Every clip is an action in one GLB, named after the Mixamo FBX it came from. Bump ?v= whenever
+// the GLB changes: .glb files are cached for a year (vercel.json) and by the service worker, so
+// an old copy (without the new clips) would otherwise keep being used — everyone in a T-pose
+const ANIM = '/models/animations/animations.glb?v=2#';
 
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
@@ -77,7 +79,16 @@ export const glbCharacterConfig = {
   oldGuyUrl: '/models/glb_characters/old_guy.glb',         // Old guy: roster / Showdown + Endless unlock; wand caster like the wizard; Town townsfolk
   giantUrl: '/models/glb_characters/giant.glb?v=1',       // Tree Island's giant (src/characters/giant.js); bump ?v= here and in keepTextureUrls
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
-  walkClip: ANIM + 'Old Man Walk',
+  walkClip: ANIM + 'Walking', // the default walk (characterWalkClip — walkClipByUrl overrides it)
+  // Per-model walk clip, keyed by url without its ?v= query
+  walkClipByUrl: {
+    '/models/glb_characters/old_guy.glb': ANIM + 'Old Man Walk',
+    '/models/glb_characters/wizard.glb': ANIM + 'Old Man Walk',
+    '/models/glb_characters/frog_man.glb': ANIM + 'Monster Walking',
+    '/models/glb_characters/gemhorn_rigged.glb': ANIM + 'Monster Walking',
+    '/models/glb_characters/frog_mom.glb': ANIM + 'Monster Walking',
+    '/models/glb_characters/pumpkin.glb': ANIM + 'Monster Walking',
+  },
   idleClip: ANIM + 'Breathing Idle',
   deathClip: ANIM + 'Flying Back Death', // played once (whole body, arms included) by playDeath()
   throwClip: ANIM + 'Throw', // bomb thrower's throw (playAction); right-handed
@@ -184,6 +195,12 @@ export function characterHold(url) {
   return hold ? { ...DEFAULT_HOLD, ...hold } : DEFAULT_HOLD;
 }
 
+/** The walk clip a character plays (glbCharacterConfig.walkClipByUrl, else walkClip). */
+export function characterWalkClip(url) {
+  const key = url ? String(url).split('?')[0] : '';
+  return glbCharacterConfig.walkClipByUrl[key] ?? glbCharacterConfig.walkClip;
+}
+
 /** Player camera height multiplier for a character (glbCharacterConfig.cameraHeightByUrl). */
 export function characterCameraHeight(url) {
   return (url && glbCharacterConfig.cameraHeightByUrl[url]) ?? 1;
@@ -271,7 +288,7 @@ class StaticRig {
   play(url) {
     const cfg = glbCharacterConfig;
     this._mode = url === cfg.deathClip ? 'death'
-      : url === cfg.walkClip || url === cfg.runClip ? 'walk'
+      : url === cfg.walkClip || url === cfg.runClip || Object.values(cfg.walkClipByUrl).includes(url) ? 'walk'
       : url === cfg.idleClip ? 'idle' : this._mode;
     if (this._mode !== 'death') this._fall = 0;
     return Promise.resolve();
@@ -312,8 +329,9 @@ const hasSkeleton = (root) => {
 // ── Character ───────────────────────────────────────────────────────────────
 
 export class GLBCharacter {
-  constructor(scene, { armIK = true, fluffy = glbCharacterConfig.fluffy, palmFallback = null } = {}) {
+  constructor(scene, { armIK = true, fluffy = glbCharacterConfig.fluffy, palmFallback = null, walkClip = glbCharacterConfig.walkClip } = {}) {
     this.scene = scene;
+    this.walkClip = walkClip; // this model's walk (characterWalkClip)
     // Scene-local stand-in palm points for arms the rig doesn't have (Mii characters)
     this._palmFallback = palmFallback;
     this._armIK = armIK;
@@ -416,7 +434,7 @@ export class GLBCharacter {
     if (this._dead || this._action) return; // picked up by revive() / when the action clip ends
     const cfg = glbCharacterConfig;
     const forced = this._forcedRun || 0;
-    const clip = forced ? cfg.runClip : !this._moving ? cfg.idleClip : this._running ? cfg.runClip : cfg.walkClip;
+    const clip = forced ? cfg.runClip : !this._moving ? cfg.idleClip : this._running ? cfg.runClip : this.walkClip;
     const key = forced < 0 ? `${clip}#back` : clip;
     if (key === this._gaitClip) return;
     this._gaitClip = key;
@@ -847,7 +865,7 @@ export async function createGLBCharacterInstance(opts = {}) {
     right: new THREE.Vector3(box.max.x, box.min.y + (box.max.y - box.min.y) * 0.45, box.max.z * 0.5),
     left: new THREE.Vector3(box.min.x, box.min.y + (box.max.y - box.min.y) * 0.45, box.max.z * 0.5),
   };
-  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true, fluffy, palmFallback });
+  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true, fluffy, palmFallback, walkClip: characterWalkClip(url) });
   character.setOwnClips(gltf.animations);
   container.userData.glbCharacter = character;
   return { container, character };
