@@ -17,12 +17,13 @@
 //
 //   const character = await loadFluffyCharacter('/models/character.glb', { enabled: true, shells: 12 })
 //   scene.add(character.root)
-//   await character.play('/models/animations/animations.glb#Old Man Walk', { inPlace: true })
+//   await character.play('/models/animations/animations.glb#Walking', { inPlace: true })
 //   // every frame:
 //   character.update(delta)
 
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
 // ── Settings ──────────────────────────────────────────────────────────────
@@ -82,11 +83,12 @@ const libraryCache = new Map<string, Promise<THREE.Group & { animations: THREE.A
 
 // All clips live in one GLB (`public/models/animations/animations.glb`), one action per
 // clip named after the Mixamo FBX it came from, each on its own armature. A clip is
-// addressed as `<glb url>#<action name>`.
+// addressed as `<glb url>#<action name>`. Compressed with meshopt by
+// scripts/optimize-animations.mjs (`npm run optimize:animations` after each Blender export).
 function loadLibrary(file: string) {
   let p = libraryCache.get(file)
   if (!p) {
-    p = new GLTFLoader().loadAsync(file).then((gltf) => {
+    p = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(file).then((gltf) => {
       const scene = gltf.scene as THREE.Group & { animations: THREE.AnimationClip[] }
       scene.animations = gltf.animations
       return scene
