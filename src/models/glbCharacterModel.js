@@ -60,8 +60,10 @@ import { FluffyCharacter, preloadAnimation } from './fluffyCharacter.ts';
 import { stylizeObject, whenStyleReferenceReady } from '../environment/artStyle.js';
 import { addBlobShadow } from '../environment/blobShadows.js';
 
-// Every clip is an action in one GLB, named after the Mixamo FBX it came from
-const ANIM = '/models/animations/animations.glb#';
+// Every clip is an action in one GLB, named after the Mixamo FBX it came from. Bump ?v= whenever
+// the GLB changes: .glb files are cached for a year (vercel.json) and by the service worker, so
+// an old copy (without the new clips) would otherwise keep being used — everyone in a T-pose
+const ANIM = '/models/animations/animations.glb?v=2#';
 
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
