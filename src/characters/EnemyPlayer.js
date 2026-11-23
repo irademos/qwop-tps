@@ -19,7 +19,7 @@ import { createGLBCharacterInstance, glbCharacterConfig, blockedStaggerHand, BLO
 let _enemyModelIndex = 0;
 // Character for an EnemyPlayer spawned without one: cycles through the roster
 function nextDefaultEnemyCharacterUrl() {
-  const urls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url, glbCharacterConfig.wizardUrl, glbCharacterConfig.treeCreatureUrl, glbCharacterConfig.frogMomUrl];
+  const urls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url, glbCharacterConfig.wizardUrl, glbCharacterConfig.treeCreatureUrl, glbCharacterConfig.frogMomUrl, glbCharacterConfig.pandaUrl];
   return urls[_enemyModelIndex++ % urls.length];
 }
 import { WALKER_TELEPORT_DIST, getWalkerGround } from '../environment/terrainHeight.js';

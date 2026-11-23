@@ -9435,7 +9435,7 @@ async function initCore(runtimeContext) {
     : Math.min(ENDLESS_KIND_GROWTH[kind].max, 1 + Math.floor((w - ENDLESS_FROM[kind]) / ENDLESS_KIND_GROWTH[kind].every)));
   // (swordsmen / bombers / shield bearers: wand casters are wizards, archers tree creatures;
   // a champion can be any of them)
-  const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'frogMom'];
+  const ENDLESS_CHARACTERS = ['frog', 'pumpkin', 'antler', 'gemhorn', 'frogMom', 'panda'];
   const ENDLESS_CHAMPION_CHARACTERS = [...ENDLESS_CHARACTERS, 'tree', 'wizard', 'oldGuy'];
   // A wizard's bubble in Endless: more often, and sooner again, the harder the wave
   const _endlessWandBubble = (w) => ({
@@ -9580,7 +9580,7 @@ async function initCore(runtimeContext) {
   // its own pick (`ps_endless_char_<key | guest>`), apart from Showdown's.
   const ENDLESS_UNLOCKS = [
     ['villageBoy', 0], ['villageGirl', 2], ['frog', 3], ['pumpkin', 4], ['antler', 5],
-    ['gemhorn', 6], ['tree', 7], ['frogMom', 7], ['wizard', 8], ['oldGuy', 9], ['villager', 10],
+    ['gemhorn', 6], ['tree', 7], ['frogMom', 7], ['wizard', 8], ['panda', 8], ['oldGuy', 9], ['villager', 10],
   ];
   const _endlessUnlockWave = (key) => ENDLESS_UNLOCKS.find(([k]) => k === key)?.[1] ?? Infinity;
   const _endlessUnlocked = (key, cleared = _endlessStats?.cleared || 0) => _endlessUnlockWave(key) <= cleared;

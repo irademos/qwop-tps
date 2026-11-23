@@ -591,6 +591,8 @@ export function createTownMode(ctx) {
   const load = () => (saveKey() ? newest(isTown(readLocal(saveKey())), isTown(T.cloud?.solo)) : null) ?? _memoryState;
 
   // ── Arrivals (newcomers take the place of the dead) ──
+  // (the town's residents' models — characterForRole picks the least used)
+  const residentUrls = () => T.npcs.filter((n) => n.alive && !n.def?.outlaw).map((n) => n.url);
   const usedNames = () => new Set([...T.npcs.filter((n) => n.alive).map((n) => firstName(n.name)), ...T.departed]);
   const updateArrivals = () => {
     for (let i = T.arrivals.length - 1; i >= 0; i--) {
@@ -600,7 +602,7 @@ export function createTownMode(ctx) {
       // (one to a house: no house free — a player took it — no newcomer)
       const home = livesOut(ROLES[a.role]) ? -1 : T.freeHome();
       if (home < 0 && !livesOut(ROLES[a.role])) continue;
-      const n = T.makeNpc({ id: T.nextId++, name: randomName(a.role, usedNames()), role: a.role, url: characterForRole(a.role), home });
+      const n = T.makeNpc({ id: T.nextId++, name: randomName(a.role, usedNames()), role: a.role, url: characterForRole(a.role, residentUrls()), home });
       if (n.def.outlaw) {
         // (a new face at the bandit camp)
         n.x = T.layout.places.camp.x;
@@ -694,7 +696,7 @@ export function createTownMode(ctx) {
       for (const p of state.people) {
         if (!ROLES[p.role]) continue;
         // (Miis are Classic's only: an old save's Mii townsperson gets another body)
-        const n = T.makeNpc(isMiiCharacterUrl(p.url) ? { ...p, url: characterForRole(p.role) } : p);
+        const n = T.makeNpc(isMiiCharacterUrl(p.url) ? { ...p, url: characterForRole(p.role, residentUrls()) } : p);
         // (a shared town's world: still in the cell / wanted for this long)
         if (p.jl > 0) { n.jailedUntil = T.simT + p.jl; n.x = T.layout.places.jail.x; n.z = T.layout.places.jail.z; }
         if (p.ol > 0) n.outlawUntil = T.simT + p.ol;
@@ -713,7 +715,7 @@ export function createTownMode(ctx) {
         const role = FOUNDING_ROLES[k] ?? 'townsfolk';
         const name = randomName(role, taken);
         taken.add(firstName(name));
-        T.npcs.push(T.makeNpc({ id: T.nextId++, name, role, url: characterForRole(role), home }));
+        T.npcs.push(T.makeNpc({ id: T.nextId++, name, role, url: characterForRole(role, residentUrls()), home }));
       }
     }
     // (one to a house — old saves had families sharing — and the player's house kept)

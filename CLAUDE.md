@@ -199,7 +199,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │   │   ├── townBook.js         # The town book (📖 / M): a live map of the town (everyone, ❗ / ❓ / 📍, bandits, enemies, players; drag / pinch / zoom) + the Town page (bag, jobs, everyone by coins — was Settings → Town)
 │   │   ├── townLights.js       # Town's lights: the map's road lamps glow at night, a few pooled point lights go to the lamps / campfires nearest the player (fires dimmer by day), the campfire's ground glow spreads at night
 │   │   ├── townNet.js          # Shared Town (Multiplayer): Firebase room assignment (12 a room, 3 weeks away = place freed), room state, the PeerJS connection (room `town-<roomId>`), other players' swords / stars / PvP / bounties
-│   │   └── townPeople.js       # Town roles (hours, hp, bravery, law, bandits / bandit chief, the wizard — `hermit`; `livesOut`), founding roster (in the order the town needs them — one to a house), names, characters, talk / chat / shout / follow lines — shared lines plus each kind's own (`speciesOf(n)` by body: pumpkin / tree / frog / antler / gem / wizard / folk → `SPECIES_LINES`, `SPECIES_SHOUTS`; `shout(list, n)`, `chatLines(…, speaker)`)
+│   │   └── townPeople.js       # Town roles (hours, hp, bravery, law, bandits / bandit chief, the wizard — `hermit`; `livesOut`), founding roster (in the order the town needs them — one to a house), names, characters (`characterForRole(role, others)`: the law / merchant / wizard / bandits by role, everyone else the least used model among the residents — one of each model first, then evenly — `leastUsed`), talk / chat / shout / follow lines — shared lines plus each kind's own (`speciesOf(n)` by body: pumpkin / tree / frog / antler / gem / wizard / folk → `SPECIES_LINES`, `SPECIES_SHOUTS`; `shout(list, n)`, `chatLines(…, speaker)`)
 │   │
 │   ├── village/
 │   │   └── villageMode.js      # Showdown village between stages: market stall shop + mystery chest, character pick, campfire (time of day), villager with a quest for the next stage (accept → calibration popup → stage; "Not right now" → back); open roam after the story (enterRoam) — game access via villageCtx in bootstrapGameApp.js
@@ -210,7 +210,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │   │
 │   ├── models/
 │   │   ├── playerModel.js      # Player group + floating hand targets; updateProceduralPlayerRig() moves hands, animates GLB character
-│   │   ├── glbCharacterModel.js # Shared GLB character (village_boy.glb / village_girl.glb / pumpkin.glb / antler_guy.glb / frog_man.glb / gemhorn_rigged.glb / wizard.glb / tree_creature.glb / mii1.glb / villager.glb, cached per `url`): walk/idle clips, one-shot actions (playAction), arm IK toward floating hands, config; a GLB's own clips (frog mom's `Eye Move`) loop on a mixer of their own — `setOwnClips` — with its loose meshes (her eyes) hung off the Head bone — `attachLooseMeshesToHead`
+│   │   ├── glbCharacterModel.js # Shared GLB character (village_boy.glb / village_girl.glb / pumpkin.glb / antler_guy.glb / frog_man.glb / gemhorn_rigged.glb / wizard.glb / tree_creature.glb / panda.glb / mii1.glb / villager.glb, cached per `url`): walk/idle clips, one-shot actions (playAction), arm IK toward floating hands, config; a GLB's own clips (frog mom's `Eye Move`) loop on a mixer of their own — `setOwnClips` — with its loose meshes (her eyes) hung off the Head bone — `attachLooseMeshesToHead`
 │   │   └── fluffyCharacter.ts  # Mixamo clips (animations.glb#<name>) → character GLB world-space retargeter + fluffy fur/secondary motion (library)
 │   │
 │   └── physics/
@@ -236,6 +236,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │   ├── models/glb_characters/tree_creature.glb   # Tree creature (Multiplayer roster; Showdown unlock)
 │   ├── models/glb_characters/mii1.glb            # Mii character — no arms, holds the Wii sword (Classic only)
 │   ├── models/glb_characters/frog_mom.glb        # Frog mom (its own `Eye Move` clip always loops — separate eye meshes; bump `?v=` in `frogMomUrl` when the GLB changes; Story: sitting on Tree Island — src/story/frogMom.js; roster, Showdown boss / enemy + Endless unlock, Town townsfolk)
+│   ├── models/glb_characters/panda.glb           # Panda (roster, Showdown boss + Endless unlock (wave 8), Town townsfolk)
 │   ├── models/glb_characters/old_guy.glb         # Old guy (roster, Showdown boss + Endless unlock; as an enemy a wand caster like the wizard — `PS_WAND_ENEMY_CHARACTERS`; Town townsfolk)
 │   ├── models/glb_characters/giant.glb           # Giant troll (Tree Island — src/characters/giant.js; Mixamo rig, no clips of its own)
 │   ├── models/glb_characters/villager.glb        # Villager — Showdown village quest giver; roster (story-mode unlock). Unrigged (StaticRig)
