@@ -88,7 +88,7 @@
 //   roomId(), canSave(), playerCount(), sendBounty(to, coins)
 
 import { FOUNDING_ROLES, ROLES, TOWN_NAME, characterForRole, firstName, livesOut, randomName, speciesOf } from './townPeople.js';
-import { GOODS, GOOD_IDS } from './townEconomy.js';
+import { GOODS, GOOD_IDS, shownWhenHeld } from './townEconomy.js';
 import * as THREE from 'three';
 import { createJobTalk, createQuestTracker } from './townJobs.js';
 import { createLockpick } from './townLockpick.js';
@@ -122,6 +122,7 @@ import { installTownFarming } from './townFarming.js';
 import { installTownCanoe } from './townCanoe.js';
 import { installTownPirates } from './townPirates.js';
 import { installTownOctopus } from './townOctopus.js';
+import { installTownChickens } from './townChickens.js';
 import { installTownCart } from './townCart.js';
 import { installTownDrive } from './townDrive.js';
 import { installTownTrees } from './townTrees.js';
@@ -281,8 +282,8 @@ export function createTownMode(ctx) {
     bagEl.classList.toggle('town-bag-full', carried >= BAG_MAX);
     for (const g of GOOD_IDS) {
       goodEls[g].textContent = `${GOODS[g].emoji} ${goods[g]}`;
-      // (cooked food only once there's some)
-      goodEls[g].classList.toggle('hidden', !!GOODS[g].cooked && goods[g] <= 0);
+      // (cooked food / chicken / eggs only once there's some)
+      goodEls[g].classList.toggle('hidden', shownWhenHeld(g) && goods[g] <= 0);
     }
   };
   // The talk box with a townsperson (townJobs.js; townActs.js), the quest tracker, the jailbreak lock
@@ -821,6 +822,7 @@ export function createTownMode(ctx) {
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     T.resetPirates(); // (the pirate ship back at its anchor — the fisher's golden fish)
     T.resetOctopus(); // (the night octopus gone)
+    T.resetChickens(); // (the flock taken down — townChickens.js)
     T.resetCart();
     T.resetDrive();
     ctx.setIntroHighlight?.(null); // (the first day's ringed buttons)
@@ -941,6 +943,7 @@ export function createTownMode(ctx) {
     T.updateCooking(dt);
     T.updateFarm(dt);
     T.updateTrees(dt);
+    T.updateChickens(dt);
     T.updateRuins();
     if (T.simT > T.growAt) { T.growAt = T.simT + 1; T.updateRegrowth(); }
     T.updateMarket();
@@ -965,6 +968,9 @@ export function createTownMode(ctx) {
     // (the night octopus holding the canoe — townOctopus.js: only while it reels from a block)
     const octo = T.octopusSwordHit(tip, swingId);
     if (octo) return octo;
+    // (a chicken — townChickens.js: one hit and it's a drumstick)
+    const hen = T.chickenSwordHit(tip, swingId);
+    if (hen) return hen;
     for (const n of T.npcs) {
       // (someone in a job with the player — the wizard fighting beside them — isn't hit)
       if (!n.alive || !n.body || n.fighter || n.questing || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
@@ -1025,6 +1031,7 @@ export function createTownMode(ctx) {
   installTownCanoe(T, ctx);
   installTownPirates(T, ctx);
   installTownOctopus(T, ctx);
+  installTownChickens(T, ctx);
   installTownCart(T, ctx);
   installTownDrive(T, ctx);
   installTownBook(T, ctx);
@@ -1080,7 +1087,7 @@ export function createTownMode(ctx) {
     // The player's bag (tap a food to eat) and jobs — on phones these live in the book, not on the HUD
     const bag = {
       max: BAG_MAX,
-      goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || goods[g] > 0).map((g) => ({
+      goods: GOOD_IDS.filter((g) => !shownWhenHeld(g) || goods[g] > 0).map((g) => ({
         id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, n: goods[g] || 0, food: !!GOODS[g].food, heal: GOODS[g].heal ?? 0,
         good: true, cooked: !!GOODS[g].cooked, price: GOODS[g].price,
       })),

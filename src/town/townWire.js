@@ -372,8 +372,8 @@ export function installTownWire(T, ctx) {
       case 'trade': {
         // (a player bought / sold one of a seller's goods — townMarket.js; the host keeps the stock)
         if (!GOODS[d.g] || !n?.alive || T.netMode !== 'host') return;
-        if (d.d < 0) n.carry[d.g] = Math.max(0, n.carry[d.g] - 1);
-        else if (d.d > 0) n.carry[d.g] += 1;
+        if (d.d < 0) n.carry[d.g] = Math.max(0, (n.carry[d.g] || 0) - 1);
+        else if (d.d > 0) n.carry[d.g] = (n.carry[d.g] || 0) + 1;
         if (Number.isFinite(d.cash)) n.money = Math.max(0, n.money + Math.max(-200, Math.min(200, d.cash)));
         return;
       }

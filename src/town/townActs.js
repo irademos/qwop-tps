@@ -202,6 +202,8 @@ export function installTownActs(T, ctx) {
     if (stall === 'wizard' && T.stallOpen('wizard')) out.push({ key: 'wizard', label: 'Wizard\'s wares', onClick: () => T.focusStall('wizard') });
     // The market stalls outside the shop (townMarket.js): Buy from <name>, Sell here / Pack up
     if (calm) out.push(...T.marketActs());
+    // A drumstick / an egg on the ground (townChickens.js) — before the farm's buttons: the hens keep round the fields
+    if (calm) out.push(...T.chickenActs());
     // Farming (townFarming.js): pick a grown veg, buy a field, plant a seed
     if (calm) out.push(...T.farmActs());
     // A job's townsperson within reach (not only the nearest): its 📦 / 💰 first
