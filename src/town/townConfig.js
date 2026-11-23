@@ -196,11 +196,12 @@ export const FISH_NIBBLE_CHANCE = 0.55;     // a nibble first (pulling on it sca
 export const FISH_NIBBLE_S = 1.4;
 export const FISH_HOOK_S = 1.1;             // s to pull after the bobber goes under
 // pulls = swims to counter before it's worn out, swim = s to counter each one, n = fish it's
-// worth, w = how often it bites (bw: on the bubbles — bigger ones there)
+// worth, w = how often it bites (bw: on the bubbles — bigger ones there), scale = how big the
+// catch on the hook is drawn (× the smallest, picked in this range for each fish hooked)
 export const FISH_SIZES = [
-  { label: 'a little one', pulls: 2, swim: 1.9, n: 1, w: 5, bw: 1 },
-  { label: 'a fine fish', pulls: 3, swim: 1.6, n: 1, w: 4, bw: 3 },
-  { label: 'a big one', pulls: 4, swim: 1.35, n: 2, w: 2, bw: 4 },
+  { label: 'a little one', pulls: 2, swim: 1.9, n: 1, w: 5, bw: 1, scale: [1, 1.6] },
+  { label: 'a fine fish', pulls: 3, swim: 1.6, n: 1, w: 4, bw: 3, scale: [1.6, 2.6] },
+  { label: 'a big one', pulls: 4, swim: 1.35, n: 2, w: 2, bw: 4, scale: [2.6, 4] },
 ];
 export const FISH_RUN_SPEED = 1.1;          // m/s of line it takes swimming out (a third of it swimming sideways)
 export const FISH_SIDE_SPEED = 1.3;         // m/s it swims off to one side

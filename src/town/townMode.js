@@ -848,6 +848,7 @@ export function createTownMode(ctx) {
     T.stopFishingRig();
     T.hideFishingHud();
     T.cooking = null;
+    T.closeCookPanel();
     T.resetMemoryHud();
     T.active = false;
     T.ready = false;

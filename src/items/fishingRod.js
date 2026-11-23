@@ -144,7 +144,7 @@ function createSplash() {
  * `cast(rod, target)` flies the bobber from the rod tip to `target` (a world point on the
  * water); `update(dt, { bite, load, fish, crank })` every frame — bite 0…1: a fish tugging at
  * the floating bobber; load 0…1: how hard the rod bends; fish {x, z}: where the bobber is
- * (reeled in a little, or a hooked fish dragging it under there); crank: radians the reel turned this frame; `reel(caught)` brings it in;
+ * (reeled in a little, or a hooked fish dragging it under there); crank: radians the reel turned this frame; `reel(caught, size)` brings it in (the catch drawn size× the smallest);
  * `stop()` takes it all away at once (the rod itself is the game's).
  */
 export function createFishingRig(scene) {
@@ -240,9 +240,11 @@ export function createFishingRig(scene) {
       phase = 'fight';
       t = 0;
     },
-    reel(gotOne) {
+    // size: × the smallest catch (FISH_SIZES `scale` — up to 4×), hanging from the hook by its head
+    reel(gotOne, size = 1) {
       if (phase !== 'cast' && phase !== 'wait' && phase !== 'fight') return;
       caught = !!gotOne;
+      fish.scale.setScalar(size);
       from.copy(bobber.visible ? bobber.position : tipW);
       if (bobber.visible) doSplash(bobber.position, caught);
       phase = 'reel';

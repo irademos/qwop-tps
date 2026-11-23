@@ -19,6 +19,9 @@ export const GOODS = {
   // (the chickens' — townChickens.js: a hen hit with a weapon drops a drumstick, hens lay eggs)
   chicken: { label: 'Chicken', emoji: '🍗', price: 7, target: 4, food: true, heal: 2, wild: true },
   egg:   { label: 'Egg', emoji: '🥚', price: 3, target: 6, food: true, heal: 1, wild: true },
+  // (cooked from them at the campfire — townCooking.js)
+  roastChicken: { label: 'Roast Chicken', emoji: '🍖', price: 13, target: 4, food: true, heal: 5, cooked: true },
+  friedEgg: { label: 'Fried Egg', emoji: '🍳', price: 6, target: 4, food: true, heal: 2, cooked: true },
 };
 export const GOOD_IDS = Object.keys(GOODS);
 export const RAW_IDS = GOOD_IDS.filter((g) => !GOODS[g].cooked && !GOODS[g].wild);

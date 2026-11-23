@@ -1566,6 +1566,10 @@ body.settings-open #inventory-button {
 
 .town-book-hint { grid-column: 1 / -1; font-size: 12px; }
 
+/* The campfire's Cook list (src/town/townCooking.js): the bag's grid, what each takes under its name */
+.town-cook-grid { margin-top: 10px; }
+.town-cook-from { font-size: 11px; opacity: 0.85; }
+
 .town-book-item {
   margin-top: 10px;
   padding: 12px;

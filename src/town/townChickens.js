@@ -1,9 +1,12 @@
 // Town: the chickens (`chicken.glb` — "Chicken - rigged" by Maf'j Alvarez, CC-BY 4.0; its own
 // baked clips: idle, pecking, walking, sitting-down, sitting-idle, standing-up).
 //
-// A flock of CHICKEN_COUNT hens keeps round the farm (the first field — T.layout.places.fields,
-// else the spawn), CHICKEN_ROAM_R about it: each wanders to a random walkable spot (the nav
-// grid, not water), stands about, pecks, and now and then (EGG_EVERY_S) sits down and lays an egg
+// A flock of CHICKEN_COUNT hens keeps mostly round the farms (each hen one of the fields —
+// T.layout.places.fields, else the spawn), CHICKEN_ROAM_R about it: each wanders to a random
+// walkable spot (the nav grid, not water), stands about, pecks; now and then (OUTING_CHANCE, at
+// most OUTING_MAX at once) one sets off along the nav grid's paths to anywhere in town or along
+// any road / trail the townsfolk walk (`outingCells`), pecks about there (OUTING_R) for OUTING_S
+// and walks back to its farm (state 'travel', `goOut` / `goHome`); and now and then (EGG_EVERY_S) sits down and lays an egg
 // (while there are fewer than EGG_MAX lying about); at night they sit and roost. The player coming
 // within FLEE_DIST sends them scurrying off (FLEE_SPEED).
 //
@@ -23,12 +26,20 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { stylizeObject } from '../environment/artStyle.js';
 import { createChickenMeatMesh, createEggMesh, loadChickenMeat } from '../items/chickenGoods.js';
+import { TOWN_BOUNDS } from './townConfig.js';
 
 export const CHICKEN_MODEL_URL = '/assets/props/chicken.glb?v=1';
 const CHICKEN_COUNT = 7;
 const MODEL_YAW = Math.PI;         // the GLB faces −Z: turned round to face +Z (the way it walks)
 const CHICKEN_HEIGHT = 0.36;       // m (the player's ≈ 0.8)
-const CHICKEN_ROAM_R = 11;         // m round the farm they keep to
+const CHICKEN_ROAM_R = 11;         // m round the farm they keep to (mostly)
+const OUTING_CHANCE = 0.04;        // each time one decides what next at its farm: off on an outing
+const OUTING_MAX = 3;              // hens out round town at once (the rest stay at the farms)
+const OUTING_S = [40, 120];        // s (town sim time) pecking about out there before heading back
+const OUTING_R = 5;                // m round the outing's spot they wander
+const OUTING_MIN_DIST = 18;        // m from the farm an outing goes at least…
+const OUTING_MAX_DIST = 75;        // …and at most
+const TRAVEL_SPEED = 0.85;         // m/s walking to / from an outing
 const CHICKEN_HP = 1;              // hits
 const CHICKEN_RESPAWN_S = 150;     // s (town sim time) before a beaten hen's replaced
 const RESPAWN_UNSEEN = 14;         // m the player must be from where the new one turns up
@@ -84,24 +95,73 @@ export function installTownChickens(T, ctx) {
   const respawns = [];         // T.simT each beaten hen comes back at
   let group = null;            // everything (in the scene while in Town)
   let feathers = null;
-  let home = null;
+  let home = null;             // the first farm (the flock's middle — the respawns)
+  let farms = [];              // every field's middle — each hen keeps to one
+  let outingCells = null;      // nav cells an outing can go to: in town, or on a road / trail
 
-  const farm = () => {
+  const farmSpots = () => {
     const pl = T.layout?.places;
-    const f = pl?.fields?.[0];
-    return f ? { x: f.x, z: f.z } : pl?.spawn ? { x: pl.spawn.x, z: pl.spawn.z } : null;
+    const fs = (pl?.fields ?? []).map((f) => ({ x: f.x, z: f.z }));
+    if (fs.length) return fs;
+    return pl?.spawn ? [{ x: pl.spawn.x, z: pl.spawn.z }] : [];
   };
-  const okSpot = (x, z) => T.layout.nav.isWalkable(x, z) && !ctx.isOverWater?.(x, z) && !T.rooms.roomAt(x, z)
-    && Math.hypot(x - home.x, z - home.z) < CHICKEN_ROAM_R * 1.15;
+  // (a step / a spot a hen may stand on: walkable, dry, not in a house's room)
+  const okGround = (x, z) => T.layout.nav.isWalkable(x, z) && !ctx.isOverWater?.(x, z) && !T.rooms.roomAt(x, z);
   const randomSpot = (near = home, r = CHICKEN_ROAM_R) => {
     for (let i = 0; i < 20; i++) {
       const a = Math.random() * Math.PI * 2;
       const d = Math.sqrt(Math.random()) * r;
       const x = near.x + Math.cos(a) * d;
       const z = near.z + Math.sin(a) * d;
-      if (okSpot(x, z)) return { x, z };
+      if (okGround(x, z) && Math.hypot(x - near.x, z - near.z) < r * 1.15) return { x, z };
     }
     return null;
+  };
+  // Where it keeps to now: its farm, or its outing's spot
+  const baseOf = (h) => h.out ?? h.farm;
+  const baseR = (h) => (h.out ? OUTING_R : CHICKEN_ROAM_R);
+  const inTown = (x, z) => x > TOWN_BOUNDS.minX && x < TOWN_BOUNDS.maxX && z > TOWN_BOUNDS.minZ && z < TOWN_BOUNDS.maxZ;
+  const findOutingCells = () => {
+    const nav = T.layout.nav;
+    return nav.cellsWhere((i) => !nav.isWater(i) && (nav.kindAt(i) >= 1 || inTown(nav.cellX(i), nav.cellZ(i))));
+  };
+  // Off along the paths to somewhere round town (false: nowhere it can walk to)
+  const startTravel = (h, x, z) => {
+    const path = T.layout.nav.findPath(h.x, h.z, x, z);
+    const end = path?.[path.length - 1];
+    if (!end || Math.hypot(end.x - x, end.z - z) > 3) return false;
+    h.path = path;
+    h.tx = path[0].x;
+    h.tz = path[0].z;
+    setState(h, 'travel', Math.max(60, path.length * 30));
+    play(h, 'walk', { rate: WALK_CLIP_RATE * TRAVEL_SPEED / WALK_SPEED });
+    return true;
+  };
+  const goOut = (h) => {
+    outingCells ??= findOutingCells();
+    if (!outingCells.length) return false;
+    const nav = T.layout.nav;
+    for (let i = 0; i < 12; i++) {
+      const c = outingCells[(Math.random() * outingCells.length) | 0];
+      const x = nav.cellX(c);
+      const z = nav.cellZ(c);
+      const d = Math.hypot(x - h.x, z - h.z);
+      if (d < OUTING_MIN_DIST || d > OUTING_MAX_DIST || !okGround(x, z)) continue;
+      if (!startTravel(h, x, z)) continue;
+      h.out = { x, z };
+      h.outUntil = T.simT + rand(...OUTING_S);
+      return true;
+    }
+    return false;
+  };
+  const goHome = (h) => {
+    const to = randomSpot(h.farm, CHICKEN_ROAM_R * 0.6) ?? h.farm;
+    h.out = null;
+    if (startTravel(h, to.x, to.z)) return true;
+    // (no way back along the paths: it turns up at the farm, out of sight, later — just put it there)
+    h.x = to.x;
+    h.z = to.z;
+    return false;
   };
   const groundAt = (x, z) => T.groundAt(x, z);
 
@@ -138,6 +198,7 @@ export function installTownChickens(T, ctx) {
     const h = {
       root, model, mixer, actions, action: null, state: 'idle', t: 0, until: rand(...IDLE_S),
       x: at.x, z: at.z, yaw: Math.random() * Math.PI * 2, tx: at.x, tz: at.z, hp: CHICKEN_HP,
+      farm: at.farm ?? home, out: null, outUntil: 0, path: null,
       eggAt: T.simT + rand(...EGG_EVERY_S), proxy: null, lastSwing: null, lastHitAt: -9, layEgg: false,
     };
     // (each one a little different)
@@ -167,9 +228,14 @@ export function installTownChickens(T, ctx) {
       play(h, 'sitDown', { once: true });
       return;
     }
+    // (out round town long enough — or wandered far from its spot: back to the farm)
+    if (h.out && (T.simT > h.outUntil || Math.hypot(h.x - h.out.x, h.z - h.out.z) > OUTING_R * 3)) { if (goHome(h)) return; }
+    else if (!h.out && Math.hypot(h.x - h.farm.x, h.z - h.farm.z) > CHICKEN_ROAM_R * 2) { h.out = null; if (goHome(h)) return; }
+    if (!h.out && Math.random() < OUTING_CHANCE && hens.filter((o) => o.out).length < OUTING_MAX && goOut(h)) return;
     const r = Math.random();
+    const base = baseOf(h);
     if (r < 0.45) {
-      const to = randomSpot(h, 5) ?? randomSpot();
+      const to = (Math.hypot(h.x - base.x, h.z - base.z) < baseR(h) ? randomSpot(h, 5) : null) ?? randomSpot(base, baseR(h));
       if (to) { h.tx = to.x; h.tz = to.z; setState(h, 'walk', 12); play(h, 'walk', { rate: WALK_CLIP_RATE }); return; }
     }
     if (r < 0.75) { setState(h, 'peck', rand(...PECK_S)); play(h, 'peck'); return; }
@@ -184,7 +250,7 @@ export function installTownChickens(T, ctx) {
     const s = Math.min(d, speed * dt);
     const nx = h.x + Math.sin(h.yaw) * s;
     const nz = h.z + Math.cos(h.yaw) * s;
-    if (!okSpot(nx, nz)) return 'blocked';
+    if (!okGround(nx, nz) && h.state !== 'travel') return 'blocked';
     h.x = nx;
     h.z = nz;
     return 'on';
@@ -193,7 +259,7 @@ export function installTownChickens(T, ctx) {
     h.t += dt;
     const near = Math.hypot(p.x - h.x, p.z - h.z);
     // (the player too close: off it scurries — not while laying / roosting)
-    if (near < FLEE_DIST && h.state !== 'flee' && h.state !== 'sitIdle' && h.state !== 'sitDown' && !T.inRoom) {
+    if (near < FLEE_DIST && h.state !== 'flee' && h.state !== 'travel' && h.state !== 'sitIdle' && h.state !== 'sitDown' && !T.inRoom) {
       const ax = h.x - p.x;
       const az = h.z - p.z;
       const k = 3 / (Math.hypot(ax, az) || 1);
@@ -209,6 +275,19 @@ export function installTownChickens(T, ctx) {
       case 'walk': {
         const r = stepToward(h, WALK_SPEED, dt);
         if (r !== 'on' || h.t > h.until) decide(h);
+        break;
+      }
+      case 'travel': {
+        // (along the nav path, waypoint by waypoint)
+        const r = stepToward(h, TRAVEL_SPEED, dt);
+        if (r === 'there' && h.path?.length > 1) {
+          h.path.shift();
+          h.tx = h.path[0].x;
+          h.tz = h.path[0].z;
+        } else if (r === 'there' || h.t > h.until) {
+          h.path = null;
+          decide(h);
+        }
         break;
       }
       case 'flee': {
@@ -404,16 +483,19 @@ export function installTownChickens(T, ctx) {
 
   // ── Each frame ──
   const build = () => {
-    home = farm();
+    farms = farmSpots();
+    home = farms[0];
     if (!home) return false;
+    outingCells = null;
     group = new THREE.Group();
     group.name = 'town-chickens';
     feathers = makeFeathers();
     group.add(feathers.mesh);
     ctx.scene.add(group);
     for (let i = 0; i < CHICKEN_COUNT; i++) {
-      const at = randomSpot();
-      if (at) spawnHen(at);
+      const farm = farms[i % farms.length];
+      const at = randomSpot(farm);
+      if (at) spawnHen({ ...at, farm });
     }
     return true;
   };
@@ -425,17 +507,17 @@ export function installTownChickens(T, ctx) {
     // (beaten ones replaced, where the player isn't looking — out of their sight)
     for (let i = respawns.length - 1; i >= 0; i--) {
       if (T.simT < respawns[i]) continue;
-      const at = randomSpot();
+      const farm = farms[(Math.random() * farms.length) | 0];
+      const at = randomSpot(farm);
       if (!at || Math.hypot(at.x - p.x, at.z - p.z) < RESPAWN_UNSEEN) continue;
       respawns.splice(i, 1);
-      spawnHen(at);
+      spawnHen({ ...at, farm });
     }
-    const far = Math.hypot(p.x - home.x, p.z - home.z) > DRAW_DIST + CHICKEN_ROAM_R;
-    group.visible = !T.inRoom && !far;
+    group.visible = !T.inRoom;
     for (const h of hens.slice()) {
       updateHen(h, dt, p);
-      h.root.visible = group.visible;
-      if (group.visible) h.mixer.update(dt);
+      h.root.visible = group.visible && Math.hypot(p.x - h.x, p.z - h.z) < DRAW_DIST;
+      if (h.root.visible) h.mixer.update(dt);
     }
     if (feathers.list.length || feathers.mesh.count) updateFeathers(dt);
   };
@@ -451,7 +533,9 @@ export function installTownChickens(T, ctx) {
   };
 
   const chickenDebug = () => ({
-    loaded: !!gltf, fit, home, hens: hens.map((h) => ({ x: +h.x.toFixed(1), z: +h.z.toFixed(1), state: h.state })),
+    loaded: !!gltf, fit, home, farms, outingCells: outingCells?.length ?? null,
+    hens: hens.map((h) => ({ x: +h.x.toFixed(1), z: +h.z.toFixed(1), state: h.state, out: h.out })),
+    sendOut: () => hens.map((h) => goOut(h)),
     eggs: eggs.length, meats: meats.length, respawns: respawns.length,
     eggsAt: eggs.map((o) => ({ x: o.x, z: o.z })), meatsAt: meats.map((o) => ({ x: o.x, z: o.z })),
     layAll: () => hens.forEach((h) => { h.eggAt = 0; }),

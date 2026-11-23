@@ -294,9 +294,10 @@ export function installTownFishing(T, ctx) {
   const miss = () => { misses += 1; };
   const say = (text) => T.feedLine(text);
   const finish = (caught = false) => {
+    const scale = T.fishing?.fish?.scale ?? 1;
     T.fishing = null;
     rig?.golden(false);
-    rig?.reel(caught);
+    rig?.reel(caught, scale);
   };
   // A job takes the fish on the line away (the golden fish, shaken off by a blast): reeled in empty
   const loseFish = (text) => {
@@ -382,7 +383,7 @@ export function installTownFishing(T, ctx) {
       const golden = !!T.questFish?.golden;
       f.phase = 'fight';
       f.t = 0;
-      f.fish = { size, stamina: golden ? Infinity : size.pulls, mode: 'turn', way: null, left: 0.5, lat: 0, tension: 0, idle: 0, golden };
+      f.fish = { size, scale: rand(...(size.scale ?? [1, 1])), stamina: golden ? Infinity : size.pulls, mode: 'turn', way: null, left: 0.5, lat: 0, tension: 0, idle: 0, golden };
       rig?.hook();
       if (golden) rig?.golden(true);
       if (f.onBubbles) say(`Off the bubbles — ${size.label}!`);
