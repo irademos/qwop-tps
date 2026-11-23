@@ -42,6 +42,7 @@ const PECK_S = [2, 5];
 const TURN_RATE = 5;               // rad/s
 const EGG_EVERY_S = [70, 160];     // s (town sim time) between one hen's eggs
 const EGG_MAX = 10;                // eggs lying about at once
+const EGG_SIZE = 0.34;             // m long, a laid egg (big, so it's easy to spot)
 const EGG_SIT_S = 3.5;             // s sat (sitting-idle) laying it
 const MEAT_MAX = 12;               // drumsticks lying about at once (the oldest goes)
 const PICKUP_DIST = 1.3;           // m from the player to pick one up
@@ -247,12 +248,12 @@ export function installTownChickens(T, ctx) {
   // ── Eggs and drumsticks on the ground ──
   const layEgg = (h) => {
     if (eggs.length >= EGG_MAX) return;
-    // (just behind where it sat)
-    const x = h.x - Math.sin(h.yaw) * 0.12;
-    const z = h.z - Math.cos(h.yaw) * 0.12;
-    const mesh = createEggMesh(0.085);
+    // (just behind where it sat, lying on its side — its middle a radius over the ground)
+    const x = h.x - Math.sin(h.yaw) * 0.3;
+    const z = h.z - Math.cos(h.yaw) * 0.3;
+    const mesh = createEggMesh(EGG_SIZE);
     mesh.rotation.set(Math.PI / 2 * 0.9, Math.random() * Math.PI * 2, 0, 'YXZ');
-    mesh.position.set(x, groundAt(x, z) + 0.03, z);
+    mesh.position.set(x, groundAt(x, z) + EGG_SIZE * 0.34, z);
     group.add(mesh);
     eggs.push({ mesh, x, z });
   };
