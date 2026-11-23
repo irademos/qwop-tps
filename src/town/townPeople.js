@@ -42,6 +42,8 @@ export const FOUNDING_ROLES = [
   'nightGuard', 'farmer', 'fisher', 'kid', 'townsfolk', 'woodcutter',
   'drifter', 'farmer', 'townsfolk', 'kid', 'townsfolk', 'fisher', 'townsfolk', 'townsfolk',
 ];
+// Every character model a townsperson can have (the wizard is always the wizard — one of him —
+// and bandits / Miis / the giant are never townsfolk)
 const CIVILIAN_URLS = [
   glbCharacterConfig.villagerUrl,
   glbCharacterConfig.pumpkinUrl,
@@ -51,16 +53,32 @@ const CIVILIAN_URLS = [
   glbCharacterConfig.villageGirlUrl,
   glbCharacterConfig.frogMomUrl,
   glbCharacterConfig.oldGuyUrl,
+  glbCharacterConfig.antlerGuyUrl,
+  glbCharacterConfig.url, // gemhorn
+  glbCharacterConfig.pandaUrl,
 ];
-export const characterForRole = (role) => {
+const KID_URLS = [glbCharacterConfig.villageBoyUrl, glbCharacterConfig.villageGirlUrl];
+// The least used of `pool` among `others` (the town's residents' urls), ties broken at random:
+// one of each model first, then the rest filled in evenly
+const leastUsed = (pool, others = []) => {
+  const count = new Map(pool.map((u) => [u, 0]));
+  for (const u of others) if (count.has(u)) count.set(u, count.get(u) + 1);
+  const min = Math.min(...count.values());
+  const best = pool.filter((u) => count.get(u) === min);
+  return best[Math.floor(Math.random() * best.length)];
+};
+// A townsperson's model: the law / merchant / wizard / bandits by role; everyone else (kids
+// among the kids' models) the least used model in town so far — `others` = the urls of the
+// town's residents (alive, not outlaws)
+export const characterForRole = (role, others = []) => {
   if (role === 'guard' || role === 'nightGuard') return glbCharacterConfig.antlerGuyUrl;
   if (role === 'sheriff') return glbCharacterConfig.url; // gemhorn
   if (role === 'merchant') return glbCharacterConfig.pumpkinUrl;
   if (role === 'wizard') return glbCharacterConfig.wizardUrl;
-  if (role === 'kid') return Math.random() < 0.5 ? glbCharacterConfig.villageBoyUrl : glbCharacterConfig.villageGirlUrl;
+  if (role === 'kid') return leastUsed(KID_URLS, others);
   if (role === 'bandit') return glbCharacterConfig.frogManUrl;
   if (role === 'banditBoss') return glbCharacterConfig.treeCreatureUrl;
-  return CIVILIAN_URLS[Math.floor(Math.random() * CIVILIAN_URLS.length)];
+  return leastUsed(CIVILIAN_URLS, others);
 };
 
 const FIRST_NAMES = [

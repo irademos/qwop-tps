@@ -77,6 +77,7 @@ export const glbCharacterConfig = {
   mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Classic only
   frogMomUrl: '/models/glb_characters/frog_mom.glb?v=2',       // Story: sitting on Tree Island (src/story/frogMom.js); roster / Showdown + Endless unlock; Town townsfolk
   oldGuyUrl: '/models/glb_characters/old_guy.glb',         // Old guy: roster / Showdown + Endless unlock; wand caster like the wizard; Town townsfolk
+  pandaUrl: '/models/glb_characters/panda.glb?v=1',        // Panda: roster / Showdown + Endless unlock; Town townsfolk
   giantUrl: '/models/glb_characters/giant.glb?v=1',       // Tree Island's giant (src/characters/giant.js); bump ?v= here and in keepTextureUrls
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
   walkClip: ANIM + 'Walking', // the default walk (characterWalkClip — walkClipByUrl overrides it)

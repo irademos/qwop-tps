@@ -88,6 +88,7 @@ export const MATCH_CHARACTERS = {
   tree: { label: 'Tree Creature', team: 'Trees', emoji: '🌳', url: glbCharacterConfig.treeCreatureUrl },
   frogMom: { label: 'Frog Mom', team: 'Frog Moms', emoji: '🐸', url: glbCharacterConfig.frogMomUrl },
   oldGuy: { label: 'Old Guy', team: 'Old Guys', emoji: '👴', url: glbCharacterConfig.oldGuyUrl },
+  panda: { label: 'Panda', team: 'Pandas', emoji: '🐼', url: glbCharacterConfig.pandaUrl },
   // story: not won from a Showdown boss — unlocked by the (future) story mode; locked
   // everywhere (Team Battle included) until then, and never given to bots
   villager: { label: 'Villager', team: 'Villagers', emoji: '🧑‍🌾', url: glbCharacterConfig.villagerUrl, story: true }
