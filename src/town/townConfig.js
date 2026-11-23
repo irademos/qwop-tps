@@ -156,11 +156,20 @@ export const WIZARD_HUT_DIST = 4;           // m from the stall: where the wizar
 // in VEG_WET_S once the hose has soaked it
 export const FIELD_PRICE = 100;             // coins (to the field's farmer)
 export const FIELD_ACT_DIST = 4.5;          // m from a field's middle: 🌱 Buy this field
+// Plots of land by the fields (townLayout.js / townFarming.js): bought at their signpost (cheaper
+// than a field), then up to PLOT_PLANTERS planter boxes built on one, PLANTER_WOOD wood each from
+// the bag; seeds are planted only in the player's own planter boxes (PLANTER_SLOTS each)
+export const PLOT_COUNT = 4;                // plots for sale round the town's fields
+export const PLOT_PRICE = 40;               // coins
+export const PLOT_ACT_DIST = 3;             // m from a plot's middle / its signpost: Buy this land, Build a planter box
+export const PLOT_PLANTERS = 3;             // planter boxes a plot holds
+export const PLANTER_WOOD = 3;              // wood a planter box takes
+export const PLANTER_SLOTS = 3;             // seeds a planter box holds
+export const PLANT_DIST = 1.6;              // m from a free spot in a planter box: Plant a seed
 export const VEG_DRY_S = 480;               // s for a seed to grow unwatered (a town day: 1440 min / MINUTES_PER_SEC)
 export const VEG_WET_S = 40;                // s while its soil is wet
 export const VEG_MAX = 24;                  // seeds planted at once
 export const VEG_PICK_DIST = 1.4;           // m — 🥕 Pick your veg
-export const VEG_GAP = 0.6;                 // m between dirt piles
 export const SEEDS_MAX = 30;
 export const SOIL_DRY_S = 60;               // s a soaked dirt pile stays wet
 export const WATER_SOAK_S = 1.2;            // s of hose on a pile to soak it

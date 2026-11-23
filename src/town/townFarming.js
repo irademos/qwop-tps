@@ -1,27 +1,35 @@
-// Town: farming. The farmers' fields (townLayout.js) can be bought — walk up to one and 🌱 Buy
-// this field (FIELD_PRICE, paid to the farmer who works it; no talking needed): its crops are the
-// player's to pick from then on (no theft), and the farmer stops working it. Seeds come from the
-// farmers (SHOP_GEAR 'seeds', SELLER_GEAR → T.seeds) and are planted anywhere (🌱 Plant a seed — a little dirt
-// pile in front of the player); each grows one veg in a town day (VEG_DRY_S), or in VEG_WET_S
-// while its soil is wet, then 🥕 Pick your veg. The water: the hose at the tap (a grabbable —
-// townGrab.js: ✋ Grab the hose with empty hands / ✋ Drop it; the player can't walk further than
-// HOSE_LENGTH from the tap meanwhile) is held in
-// the right hand and aimed with the gyro like the sword (no gyro: where the player faces);
-// 💧 Water — the Block bar's place on the game's screen and the phone (bootstrapGameApp.js:
-// isHoseHeld / setWatering) — or holding F sprays it, and the dirt piles the water lands on soak
-// (WATER_SOAK_S of spray) and stay wet SOIL_DRY_S.
+// Town: farming. The farmers' fields (townLayout.js — rows of crops in planter boxes) can be
+// bought — walk up to one and Buy this field (FIELD_PRICE, paid to the farmer who works it; no
+// talking needed): its crops are the player's to pick from then on (no theft), and the farmer
+// stops working it. Cheaper: a plot of land by the fields (`places.plots`, a signpost on each —
+// Buy this land, PLOT_PRICE), on which the player builds up to PLOT_PLANTERS planter boxes
+// (planter_box.glb — Build a planter box, PLANTER_WOOD wood each from the bag). Seeds come from
+// the farmers (SHOP_GEAR 'seeds', SELLER_GEAR → T.seeds) and are planted only in the player's own
+// planter boxes (Plant a seed — PLANTER_SLOTS spots in each, a little dirt pile on its soil); each
+// grows one veg in a town day (VEG_DRY_S), or in VEG_WET_S while its soil is wet, then Pick your
+// veg. The water: a hose's tap stands by each field / plot, shown only by land the player owns
+// (a grabbable — townGrab.js: Grab the hose with empty hands / Drop it; the player can't walk
+// further than HOSE_LENGTH from that tap meanwhile), held in the right hand and aimed with the
+// gyro like the sword (no gyro: where the player faces); Water — the Block bar's place on the
+// game's screen and the phone (bootstrapGameApp.js: isHoseHeld / setWatering) — or holding F
+// sprays it, and the dirt piles the water lands on soak (WATER_SOAK_S of spray) and stay wet
+// SOIL_DRY_S. The built planter boxes are solid (T.planterObstacles → T.refreshObstacles).
 //
-// Who owns which field is the town's (T.fieldOwners: field index → { k: member key, n: name }; a
-// shared town's host keeps it — 'buyField' / 'fields' ops); what's planted is the player's own
-// (T.veg, saved with their own things — others don't see it).
+// Who owns which field / plot (and how many boxes a plot has) is the town's (T.fieldOwners: field
+// index → { k: member key, n: name }; T.plotOwners: plot index → { k, n, b: boxes built }; a
+// shared town's host keeps them — 'buyField' / 'fields', 'buyPlot' / 'buildPlanter' / 'plots'
+// ops); what's planted is the player's own (T.veg, saved with their own things — others don't
+// see it).
 
 import * as THREE from 'three';
 import { makeTextSprite } from '../village/villageMode.js';
 import { firstName } from './townPeople.js';
 import { createVeg, VEG_KINDS } from '../items/vegModels.js';
+import { createPlanterBox, planterSoilY } from '../items/planterBox.js';
 import {
-  FIELD_ACT_DIST, FIELD_PRICE, HOSE_GRAB_DIST, HOSE_LENGTH, HOSE_SPEED, HOSE_SPLASH_R, SEEDS_MAX, SOIL_DRY_S,
-  VEG_DRY_S, VEG_GAP, VEG_MAX, VEG_PICK_DIST, VEG_WET_S, WATER_SOAK_S, dist2,
+  FIELD_ACT_DIST, FIELD_PRICE, HOSE_GRAB_DIST, HOSE_LENGTH, HOSE_SPEED, HOSE_SPLASH_R, PLANTER_SLOTS, PLANTER_WOOD,
+  PLANT_DIST, PLOT_ACT_DIST, PLOT_PLANTERS, PLOT_PRICE, SEEDS_MAX, SOIL_DRY_S,
+  VEG_DRY_S, VEG_MAX, VEG_PICK_DIST, VEG_WET_S, WATER_SOAK_S, dist2,
 } from './townConfig.js';
 
 const GRAVITY = 9.8;
@@ -32,7 +40,15 @@ const DRY_COLOR = new THREE.Color(0x8a6a45);
 const WET_COLOR = new THREE.Color(0x43301d);
 const GYRO_MAX_AGE_MS = 500;        // (as playerModel.js: older, the gyro's not live)
 const HOSE_REEL_UP = 0.55;          // m — the hose leaves the tap this high
-const PLANT_AHEAD = 0.6;            // m in front of the player a seed goes in
+// A plot's planter boxes (plot-local, axis-aligned — long along X): their middles' z, size, and
+// the seed spots along each
+const PLOT_BOX_Z = [-1.5, 0, 1.5];
+const PLOT_BOX_LEN = 2.2;
+const PLOT_BOX_W = 0.62;
+const PLOT_BOX_H = 0.42;
+const PLOT_SLOT_X = [-0.7, 0, 0.7];
+const PLOT_SIGN = { x: -1.9, z: 1.9 };  // the signpost, from the plot's middle
+const PLOT_STAKES = [[-1.5, -2.2], [1.5, -2.2], [-1.5, 2.2], [1.5, 2.2]];
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -44,53 +60,117 @@ const _FWD = new THREE.Vector3(0, 0, 1);
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownFarming(T, ctx) {
   T.fieldOwners = {};
-  T.veg = [];                 // the player's planted seeds: [{ x, z, g: 0..1 (1 ripe), w: s of wet soil left }]
+  T.plotOwners = {};          // plot index → { k, n, b: planter boxes built }
+  T.veg = [];                 // the player's planted seeds: [{ x, z, p, b, s (plot, box, spot), g: 0..1 (1 ripe), w: s of wet soil left }]
   T.seeds = 0;
-  T.hose = null;              // { watering, dropAt } while the player holds it
+  T.hose = null;              // { tap, watering, dropAt } while the player holds it
   let farm = null;            // the meshes (buildFarm)
   let keyDown = false;
 
-  const tapSpot = () => T.layout?.places.tap ?? null;
   const fields = () => T.layout?.places.fields ?? [];
+  const plots = () => T.layout?.places.plots ?? [];
   const myKey = () => (T.mp() ? ctx.memberKey() : 'me');
   const ownsField = (i) => T.fieldOwners[i]?.k === myKey();
+  const ownsPlot = (i) => T.plotOwners[i]?.k === myKey();
   const myFields = () => Object.keys(T.fieldOwners).map(Number).filter(ownsField);
+  const myPlots = () => Object.keys(T.plotOwners).map(Number).filter(ownsPlot);
+  const builtOn = (i) => Math.max(0, Math.min(PLOT_PLANTERS, Math.floor(T.plotOwners[i]?.b || 0)));
+  // A plot's planter box b: its middle (world) and the soil's height
+  const boxSpot = (i, b) => {
+    const p = plots()[i];
+    if (!p) return null;
+    const x = p.x;
+    const z = p.z + PLOT_BOX_Z[b];
+    const gy = T.groundAt(x, z);
+    return { x, z, gy, soil: gy + planterSoilY(PLOT_BOX_H) };
+  };
+  const slotSpot = (i, b, k) => {
+    const o = boxSpot(i, b);
+    return o && { x: o.x + PLOT_SLOT_X[k], z: o.z, y: o.soil };
+  };
+  // Every built planter box (anyone's — they're seen by all): { i, b, x, z, gy, soil }
+  const builtBoxes = () => {
+    const out = [];
+    plots().forEach((p, i) => { for (let b = 0; b < builtOn(i); b++) out.push({ i, b, ...boxSpot(i, b) }); });
+    return out;
+  };
+  // The taps by land the player owns (the hose is at one of them)
+  const myTaps = () => [
+    ...fields().filter((f, i) => ownsField(i) && f.tap).map((f) => f.tap),
+    ...plots().filter((p, i) => ownsPlot(i) && p.tap).map((p) => p.tap),
+  ];
+  const nearestTap = () => {
+    const p = T.playerPos();
+    let best = null;
+    let bd = Infinity;
+    for (const t of myTaps()) {
+      const d = dist2(p.x, p.z, t.x, t.z);
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best;
+  };
+  const tapSpot = () => T.hose?.tap ?? null;
   // Whose a field is: 'mine', 'theirs' (another player's) or null (a farmer's)
   const fieldOwner = (f) => {
     const o = T.fieldOwners[fields().indexOf(f)];
     return !o ? null : o.k === myKey() ? 'mine' : 'theirs';
   };
 
-  // ── Props: the tap (+ the hose, its nozzle, the water), the fields' signs, the dirt piles ──
+  // ── Props: the taps (+ the hose, its nozzle, the water), the fields' signs, the plots'
+  // signposts / stakes / planter boxes, the dirt piles ──
   const mat = (color) => new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0 });
+  const makeTap = (group, tap, metal, hoseMat, wood) => {
+    const root = new THREE.Group();
+    root.position.set(tap.x, T.groundAt(tap.x, tap.z), tap.z);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.9, 0.14), wood);
+    post.position.y = 0.45;
+    const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.18, 8), metal);
+    spout.rotation.x = Math.PI / 2;
+    spout.position.set(0, 0.82, 0.12);
+    const reel = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 18), hoseMat);
+    reel.position.set(0, HOSE_REEL_UP, 0.12);
+    root.add(post, spout, reel);
+    root.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    const sign = makeTextSprite('Hose', { height: 0.24 });
+    sign.position.set(0, 1.25, 0);
+    root.add(sign);
+    root.visible = false;
+    group.add(root);
+    tap.top = root.position.clone().add(new THREE.Vector3(0, HOSE_REEL_UP, 0.12));
+    return root;
+  };
   const buildFarm = (group, places) => {
     const metal = new THREE.MeshStandardMaterial({ color: 0x8a9096, roughness: 0.4, metalness: 0.7 });
     const hoseMat = mat(0x3f8a3a);
+    const wood = mat(0x6b4a2b);
     farm = {
       group, fieldSigns: places.fields.map(() => ({ sign: null, text: '' })), live: [], piles: new Map(),
-      pileGeo: new THREE.SphereGeometry(0.25, 10, 6).scale(1, 0.4, 1),
+      pileGeo: new THREE.SphereGeometry(0.2, 10, 6).scale(1, 0.4, 1),
       stemGeo: new THREE.ConeGeometry(0.09, 0.4, 5).translate(0, 0.2, 0),
       stemMat: mat(0x5f9e3a),
+      taps: [], plots: [], boxSig: '',
     };
-    const tap = places.tap;
-    if (tap) {
-      const root = new THREE.Group();
-      root.position.set(tap.x, T.groundAt(tap.x, tap.z), tap.z);
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.9, 0.14), mat(0x6b4a2b));
-      post.position.y = 0.45;
-      const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.18, 8), metal);
-      spout.rotation.x = Math.PI / 2;
-      spout.position.set(0, 0.82, 0.12);
-      const reel = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.05, 8, 18), hoseMat);
-      reel.position.set(0, HOSE_REEL_UP, 0.12);
-      root.add(post, spout, reel);
-      root.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-      group.add(root);
-      const sign = makeTextSprite('Hose', { height: 0.24 });
-      sign.position.set(tap.x, root.position.y + 1.25, tap.z);
-      group.add(sign);
-      farm.tapTop = root.position.clone().add(_v.set(0, HOSE_REEL_UP, 0.12));
-    }
+    // A tap by every field and plot (shown once it's the player's)
+    places.fields.forEach((f, i) => { if (f.tap) farm.taps.push({ tap: f.tap, root: makeTap(group, f.tap, metal, hoseMat, wood), owned: () => ownsField(i) }); });
+    (places.plots ?? []).forEach((p, i) => {
+      if (p.tap) farm.taps.push({ tap: p.tap, root: makeTap(group, p.tap, metal, hoseMat, wood), owned: () => ownsPlot(i) });
+      // Its signpost and corner stakes
+      const sx = p.x + PLOT_SIGN.x;
+      const sz = p.z + PLOT_SIGN.z;
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.4, 0.1), wood);
+      post.position.set(sx, T.groundAt(sx, sz) + 0.7, sz);
+      post.castShadow = true;
+      const board = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.36, 0.05), wood);
+      board.position.set(sx, T.groundAt(sx, sz) + 1.2, sz + 0.06);
+      board.castShadow = true;
+      group.add(post, board);
+      for (const [dx, dz] of PLOT_STAKES) {
+        const stake = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.45, 0.07), wood);
+        stake.position.set(p.x + dx, T.groundAt(p.x + dx, p.z + dz) + 0.2, p.z + dz);
+        group.add(stake);
+      }
+      farm.plots.push({ sign: null, text: '', at: { x: sx, z: sz }, boxes: [] });
+    });
     // The hose out to the player's hand (rebuilt each frame while held), its nozzle, the water
     farm.hose = new THREE.Mesh(new THREE.BufferGeometry(), hoseMat);
     farm.hose.visible = false;
@@ -109,7 +189,16 @@ export function installTownFarming(T, ctx) {
     renderSigns();
   };
 
-  // Over each field: for sale, someone's, yours
+  // Over each field: for sale, someone's, yours; each plot's signpost and planter boxes; the
+  // taps by the player's own land
+  const setSign = (o, text, x, y, z, height) => {
+    if (text === o.text) return;
+    o.text = text;
+    if (o.sign) { o.sign.parent?.remove(o.sign); o.sign.material.map?.dispose(); o.sign.material.dispose(); }
+    o.sign = makeTextSprite(text, { height });
+    o.sign.position.set(x, y, z);
+    farm.group.add(o.sign);
+  };
   const renderSigns = () => {
     if (!farm) return;
     fields().forEach((f, i) => {
@@ -117,14 +206,34 @@ export function installTownFarming(T, ctx) {
       if (!fs) return;
       const o = T.fieldOwners[i];
       const text = !o ? `Field for sale · ${FIELD_PRICE} 🪙` : ownsField(i) ? 'Your field' : `${o.n || 'Someone'}'s field`;
-      if (text === fs.text) return;
-      fs.text = text;
-      if (fs.sign) { fs.sign.parent?.remove(fs.sign); fs.sign.material.map?.dispose(); fs.sign.material.dispose(); }
-      fs.sign = makeTextSprite(text, { height: 0.22 });
-      fs.sign.position.set(f.x, T.groundAt(f.x, f.z) + 1.6, f.z);
-      farm.group.add(fs.sign);
+      setSign(fs, text, f.x, T.groundAt(f.x, f.z) + 1.6, f.z, 0.22);
     });
+    plots().forEach((p, i) => {
+      const ps = farm.plots[i];
+      if (!ps) return;
+      const o = T.plotOwners[i];
+      const text = !o ? `Land for sale · ${PLOT_PRICE} 🪙` : ownsPlot(i) ? 'Your land' : `${o.n || 'Someone'}'s land`;
+      setSign(ps, text, ps.at.x, T.groundAt(ps.at.x, ps.at.z) + 1.75, ps.at.z, 0.2);
+      const n = o ? builtOn(i) : 0;
+      while (ps.boxes.length < n) {
+        const b = ps.boxes.length;
+        const at = boxSpot(i, b);
+        const box = createPlanterBox({ length: PLOT_BOX_LEN, width: PLOT_BOX_W, height: PLOT_BOX_H });
+        box.position.set(at.x, at.gy, at.z);
+        farm.group.add(box);
+        ps.boxes.push(box);
+      }
+      while (ps.boxes.length > n) ps.boxes.pop().removeFromParent();
+    });
+    for (const t of farm.taps) t.root.visible = t.owned();
+    // (the built boxes are solid: re-sent only when they change)
+    const sig = builtBoxes().map((o) => `${o.i}.${o.b}`).join(',');
+    if (sig !== farm.boxSig) { farm.boxSig = sig; T.refreshObstacles?.(); }
   };
+  const planterObstacles = () => (farm ? builtBoxes().map((o) => ({
+    box: true, owner: 'planter', x: o.x, z: o.z, hx: PLOT_BOX_LEN / 2, hz: PLOT_BOX_W / 2, yaw: 0,
+    y0: o.gy - 1, y1: o.gy + PLOT_BOX_H,
+  })) : []);
 
   // ── Buying a field (at the field: paid to the farmer who works it) ──
   const fieldNear = () => {
@@ -164,10 +273,92 @@ export function installTownFarming(T, ctx) {
     if (i < 0 || T.fieldOwners[i]) return [];
     return [{ key: `field:${i}`, label: `Buy this field (${FIELD_PRICE} 🪙)`, onClick: () => buyField(i) }];
   };
+  // ── A plot of land (at its signpost / in it): bought, then planter boxes built on it ──
+  const plotNear = () => {
+    if (T.inRoom) return -1;
+    const p = T.playerPos();
+    let best = -1;
+    let bd = Infinity;
+    plots().forEach((pl, i) => {
+      const d = Math.min(dist2(p.x, p.z, pl.x, pl.z), dist2(p.x, p.z, pl.x + PLOT_SIGN.x, pl.z + PLOT_SIGN.z));
+      if (d < PLOT_ACT_DIST && d < bd) { bd = d; best = i; }
+    });
+    return best;
+  };
+  const sendPlots = () => { if (T.netMode === 'host') T.net.broadcast({ w: 1, op: 'plots', p: T.plotOwners }); };
+  const buyPlot = (i) => {
+    if (!plots()[i] || T.plotOwners[i]) return;
+    if (ctx.getCoins() < PLOT_PRICE) { T.feedLine(`This land costs ${PLOT_PRICE} coins.`); return; }
+    ctx.addCoins(-PLOT_PRICE);
+    T.plotOwners[i] = { k: myKey(), n: ctx.getPlayerName(), b: 0 };
+    if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'buyPlot', i, k: myKey(), n: ctx.getPlayerName() });
+    else sendPlots();
+    T.feedLine(`You bought this land. Bring ${PLANTER_WOOD} wood to build a planter box on it (up to ${PLOT_PLANTERS}).`);
+    ctx.playSfx?.('buy');
+    renderSigns();
+    T.save();
+  };
+  const buildPlanter = (i) => {
+    if (!ownsPlot(i)) return;
+    const b = builtOn(i);
+    if (b >= PLOT_PLANTERS) return;
+    if ((T.goods.wood || 0) < PLANTER_WOOD) {
+      T.feedLine(`A planter box takes ${PLANTER_WOOD} wood — you have ${T.goods.wood || 0}. Chop a tree and split its logs.`);
+      return;
+    }
+    T.goods.wood -= PLANTER_WOOD;
+    T.renderGoods();
+    T.plotOwners[i].b = b + 1;
+    if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'buildPlanter', i, k: myKey(), b: b + 1 });
+    else sendPlots();
+    ctx.playSfx?.('wood');
+    T.feedLine(b + 1 === 1
+      ? 'Built a planter box. Plant seeds in it — the farmers sell them.'
+      : `Built a planter box (${b + 1}/${PLOT_PLANTERS}).`);
+    renderSigns();
+    T.save();
+  };
+  const plotActs = () => {
+    const i = plotNear();
+    if (i < 0) return [];
+    if (!T.plotOwners[i]) return [{ key: `plot:${i}`, label: `Buy this land (${PLOT_PRICE} 🪙)`, onClick: () => buyPlot(i) }];
+    if (ownsPlot(i) && builtOn(i) < PLOT_PLANTERS) {
+      return [{ key: `planter:${i}`, label: `Build a planter box (${PLANTER_WOOD} 🪵)`, onClick: () => buildPlanter(i) }];
+    }
+    return [];
+  };
+  const cleanPlots = (p) => {
+    const out = {};
+    if (!p || typeof p !== 'object') return out;
+    for (const [i, v] of Object.entries(p)) {
+      const idx = Number(i);
+      if (Number.isInteger(idx) && idx >= 0 && idx < plots().length && typeof v?.k === 'string') {
+        out[idx] = { k: v.k, n: typeof v.n === 'string' ? v.n.slice(0, 40) : '', b: Math.max(0, Math.min(PLOT_PLANTERS, Math.floor(Number(v.b) || 0))) };
+      }
+    }
+    return out;
+  };
+
   // Shared town: the host keeps who owns which
   const handleFarmNet = (from, d) => {
     if (d.op === 'fields') {
       if (T.netMode === 'client' && from === T.net.hostId()) { T.fieldOwners = cleanOwners(d.f); T.assignWork(); renderSigns(); }
+      return true;
+    }
+    if (d.op === 'plots') {
+      if (T.netMode === 'client' && from === T.net.hostId()) { T.plotOwners = cleanPlots(d.p); renderSigns(); }
+      return true;
+    }
+    if (d.op === 'buyPlot' || d.op === 'buildPlanter') {
+      if (T.netMode !== 'host' || !T.ready) return true;
+      const i = Number(d.i);
+      if (Number.isInteger(i) && i >= 0 && i < plots().length && typeof d.k === 'string') {
+        const o = T.plotOwners[i];
+        if (d.op === 'buyPlot' && !o) T.plotOwners[i] = { k: d.k, n: typeof d.n === 'string' ? d.n.slice(0, 40) : '', b: 0 };
+        else if (d.op === 'buildPlanter' && o?.k === d.k) o.b = Math.max(o.b, Math.min(PLOT_PLANTERS, Math.floor(Number(d.b) || 0)));
+        renderSigns();
+      }
+      sendPlots();
       return true;
     }
     if (d.op !== 'buyField') return false;
@@ -191,26 +382,38 @@ export function installTownFarming(T, ctx) {
     return out;
   };
 
-  // ── Planting anywhere / picking ──
-  // Where a seed would go: just in front of the player, on dry open ground (null: not here)
+  // ── Planting (only in the player's own planter boxes) / picking ──
+  // Where a seed would go: the free spot in one of the player's planter boxes nearest them
+  // (null: none in reach)
   const plantSpot = () => {
     if (T.inRoom || T.jail || T.seeds <= 0 || T.veg.length >= VEG_MAX) return null;
-    const pm = ctx.getPlayerModel();
-    if (!pm) return null;
-    pm.getWorldQuaternion(_q);
-    const f = _v.set(0, 0, 1).applyQuaternion(_q).setY(0).normalize();
     const p = T.playerPos();
-    const x = p.x + f.x * PLANT_AHEAD;
-    const z = p.z + f.z * PLANT_AHEAD;
-    if (ctx.isOverWater(x, z) || T.rooms.roomAt(x, z) || T.veg.some((v) => dist2(v.x, v.z, x, z) < VEG_GAP)) return null;
-    if (!Number.isFinite(ctx.getGroundY(x, z)) || Math.abs(ctx.getGroundY(x, z) - p.y) > 0.6) return null;
-    return { x, z };
+    let best = null;
+    let bd = PLANT_DIST;
+    for (const i of myPlots()) {
+      for (let b = 0; b < builtOn(i); b++) {
+        for (let k = 0; k < PLANTER_SLOTS; k++) {
+          if (T.veg.some((v) => v.p === i && v.b === b && v.s === k)) continue;
+          const at = slotSpot(i, b, k);
+          const d = at ? dist2(p.x, p.z, at.x, at.z) : Infinity;
+          if (d < bd) { bd = d; best = { p: i, b, s: k, x: at.x, z: at.z }; }
+        }
+      }
+    }
+    return best;
+  };
+  // (why not: the town book's Plant button)
+  const plantHint = () => {
+    if (T.seeds <= 0) return 'No seeds — the farmers sell them.';
+    if (!myPlots().length) return `Buy some land by the fields (${PLOT_PRICE} coins at its signpost) and build a planter box on it.`;
+    if (!myPlots().some((i) => builtOn(i) > 0)) return `Build a planter box on your land (${PLANTER_WOOD} wood).`;
+    return 'Stand by one of your planter boxes with a free spot to plant.';
   };
   const plant = () => {
     const at = plantSpot();
-    if (!at) return;
+    if (!at) { T.feedLine(plantHint()); return; }
     T.seeds -= 1;
-    T.veg.push({ x: at.x, z: at.z, g: 0, w: 0 });
+    T.veg.push({ x: at.x, z: at.z, p: at.p, b: at.b, s: at.s, g: 0, w: 0 });
     T.feedLine(T.veg.length === 1
       ? 'Planted a seed. It\'ll grow a veg by tomorrow — or water it with the hose and it\'s ready in no time.'
       : `Planted a seed (${T.seeds} left).`);
@@ -231,7 +434,7 @@ export function installTownFarming(T, ctx) {
     const out = [];
     if (T.hose?.watering) return out;
     if (ripeVegNear()) out.push({ key: 'pickVeg', label: 'Pick your veg', onClick: pickVeg });
-    out.push(...fieldActs());
+    out.push(...fieldActs(), ...plotActs());
     if (plantSpot()) out.push({ key: 'plant', label: `Plant a seed (${T.seeds})`, onClick: plant });
     return out;
   };
@@ -250,8 +453,9 @@ export function installTownFarming(T, ctx) {
   };
   // The hose is a grabbable (townGrab.js — ✋ Grab the hose near its tap with empty hands, ✋ Drop
   // it; while held the Block bar is 💧 Water)
+  // (the nearest tap by the player's own land — or, held, the one it's from)
   const tapDistance = () => {
-    const A = tapSpot();
+    const A = tapSpot() ?? nearestTap();
     if (!A || !farm) return Infinity;
     const p = T.playerPos();
     return dist2(p.x, p.z, A.x, A.z);
@@ -265,7 +469,9 @@ export function installTownFarming(T, ctx) {
     grab: () => {
       T.fishing = null;
       T.stopFishingRig?.();
-      T.hose = { watering: false, dropAt: 0 };
+      const tap = nearestTap();
+      if (!tap) return false;
+      T.hose = { tap, watering: false, dropAt: 0 };
       ctx.setPositionConstraint(hoseConstraint);
       T.feedLine(ctx.hasGyro()
         ? 'Got the hose. Point it with the phone and hold Water.'
@@ -274,6 +480,7 @@ export function installTownFarming(T, ctx) {
     },
     drop: ({ keepConstraint = false, quiet = false } = {}) => {
       if (!T.hose) return;
+      const A = T.hose.tap;
       T.hose = null;
       keyDown = false;
       if (!keepConstraint) ctx.setPositionConstraint(null);
@@ -281,7 +488,8 @@ export function installTownFarming(T, ctx) {
         farm.hose.visible = false;
         farm.nozzle.visible = false;
       }
-      if (!quiet) T.feedLine(tapDistance() < HOSE_GRAB_DIST ? 'Hose hung back on the tap.' : 'The hose winds back onto its reel.');
+      const p = T.playerPos();
+      if (!quiet) T.feedLine(A && dist2(p.x, p.z, A.x, A.z) < HOSE_GRAB_DIST ? 'Hose hung back on the tap.' : 'The hose winds back onto its reel.');
     },
   });
   const setWatering = (on) => {
@@ -325,7 +533,7 @@ export function installTownFarming(T, ctx) {
     farm.nozzle.position.copy(_from).addScaledVector(_dir, -0.12);
     farm.nozzle.quaternion.setFromUnitVectors(_FWD, _dir);
     // The hose: off the reel, along the ground to the player's feet, up to the nozzle
-    const t0 = farm.tapTop;
+    const t0 = A.top;
     const pts = [t0.clone(), new THREE.Vector3(A.x, T.groundAt(A.x, A.z) + 0.04, A.z + 0.3)];
     const steps = 5;
     for (let k = 1; k <= steps; k++) {
@@ -357,6 +565,7 @@ export function installTownFarming(T, ctx) {
   const updateDrops = (dt) => {
     if (!farm) return;
     const perDrop = SOIL_DRY_S / (DROP_RATE * WATER_SOAK_S);
+    const boxes = farm.live.length ? builtBoxes() : [];
     farm.live = farm.live.filter((d) => {
       d.v.y -= GRAVITY * dt;
       d.p.addScaledVector(d.v, dt);
@@ -371,7 +580,11 @@ export function installTownFarming(T, ctx) {
         }
         return false;
       }
-      const gy = T.groundAt(d.p.x, d.p.z, -100);
+      let gy = T.groundAt(d.p.x, d.p.z, -100);
+      // (a planter box's soil)
+      for (const o of boxes) {
+        if (Math.abs(d.p.x - o.x) < PLOT_BOX_LEN / 2 && Math.abs(d.p.z - o.z) < PLOT_BOX_W / 2) gy = Math.max(gy, o.soil);
+      }
       if (d.p.y > gy + 0.05) return d.p.y > gy - 20;
       for (const v of T.veg) {
         if (dist2(v.x, v.z, d.p.x, d.p.z) < HOSE_SPLASH_R) v.w = Math.min(SOIL_DRY_S, v.w + perDrop);
@@ -423,7 +636,8 @@ export function installTownFarming(T, ctx) {
       let m = farm.piles.get(v);
       if (!m) {
         m = makePile();
-        m.g.position.set(v.x, T.groundAt(v.x, v.z), v.z);
+        const at = slotSpot(v.p, v.b, v.s);
+        m.g.position.set(v.x, at ? at.y : T.groundAt(v.x, v.z), v.z);
         m.g.rotation.y = (v.x * 7.3 + v.z * 3.1) % (Math.PI * 2);
         farm.piles.set(v, m);
       }
@@ -457,18 +671,35 @@ export function installTownFarming(T, ctx) {
   // The world's (who owns which field) and the player's own (seeds, what they planted)
   const restoreFarm = (state, own) => {
     T.fieldOwners = cleanOwners(state?.fieldOwners);
+    T.plotOwners = cleanPlots(state?.plotOwners);
     T.seeds = Math.max(0, Math.min(SEEDS_MAX, Math.floor(own?.seeds || 0)));
-    T.veg = (Array.isArray(own?.veg) ? own.veg : []).slice(0, VEG_MAX)
-      .filter((v) => Number.isFinite(v?.x) && Number.isFinite(v?.z))
-      .map((v) => ({ x: v.x, z: v.z, g: Math.max(0, Math.min(1, Number(v.g) || 0)), w: Math.max(0, Math.min(SOIL_DRY_S, Number(v.w) || 0)) }));
     // (a shared town: the player's own record of what they bought, until the host's word)
     for (const i of own?.myFields ?? []) if (!T.fieldOwners[i] && T.mp() && fields()[i]) T.fieldOwners[i] = { k: myKey(), n: ctx.getPlayerName() };
+    for (const r of Array.isArray(own?.myPlots) ? own.myPlots : []) {
+      const i = Number(r?.i);
+      if (!T.mp() || !plots()[i] || (T.plotOwners[i] && T.plotOwners[i].k !== myKey())) continue;
+      const b = Math.max(0, Math.min(PLOT_PLANTERS, Math.floor(Number(r.b) || 0)));
+      T.plotOwners[i] = { k: myKey(), n: ctx.getPlayerName(), b: Math.max(b, T.plotOwners[i]?.b || 0) };
+    }
+    // What's planted: only in the player's planter boxes (a seed planted anywhere by an older
+    // save goes back in the bag)
+    const seen = new Set();
+    T.veg = [];
+    for (const v of (Array.isArray(own?.veg) ? own.veg : []).slice(0, VEG_MAX)) {
+      const key = `${v?.p}.${v?.b}.${v?.s}`;
+      const at = Number.isInteger(v?.p) && ownsPlot(v.p) && v.b < builtOn(v.p) && v.s >= 0 && v.s < PLANTER_SLOTS
+        && !seen.has(key) ? slotSpot(v.p, v.b, v.s) : null;
+      if (!at) { T.seeds = Math.min(SEEDS_MAX, T.seeds + 1); continue; }
+      seen.add(key);
+      T.veg.push({ x: at.x, z: at.z, p: v.p, b: v.b, s: v.s, g: Math.max(0, Math.min(1, Number(v.g) || 0)), w: Math.max(0, Math.min(SOIL_DRY_S, Number(v.w) || 0)) });
+    }
     renderSigns();
   };
   const farmSnapshot = () => ({
     seeds: T.seeds,
     myFields: myFields(),
-    veg: T.veg.map((v) => ({ x: Math.round(v.x * 100) / 100, z: Math.round(v.z * 100) / 100, g: Math.round(v.g * 1000) / 1000, w: Math.round(v.w) })),
+    myPlots: myPlots().map((i) => ({ i, b: builtOn(i) })),
+    veg: T.veg.map((v) => ({ x: Math.round(v.x * 100) / 100, z: Math.round(v.z * 100) / 100, p: v.p, b: v.b, s: v.s, g: Math.round(v.g * 1000) / 1000, w: Math.round(v.w) })),
   });
   const resetFarm = () => {
     T.dropHeld({ quiet: true });
@@ -477,9 +708,10 @@ export function installTownFarming(T, ctx) {
 
   Object.assign(T, {
     // (the town book's Bag page: 🌱 Plant)
-    plantSeed: plant, canPlant: () => !!plantSpot(),
+    plantSeed: plant, canPlant: () => !!plantSpot(), plantHint,
     buildFarm, farmActs, farmSnapshot, fieldOwner, handleFarmNet, resetFarm, restoreFarm,
-    updateFarm,
+    updateFarm, planterObstacles, ownsPlot,
     applyFieldOwners: (f) => { T.fieldOwners = cleanOwners(f); renderSigns(); },
+    applyPlotOwners: (p) => { T.plotOwners = cleanPlots(p); renderSigns(); },
   });
 }
