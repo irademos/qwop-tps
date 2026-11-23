@@ -26,7 +26,7 @@ import * as THREE from 'three';
 import { createCartRide, CART_HALF_WIDTH, CART_FRONT, CART_BACK } from '../items/cart.js';
 import { buildItemMesh } from '../village/villageMode.js';
 import { createWoodLog } from '../items/woodLog.js';
-import { GOODS, GOOD_IDS } from './townEconomy.js';
+import { GOODS, GOOD_IDS, shownWhenHeld } from './townEconomy.js';
 import { BAG_MAX, CART_ACT_DIST, WALLET_MAX, dist2 } from './townConfig.js';
 
 const PARK_CLEARANCE = 1.1; // m from the cart's middle to a placed thing's bounds
@@ -39,7 +39,7 @@ const CART_SOUND_FULL_SPEED = 7; // m/s — the rolling sound at full volume (it
 const CART_SOLID_H = 1.1;   // m — how high the parked cart's box stands over the ground (a collider: the player bumps into it)
 const BRING_RINGS = [1.75, 2.3, 3, 4, 5.5]; // m from the player the cart's brought round to (bringCart — Get in within CART_ACT_DIST)
 // (the item model a crate of a good shows — villageMode.js buildItemMesh)
-const CRATE_ITEM = { fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'veg' };
+const CRATE_ITEM = { fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'veg', chicken: 'chicken', egg: 'egg' };
 export const CART_MAX = 30;  // goods the cart's bed holds
 const STORE_REACH = CART_ACT_DIST + 1.2; // m from the cart its store panel stays open
 // The logs stacked in the bed (cart-local, across it): a stack at each end, 3 / 2 / 3 a layer
@@ -209,7 +209,7 @@ export function installTownCart(T, ctx) {
     count: storeCount(),
     max: CART_MAX,
     bulk: true,
-    goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || T.goods[g] > 0 || T.cartStore[g] > 0).map((g) => ({
+    goods: GOOD_IDS.filter((g) => !shownWhenHeld(g) || T.goods[g] > 0 || T.cartStore[g] > 0).map((g) => ({
       id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, have: T.goods[g], stored: T.cartStore[g],
     })),
   });

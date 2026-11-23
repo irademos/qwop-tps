@@ -31,6 +31,7 @@
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
 // (prices, stock, buying, the chest's prizes) lives there too.
 
+import { createChickenMeatMesh, createEggMesh } from '../items/chickenGoods.js';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
@@ -650,6 +651,22 @@ export function buildItemMesh(kind) {
       fish.position.set(x, y, z);
       fish.rotation.y = yaw;
       g.add(fish);
+    });
+  } else if (kind === 'chicken') {
+    // Two drumsticks (Town's chicken — src/items/chickenGoods.js)
+    [[-0.02, 0, -0.035, 0.3], [0.02, 0.035, 0.035, -0.5]].forEach(([x, y, z, yaw]) => {
+      const leg = createChickenMeatMesh(0.2);
+      leg.position.set(x, y, z);
+      leg.rotation.y = yaw;
+      g.add(leg);
+    });
+  } else if (kind === 'egg') {
+    // A few eggs (Town's chickens), one lying on the others
+    [[-0.04, 0, 0, 0], [0.04, 0, -0.02, 0], [0, 0, 0.05, 0], [0, 0.07, 0.01, 1.4]].forEach(([x, y, z, tilt]) => {
+      const egg = createEggMesh(0.075);
+      egg.position.set(x, y, z);
+      egg.rotation.z = tilt;
+      g.add(egg);
     });
   } else if (kind === 'veg') {
     // A little heap of vegetables (vegetables.glb — src/items/vegModels.js; filled in once loaded)

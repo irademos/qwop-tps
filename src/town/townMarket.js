@@ -18,7 +18,7 @@
 //     a stand is told to everyone ('stand'); the host's townsfolk at another player's stand ask
 //     that player ('standAsk' → 'standAns').
 
-import { GOODS, GOOD_IDS, FOOD_IDS, RAW_IDS, SELLER_GEAR, SELLER_GOOD, SHOP_GEAR, buyBackPrice, goodPrice } from './townEconomy.js';
+import { GOODS, GOOD_IDS, FOOD_IDS, RAW_IDS, SELLER_BUYS, SELLER_GEAR, SELLER_GOOD, SHOP_GEAR, buyBackPrice, goodPrice } from './townEconomy.js';
 import { firstName } from './townPeople.js';
 import { SHOP_SELL_SPOTS } from './townStalls.js';
 import {
@@ -275,7 +275,7 @@ export function installTownMarket(T, ctx) {
     if (shuns(n)) return `${firstName(n.name)} won't trade with you`;
     if (T.goods[g] <= 0) return `You've no ${GOODS[g].label.toLowerCase()}`;
     if (n.money < sellPrice(n, g)) return `${firstName(n.name)} can't afford it`;
-    if (n.carry[g] >= CARRY_MAX) return `${firstName(n.name)} has plenty`;
+    if ((n.carry[g] || 0) >= CARRY_MAX) return `${firstName(n.name)} has plenty`;
     return null;
   };
   const playerSell = (n, g) => {
@@ -283,7 +283,7 @@ export function installTownMarket(T, ctx) {
     const price = sellPrice(n, g);
     T.goods[g] -= 1;
     T.renderGoods();
-    n.carry[g] += 1;
+    n.carry[g] = (n.carry[g] || 0) + 1;
     n.money -= price;
     tellTrade(n, g, 1, -price);
     ctx.addCoins(price);
@@ -322,12 +322,14 @@ export function installTownMarket(T, ctx) {
         },
       });
     }
-    if (T.goods[g] > 0) {
+    // (their own good, and what else they buy — SELLER_BUYS: the farmer's chicken and eggs)
+    for (const sg of [g, ...(SELLER_BUYS[n.role] ?? [])]) {
+      if (!(T.goods[sg] > 0)) continue;
       out.push({
-        label: `Sell ${GOODS[g].label.toLowerCase()} (${sellPrice(n, g)} 🪙)`, act: true,
+        label: `Sell ${GOODS[sg].label.toLowerCase()} (${sellPrice(n, sg)} 🪙)`, act: true,
         onClick: () => {
-          const why = sellBlock(n, g);
-          reopen(playerSell(n, g) ? `I'll take that. ${GOODS[g].emoji}` : why ? `${why.replace(`${firstName(n.name)} `, 'I ')}.` : 'No thanks.');
+          const why = sellBlock(n, sg);
+          reopen(playerSell(n, sg) ? `I'll take that. ${GOODS[sg].emoji}` : why ? `${why.replace(`${firstName(n.name)} `, 'I ')}.` : 'No thanks.');
         },
       });
     }

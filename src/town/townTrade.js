@@ -405,7 +405,7 @@ export function installTownTrade(T, ctx) {
     n.proxy.group.position.set(n.x, T.groundY(n), n.z);
     return n.proxy;
   };
-  const getWeaponTargets = () => (T.active && T.ready && !T.sequence ? [...weaponTargetsFor().map(proxyFor), ...(T.octopusWeaponTargets?.() ?? [])] : []);
+  const getWeaponTargets = () => (T.active && T.ready && !T.sequence ? [...weaponTargetsFor().map(proxyFor), ...(T.octopusWeaponTargets?.() ?? []), ...(T.chickenWeaponTargets?.() ?? [])] : []);
   const getMagicTargets = () => (T.active && T.ready && !T.sequence ? weaponTargetsFor().map((n) => ({
     center: new THREE.Vector3(n.x, T.groundY(n) + 0.55 * heightScale(n.url), n.z),
     radius: 0.45,
@@ -414,7 +414,7 @@ export function installTownTrade(T, ctx) {
     onHit: (b) => {
       if (n.alive && !n.fighter) T.hurt(n, fromPlayer(n), b.element === 'fire' ? ctx.magicDamage.fire : ctx.magicDamage.ice);
     },
-  })).concat(T.octopusMagicTargets?.() ?? []) : []);
+  })).concat(T.octopusMagicTargets?.() ?? [], T.chickenMagicTargets?.() ?? []) : []);
   // ── The shop (the weaponsmith behind its counter) and the wizard's stall ──
   const shopOpen = () => !!workingMerchant();
   // The weaponsmith, if they're at the counter now

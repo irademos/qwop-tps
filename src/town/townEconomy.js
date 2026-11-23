@@ -7,21 +7,31 @@
 
 // price: what one costs (coins, set — no haggling); heal: health a bite gives the player;
 // cooked: made at the campfire's pot (townCooking.js — RECIPES) — nobody else makes them, so
-// only the player sells them (from a stall); target: for jobs (townMissions.js — what's short)
+// only the player sells them (from a stall); wild: gathered by the player (the chickens —
+// townChickens.js), no townsperson makes them: like cooked, left out of shortages and shown once
+// the player has some; target: for jobs (townMissions.js — what's short)
 export const GOODS = {
   wood:  { label: 'Wood', emoji: '🪵', price: 4, target: 6 },
   fish:  { label: 'Fish', emoji: '🐟', price: 6, target: 6, food: true, heal: 2 },
   crops: { label: 'Veg',  emoji: '🥕', price: 3, target: 8, food: true, heal: 1 },
   grilledFish: { label: 'Grilled Fish', emoji: '🍢', price: 11, target: 4, food: true, heal: 4, cooked: true },
   stew:  { label: 'Stew', emoji: '🍲', price: 9, target: 4, food: true, heal: 3, cooked: true },
+  // (the chickens' — townChickens.js: a hen hit with a weapon drops a drumstick, hens lay eggs)
+  chicken: { label: 'Chicken', emoji: '🍗', price: 7, target: 4, food: true, heal: 2, wild: true },
+  egg:   { label: 'Egg', emoji: '🥚', price: 3, target: 6, food: true, heal: 1, wild: true },
 };
 export const GOOD_IDS = Object.keys(GOODS);
-export const RAW_IDS = GOOD_IDS.filter((g) => !GOODS[g].cooked);
+export const RAW_IDS = GOOD_IDS.filter((g) => !GOODS[g].cooked && !GOODS[g].wild);
+// (cooked / wild goods: shown in the goods pill, the bag, the chest, the cart only once there are some)
+export const shownWhenHeld = (g) => !!(GOODS[g].cooked || GOODS[g].wild);
 export const FOOD_IDS = GOOD_IDS.filter((g) => GOODS[g].food);
 // Who sells what: their own good (made at work — townConfig.js PRODUCE) and the gear of their
 // trade (SHOP_GEAR ids — always in stock: they make their own)
 export const SELLER_GOOD = { fisher: 'fish', farmer: 'crops', woodcutter: 'wood' };
 export const SELLER_GEAR = { fisher: ['rod'], farmer: ['seeds'] };
+// Goods a seller buys from the player besides their own (at buyBackPrice, like their own): the
+// farmer takes chicken and eggs off the player's hands
+export const SELLER_BUYS = { farmer: ['chicken', 'egg'] };
 // Everything a selling spot can show (townStalls.js)
 export const MARKET_WARES = [...Object.keys(GOODS), 'seeds', 'rod'];
 const BUY_BACK_SHARE = 0.6; // what a seller pays the player for one of their own good, as a share of its price

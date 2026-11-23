@@ -35,7 +35,7 @@
 //   - Gear (weapons, bombs…) kept in the chest too, and a bigger bag to buy.
 
 import { FOUNDING_ROLES, firstName, livesOut } from './townPeople.js';
-import { GOODS, GOOD_IDS } from './townEconomy.js';
+import { GOODS, GOOD_IDS, shownWhenHeld } from './townEconomy.js';
 import { makeTextSprite } from '../village/villageMode.js';
 import { createStoragePanel } from './townStoragePanel.js';
 import {
@@ -473,7 +473,7 @@ export function installTownHomes(T, ctx) {
     bag: bagCount(),
     bagMax: BAG_MAX,
     stored: T.store.coins,
-    goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || T.goods[g] > 0 || T.store.goods[g] > 0).map((g) => ({
+    goods: GOOD_IDS.filter((g) => !shownWhenHeld(g) || T.goods[g] > 0 || T.store.goods[g] > 0).map((g) => ({
       id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, have: T.goods[g], stored: T.store.goods[g],
     })),
   });
