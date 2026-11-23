@@ -11882,8 +11882,8 @@ async function initCore(runtimeContext) {
   };
 
   // ── The "move your phone" hint (src/controls/gyroHint.js): a gyro item (sword / wand / rod /
-  // oar / shield) or a ride steered by the phone's lean (broom, cart) out, the phone (not
-  // Use This Device) still for a while → an arm moving a phone shows how. Not over menus,
+  // oar / shield) or a ride steered by the phone's lean (broom, cart) out, the phone (or this
+  // device, with Use This Device) still for a while → an arm moving a phone shows how. Not over menus,
   // lobbies, talks or the calibration popup; drawn after the world (the game loop).
   const gyroHint = createGyroHint({ renderer });
   window.gyroHint = gyroHint;
@@ -11903,7 +11903,7 @@ async function initCore(runtimeContext) {
   const _gyroHintFrame = (dt) => {
     const g = window.phoneSwordGyro;
     let kind = null;
-    if (g?.connected && !g.localDevice && Number.isFinite(g.beta) && Number.isFinite(g.gamma)
+    if (g?.connected && Number.isFinite(g.beta) && Number.isFinite(g.gamma)
       && startOverlay?.classList.contains('hidden') && !playerDead
       && !_isSwordCalibPromptOpen() && !bossTalk.isOpen() && !village?.isOpen() && !town?.isTalking?.()
       && !_bowDraw.active && !_bombAim.active && !document.body.classList.contains('story-cut')
