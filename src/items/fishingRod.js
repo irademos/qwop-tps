@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createKoiFishMesh, createGoldenFishMesh } from './fishModels.js';
 
 // Town fishing rod: a procedural rod built like the wand / swords — origin at the grip,
 // pointing along +Z — so the game holds it as the sword weapon in rod form (FoamSword.rod,
@@ -21,9 +22,7 @@ const WRAP_COLOR = 0xe2b64a;
 const REEL_COLOR = 0x3a3d42;
 const BOBBER_TOP = 0xd83a2e;
 const BOBBER_BOTTOM = 0xf4f1ea;
-const FISH_COLOR = 0x8fb3c9;
-const GOLD_COLOR = 0xf2b632;   // the golden fish (a Town job's — townFishing.js T.questFish)
-const GOLD_SCALE = 2.4;
+const GOLD_SCALE = 2.4;       // the golden fish (a Town job's — townFishing.js T.questFish), × the catch
 const GOLD_LEAP_EVERY = 2.1;   // s between its leaps out of the water while it's on the line
 const GOLD_LEAP_S = 0.75;      // s in the air
 const GOLD_LEAP_H = 0.9;       // m at the top
@@ -121,24 +120,15 @@ function createBobber() {
   return g;
 }
 
-function createFish(color = FISH_COLOR, extra = {}) {
+// The catch (koi_fish.glb) / the golden fish (golden_fish.glb) — fishModels.js — hanging head up
+// from the hook: its head at the origin, body down along −Y
+const FISH_LENGTH = 0.26;
+function createFish(golden = false) {
   const g = new THREE.Group();
-  const mat = std(color, { metalness: 0.35, roughness: 0.4, ...extra });
-  // Hangs head up from the hook: body along Y, tail at the bottom
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.1, 14, 10), mat);
-  body.scale.set(0.4, 1, 0.75);
-  body.position.y = -0.1;
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.09, 4).rotateX(Math.PI), mat);
-  tail.scale.set(0.3, 1, 1);
-  tail.position.y = -0.23;
-  const eyeMat = std(0x111111);
-  for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.009, 6, 5), eyeMat);
-    eye.position.set(side * 0.035, -0.04, 0.03);
-    g.add(eye);
-  }
-  g.add(body, tail);
-  g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  const fish = golden ? createGoldenFishMesh(FISH_LENGTH) : createKoiFishMesh(FISH_LENGTH);
+  fish.rotation.z = Math.PI / 2; // (head +X → +Y)
+  fish.position.y = -FISH_LENGTH / 2;
+  g.add(fish);
   return g;
 }
 
@@ -169,7 +159,7 @@ export function createFishingRig(scene) {
   bobber.add(fish);
   fish.visible = false;
   // The golden fish (golden(true)): leaping out of the water by the bobber while it's on the line
-  const goldFish = createFish(GOLD_COLOR, { metalness: 0.7, roughness: 0.25, emissive: 0x6b4500, emissiveIntensity: 0.6 });
+  const goldFish = createFish(true);
   goldFish.scale.setScalar(GOLD_SCALE);
   goldFish.visible = false;
   let gold = false;

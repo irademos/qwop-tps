@@ -32,6 +32,7 @@
 // (prices, stock, buying, the chest's prizes) lives there too.
 
 import { createChickenMeatMesh, createEggMesh } from '../items/chickenGoods.js';
+import { createKoiFishMesh } from '../items/fishModels.js';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
@@ -635,21 +636,11 @@ export function buildItemMesh(kind) {
     });
     g.rotation.y = 0.3;
   } else if (kind === 'fish') {
-    const scale = std(0x7f9bb0, { metalness: 0.3, roughness: 0.4 });
-    const fin = std(0x5d7486, { roughness: 0.6 });
+    // Two koi lying on their sides (koi_fish.glb — src/items/fishModels.js)
     [[0, 0.03, -0.035, 0.2], [0.02, 0.07, 0.035, -0.25]].forEach(([x, y, z, yaw]) => {
-      const fish = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.SphereGeometry(0.06, 14, 10), scale);
-      body.scale.set(1.8, 0.6, 0.5);
-      const tail = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.06, 4), fin);
-      tail.rotation.z = -Math.PI / 2;
-      tail.scale.z = 0.25;
-      tail.position.x = -0.13;
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.008, 6, 4), std(0x111111));
-      eye.position.set(0.075, 0.01, 0.026);
-      fish.add(body, tail, eye);
+      const fish = createKoiFishMesh(0.26);
+      fish.rotation.set(Math.PI / 2, yaw, 0, 'YXZ');
       fish.position.set(x, y, z);
-      fish.rotation.y = yaw;
       g.add(fish);
     });
   } else if (kind === 'chicken') {
