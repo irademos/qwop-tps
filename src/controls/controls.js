@@ -187,6 +187,15 @@ export class PlayerControls {
     // Riding Town's broom (with holdStill): { y, yaw } — the game moves playerX / playerZ, and
     // the player's height and the body's facing are these (the camera's yaw stays this.yaw)
     this.ride = null;
+    // (a ride may also carry `pitch` (rad, nose up +) — the body tipped forward / back about a
+    // point `pivot` m over its feet — and `camPitch`: the camera's pitch eased toward it —
+    // Town's underwater dive, src/town/townDive.js)
+    // The swim clip the game wants while it moves the player itself ('swim' | 'tread' | null —
+    // the dive under water)
+    this.diveAnim = null;
+    // The stick this frame, camera-relative (−1…1): { fwd (up / W), right (D) } — read by a ride
+    // that steers by it (the dive without a gyro)
+    this.stickInput = { fwd: 0, right: 0 };
     // (x, z) → the water's surface Y there, or null (no water) — swimming (SWIM_CONFIG)
     this.swimLevel = null;
     // (x, z) → m of water over the map's real ground there (Infinity off the map)
@@ -910,6 +919,22 @@ export class PlayerControls {
     const endBoost = () => getAppState()?.setBroomBoost?.(false);
     ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach((type) => this.psBoostBtn.addEventListener(type, endBoost));
 
+    // Town, swimming: Dive — held, the player swims under water the way they face (the gyro /
+    // the stick steers); let go, they hover still (src/town/townDive.js)
+    this.psDiveBtn = createButton('ps-dive-btn', 'mobile-primary-action ps-dive-btn', 'Dive');
+    this.psDiveBtn.style.display = 'none';
+    bindPress(this.psDiveBtn, (event) => {
+      if (!this.enabled) return;
+      getAppState()?.setDiveHeld?.(true);
+      this.psDiveBtn.classList.add('ps-dive-held');
+      if (event) this.safePreventDefault(event);
+    });
+    const endDive = () => {
+      this.psDiveBtn.classList.remove('ps-dive-held');
+      getAppState()?.setDiveHeld?.(false);
+    };
+    ['touchend', 'touchcancel', 'mouseup', 'mouseleave'].forEach((type) => this.psDiveBtn.addEventListener(type, endDive));
+
     // The Block bar does what fits the weapon in hand (getBlockBarMode), decided on press:
     // block while held (sword), fire on release (gun), back to the sword (shield), or the
     // shield up while held and the wand back on release (wand)
@@ -1073,6 +1098,12 @@ export class PlayerControls {
       this.psBoostBtn.style.display = riding ? '' : 'none';
       this.psBoostBtn.classList.toggle('ps-broom-active', !!appState?.isBroomBoosting?.());
     }
+    // Town, swimming / under water: Dive (held)
+    if (this.psDiveBtn) {
+      const diveShown = !!(appState?.canDive?.() || appState?.isDiving?.());
+      this.psDiveBtn.style.display = diveShown ? '' : 'none';
+      if (!diveShown) this.psDiveBtn.classList.remove('ps-dive-held');
+    }
     // Block bar: Block (sword / wand), Fire (gun), Sword (shield), Shield (wand + a shield)
     const showPunch = !!this.getBlockBarMode();
     this.punchButton.textContent = this.getMobileAttackLabel();
@@ -1194,7 +1225,7 @@ export class PlayerControls {
   // A held button (the bow drawn, a bomb aimed): the touch layout stays put under the finger
   _holdingButton() {
     const appState = appContext.uiState.appState ?? window.appState;
-    return !!(appState?.isBowDrawing?.() || appState?.isBombAiming?.());
+    return !!(appState?.isBowDrawing?.() || appState?.isBombAiming?.() || appState?.isDiveHeld?.());
   }
 
   isTouchLayout() {
@@ -1209,7 +1240,7 @@ export class PlayerControls {
 
   // Block/fire button + the weapon button, Bow / Bomb, Shield / Bubble (+ the broom's)
   layoutMobileActionButtons() {
-    const buttons = [this.punchButton, this.psWeaponBtn1, this.psBowBtn, this.psShieldBtn, this.psBroomBtn, this.psBoostBtn];
+    const buttons = [this.punchButton, this.psWeaponBtn1, this.psBowBtn, this.psShieldBtn, this.psBroomBtn, this.psBoostBtn, this.psDiveBtn];
     buttons.forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
@@ -1238,6 +1269,8 @@ export class PlayerControls {
         if (shown(b)) place(b, { x: 1, y: rows[1]++ });
       }
       if (shown(this.psBowBtn)) place(this.psBowBtn, { x: 0, y: rows[0]++ });
+      // (Dive on top of the jump column — the thumb's spot; the jump does nothing in the water)
+      if (shown(this.psDiveBtn)) place(this.psDiveBtn, { x: 0, y: rows[0]++ });
       return;
     }
     if (this.punchButton.style.display !== 'none') this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
@@ -1247,6 +1280,7 @@ export class PlayerControls {
     // (Town's broom: the weapon column)
     this.applyMobileButtonPosition(this.psBroomBtn, { x: 2, y: 1 });
     this.applyMobileButtonPosition(this.psBoostBtn, { x: 2, y: 2 });
+    this.applyMobileButtonPosition(this.psDiveBtn, { x: 2, y: 3 });
   }
 
   setupEventListeners() {
@@ -1274,6 +1308,9 @@ export class PlayerControls {
       }
       if (e.key === " ") {
         if (e.repeat) return;
+        // (Town, swimming / under water: Space is Dive, held)
+        const appState = appContext.uiState.appState ?? window.appState;
+        if (appState?.canDive?.() || appState?.isDiving?.()) { appState.setDiveHeld?.(true); return; }
         // The jump itself runs in the game loop (see phoneSwordJumpPressed in bootstrapGameApp.js)
         window.phoneSwordJumpPressed = true;
       }
@@ -1282,6 +1319,7 @@ export class PlayerControls {
     document.addEventListener("keyup", (e) => {
       this.keysPressed.delete(e.key.toLowerCase());
       if (e.key === 'Shift') (appContext.uiState.appState ?? window.appState)?.setBroomBoost?.(false);
+      if (e.key === ' ') (appContext.uiState.appState ?? window.appState)?.setDiveHeld?.(false);
       if (e.key.toLowerCase() === 'q') (appContext.uiState.appState ?? window.appState)?.releaseBowDraw?.();
     });
     
@@ -1762,6 +1800,15 @@ export class PlayerControls {
         if (this.keysPressed.has("d")) moveDirection.x = -1;
       }
 
+      if (useJoystick) {
+        const f = this.joystickForce > 0.1 ? this.joystickForce : 0;
+        this.stickInput.fwd = Math.sin(this.joystickAngle) * f;
+        this.stickInput.right = Math.cos(this.joystickAngle) * f;
+      } else {
+        this.stickInput.fwd = moveDirection.z;
+        this.stickInput.right = -moveDirection.x;
+      }
+
       const cameraDirection = new THREE.Vector3();
       this.camera.getWorldDirection(cameraDirection);
       cameraDirection.y = 0;
@@ -1924,8 +1971,22 @@ export class PlayerControls {
 
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
+        // (YXZ: a ride's pitch tips the body about its own sideways axis, then the yaw turns it)
+        this.playerModel.rotation.order = 'YXZ';
         this.playerModel.rotation.set(0, surf ? surf.yaw : roll ? roll.yaw : this.ride ? this.ride.yaw
           : swimming && this._swimYaw != null ? this._swimYaw : this.yaw, 0);
+        const ridePitch = !surf && !roll && this.ride && Number.isFinite(this.ride.pitch) ? this.ride.pitch : 0;
+        if (ridePitch) {
+          // Tipped about a point `pivot` m over the feet (it stays put): the feet move instead
+          this.playerModel.rotation.x = -ridePitch;
+          const c = Number.isFinite(this.ride.pivot) ? this.ride.pivot : 0;
+          const yaw = this.playerModel.rotation.y;
+          const sp = Math.sin(-ridePitch), cp = Math.cos(-ridePitch);
+          // pivot − R·(0, c, 0), R = Ry(yaw)·Rx(−pitch)
+          this.playerModel.position.x -= Math.sin(yaw) * c * sp;
+          this.playerModel.position.y += c * (1 - cp);
+          this.playerModel.position.z -= Math.cos(yaw) * c * sp;
+        }
         this.playerModel.up.set(0, 1, 0);
         this.camera.up.set(0, 1, 0);
 
@@ -1984,7 +2045,8 @@ export class PlayerControls {
     this.deltaSeconds = delta;
 
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, {
-      swimming: this.isSwimming && !this._climb && !this._surface ? (this.swimMoving ? 'swim' : 'tread') : null,
+      swimming: this.diveAnim
+        || (this.isSwimming && !this._climb && !this._surface ? (this.swimMoving ? 'swim' : 'tread') : null),
       isMoving: !!this.isMoving && !this._climb && !(this._surface && !this._surface.standing),
       climbing: !!this._climb || (!!this._surface && !this._surface.standing),
       climbMoving: (!!this._climb && !!this._climbMoving) || !!this._surface?.moving
@@ -2024,7 +2086,11 @@ export class PlayerControls {
       }
     }
 
-    if (Number.isFinite(this.weaponAimPitch)) {
+    if (Number.isFinite(this.ride?.camPitch)) {
+      // (a ride that tips the body — the dive: the camera looks the way it swims)
+      const targetPitch = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.ride.camPitch));
+      this.pitch += (targetPitch - this.pitch) * (1 - Math.exp(-GYRO_LERP_SPEED * delta));
+    } else if (Number.isFinite(this.weaponAimPitch)) {
       // Phone-aimed gun / shield: the camera tilts with the aim (third person orbits the
       // other way — a lower camera looks up)
       const targetPitch = this.isFirstPersonView

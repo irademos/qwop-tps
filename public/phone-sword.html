@@ -231,6 +231,9 @@
     /* …and on it: Boost (higher + faster, uses mana) */
     #btn-boost { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
     #btn-boost.owned { display: block; }
+    /* Town, swimming: Dive — held, under water (the phone's tilt steers) */
+    #btn-dive { background: rgba(14, 116, 144, 0.55); border-color: rgba(165, 243, 252, 0.7); display: none; }
+    #btn-dive.owned { display: block; }
     /* Town fishing, once the fish is worn out: the reel takes the joystick's place (and the Block
        bar goes) — crank the handle round (clockwise) to wind the line in; the middle says Reel in
        only once the player's been getting it wrong */
@@ -458,6 +461,8 @@ Rod</button>
 Broom</button>
       <button class="ctl-btn row-btn" id="btn-boost" data-action="boostDown" data-release="boostUp">🚀
 Boost</button>
+      <button class="ctl-btn row-btn" id="btn-dive" data-action="diveDown" data-release="diveUp">🌊
+Dive</button>
       <button class="ctl-btn row-btn" id="btn-bomb" data-action="bombDown" data-release="bombUp">💣
 0</button>
       <button class="ctl-btn row-btn" id="btn-bubble" data-action="bubble">🫧
@@ -692,16 +697,17 @@ Boost</button>
     const btnRod = document.getElementById('btn-rod');
     const btnBroom = document.getElementById('btn-broom');
     const btnBoost = document.getElementById('btn-boost');
+    const btnDive = document.getElementById('btn-dive');
     // The button row above Block holds up to ACTION_ROW_MAX of the buttons shown; any more go
     // in the slots beside Block (left, then right)
     const ACTION_ROW_MAX = 5;
     const actionRow = document.getElementById('action-grid');
     const blockSides = [document.getElementById('block-side-left'), document.getElementById('block-side-right')];
-    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnRod, btnBroom, btnBoost, btnBomb, btnBubble];
+    const rowButtons = [btnDive, btnSword, btnGun, btnShield, btnWand, btnRod, btnBroom, btnBoost, btnBomb, btnBubble];
     function layoutRowButtons() {
       let n = 0;
       rowButtons.forEach((b) => {
-        const shown = b === btnWand || b === btnRod || b === btnBroom || b === btnBoost ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
+        const shown = b === btnWand || b === btnRod || b === btnBroom || b === btnBoost || b === btnDive ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
         const parent = !shown || n < ACTION_ROW_MAX ? actionRow : blockSides[n - ACTION_ROW_MAX] ?? actionRow;
         if (shown) n += 1;
         parent.appendChild(b); // (re-appended in order, so the order holds)
@@ -740,6 +746,9 @@ Boost</button>
       btnBoost.classList.toggle('owned', !!st.onBroom);
       btnBoost.classList.toggle('equipped', !!st.boosting);
       btnBoost.textContent = `🚀 Boost\n🔮${st.mana ?? 0}`;
+      // Town, swimming: Dive (held)
+      btnDive.classList.toggle('owned', !!st.canDive);
+      btnDive.classList.toggle('equipped', !!st.diving);
       // The line out (its cues buzz); once it's time to reel in, the bar's a reel
       const lineOut = !!st.reelMode;
       const reeling = lineOut && !!st.reelShow;
