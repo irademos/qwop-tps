@@ -11883,38 +11883,41 @@ async function initCore(runtimeContext) {
 
   // ── The "move your phone" hint (src/controls/gyroHint.js): a gyro item (sword / wand / rod /
   // oar / shield) or a ride steered by the phone's lean (broom, cart) out, the phone (or this
-  // device, with Use This Device) still for a while → an arm moving a phone shows how. Not over menus,
+  // device, with Use This Device) still for a while, or an item / ride out for its first time → an arm moving a phone shows how. Not over menus,
   // lobbies, talks or the calibration popup; drawn after the world (the game loop).
   const gyroHint = createGyroHint({ renderer });
   window.gyroHint = gyroHint;
   const _gyroHintPose = new THREE.Quaternion();
+  // What's out that the gyro works: { kind (the motion), item (first-time hints) } or null
   const _gyroHintKind = () => {
     const id = _heldWeaponId();
-    if (id === OAR_ITEM_ID) return 'tilt';
-    if (id === FISHING_ROD_ITEM_ID) return 'cast';
-    if (id === MAGIC_WAND_ITEM_ID) return 'wand';
-    if (id === FOAM_SWORD_ITEM_ID) return 'swing';
-    if (id === SHIELD_ITEM_ID) return 'aim';
-    if (_broomRide?.isRiding() || town?.inCart?.()) return 'tilt';
+    if (id === OAR_ITEM_ID) return { kind: 'tilt', item: 'oar' };
+    if (id === FISHING_ROD_ITEM_ID) return { kind: 'cast', item: 'rod' };
+    if (id === MAGIC_WAND_ITEM_ID) return { kind: 'wand', item: 'wand' };
+    if (id === FOAM_SWORD_ITEM_ID) return { kind: 'swing', item: 'sword' };
+    if (id === SHIELD_ITEM_ID) return { kind: 'aim', item: 'shield' };
+    if (_broomRide?.isRiding()) return { kind: 'tilt', item: 'broom' };
+    if (town?.inCart?.()) return { kind: 'tilt', item: 'cart' };
     return null;
   };
   const _GYRO_HINT_BLOCKERS = '.duel-lobby:not(.hidden), .match-results:not(.hidden), '
     + '.endless-panel:not(.hidden), #game-over-overlay:not(.hidden), #classic-stage-overlay:not(.hidden)';
   const _gyroHintFrame = (dt) => {
     const g = window.phoneSwordGyro;
-    let kind = null;
+    let what = null;
     if (g?.connected && Number.isFinite(g.beta) && Number.isFinite(g.gamma)
       && startOverlay?.classList.contains('hidden') && !playerDead
       && !_isSwordCalibPromptOpen() && !bossTalk.isOpen() && !village?.isOpen() && !town?.isTalking?.()
       && !_bowDraw.active && !_bombAim.active && !document.body.classList.contains('story-cut')
       && !document.querySelector(_GYRO_HINT_BLOCKERS)) {
-      kind = _gyroHintKind();
+      what = _gyroHintKind();
     }
-    if (kind) _pswDeviceQuat(Number.isFinite(g.alpha) ? g.alpha : 0, g.beta, g.gamma, _gyroHintPose);
+    if (what) _pswDeviceQuat(Number.isFinite(g.alpha) ? g.alpha : 0, g.beta, g.gamma, _gyroHintPose);
     gyroHint.update(dt, {
-      wanted: !!kind,
-      kind: kind || 'swing',
-      pose: kind ? _gyroHintPose : null,
+      wanted: !!what,
+      kind: what?.kind || 'swing',
+      item: what?.item || null,
+      pose: what ? _gyroHintPose : null,
       tutorial: !!showdownTutorial?.isActive(),
     });
     gyroHint.render();

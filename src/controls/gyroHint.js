@@ -3,7 +3,8 @@
 // a while, a little arm holding a phone shows how to move it — swinging, casting, tilting or
 // turning — with a line of text under it. Moving the phone puts it away; after the player has
 // done that HINT_MOVES_TO_STOP times it never shows again (localStorage HINT_STORE_KEY) —
-// except in the tutorial, where it always may.
+// except in the tutorial, where it always may. The first time each item / ride is out it shows
+// straight away, still phone or not, whatever that count (SEEN_STORE_KEY).
 //
 // Like the Endless character chooser (src/endless/characterChooser.js) it is its own little
 // scene, drawn with the game's renderer into the rect of a DOM element (`.gyro-hint-stage`)
@@ -13,7 +14,8 @@
 // The motions are procedural: the arm turns about its shoulder, the elbow and wrist bend.
 //
 // createGyroHint({ renderer })
-//   → { update(dt, { wanted, kind, pose, tutorial }), render(), hide(), reset(), debug() }
+//   → { update(dt, { wanted, kind, item, pose, tutorial }), render(), hide(), reset(), debug() }
+//   item: what's out — 'sword' | 'wand' | 'rod' | 'oar' | 'shield' | 'broom' | 'cart' (first-time hints)
 //   kind: 'swing' | 'wand' | 'cast' | 'tilt' | 'aim'; pose: the phone's orientation (a
 //   THREE.Quaternion — any frame, only its changes count) or null
 import * as THREE from 'three';
@@ -28,6 +30,11 @@ const STILL_DEG = 6;            // turning less than this counts as still
 const MOVED_DEG = 22;           // while it shows: turned this far from where it was → moved
 const HINT_MOVES_TO_STOP = 3;   // moved this many times with it up → never again
 const HINT_STORE_KEY = 'sq:gyroHintMoves';
+// The first time each item / ride is out with a gyro (whatever the count above), the hint
+// shows FIRST_DELAY_S after it comes out, still or not, until the phone's moved; items that
+// have had theirs: localStorage SEEN_STORE_KEY
+const FIRST_DELAY_S = 0.8;
+const SEEN_STORE_KEY = 'sq:gyroHintSeen';
 const FADE_RATE = 6;            // 1/s, in and out
 
 const TEXT = {
@@ -76,6 +83,13 @@ const readMoves = () => {
 };
 const writeMoves = (n) => {
   try { localStorage.setItem(HINT_STORE_KEY, String(n)); } catch { /* private mode */ }
+};
+
+const readSeen = () => {
+  try { return new Set(JSON.parse(localStorage.getItem(SEEN_STORE_KEY) || '[]')); } catch { return new Set(); }
+};
+const writeSeen = (set) => {
+  try { localStorage.setItem(SEEN_STORE_KEY, JSON.stringify([...set])); } catch { /* private mode */ }
 };
 
 // 0 → 1 quickly, hold, 1 → 0 slowly: a swipe and its way back (u in 0 … 1 over one loop)
@@ -173,6 +187,10 @@ export function createGyroHint({ renderer }) {
   let stillT = 0;
   const ref = new THREE.Quaternion();
   let hasRef = false;
+  const seen = readSeen();
+  let item = null;        // what's out now ('sword', 'rod', 'broom'…), how long it's been out
+  let itemT = 0;
+  let firstItem = null;   // showing for that item's first time
   let forced = false;   // shown from the dev console (debug().show) until hide()
 
   const setShown = (on) => {
@@ -242,13 +260,28 @@ export function createGyroHint({ renderer }) {
       .multiply(_q.setFromAxisAngle(Y, wristRoll));
   };
 
-  const update = (dt, { wanted = false, kind: k = 'swing', pose: devicePose = null, tutorial = false } = {}) => {
-    const allowed = wanted && !!devicePose && (tutorial || moves < HINT_MOVES_TO_STOP);
+  const update = (dt, { wanted = false, kind: k = 'swing', item: it = null, pose: devicePose = null, tutorial = false } = {}) => {
+    const can = wanted && !!devicePose;
+    const allowed = can && (tutorial || moves < HINT_MOVES_TO_STOP);
+    // What's out, and for how long
+    const nowItem = can ? it : null;
+    if (nowItem !== item) {
+      item = nowItem;
+      itemT = 0;
+      // (a first-time hint is for the item it came up for)
+      if (shown && firstItem && firstItem !== item) { setShown(false); firstItem = null; }
+    } else if (item) {
+      itemT += dt;
+    }
+    const firstTime = !!item && !seen.has(item);
+    // (≈ 24 KB: fetched as soon as a gyro item's out, so a first-time hint isn't kept waiting)
+    if (can) load();
     if (forced) {
       // (left as it is)
-    } else if (!allowed) {
+    } else if (!can || (!allowed && !firstItem && !firstTime)) {
       hasRef = false;
       stillT = 0;
+      firstItem = null;
       if (shown) setShown(false);
     } else {
       if (!hasRef) { ref.copy(devicePose); hasRef = true; stillT = 0; }
@@ -256,10 +289,20 @@ export function createGyroHint({ renderer }) {
       if (shown) {
         if (deg > MOVED_DEG) {
           setShown(false);
-          if (!tutorial) { moves += 1; writeMoves(moves); }
+          if (firstItem) { seen.add(firstItem); writeSeen(seen); firstItem = null; }
+          else if (!tutorial) { moves += 1; writeMoves(moves); }
           ref.copy(devicePose);
           stillT = 0;
         }
+      } else if (firstTime && itemT >= FIRST_DELAY_S && (bones || failed)) {
+        // Its first time out: show it now, from where the phone is
+        kind = k;
+        firstItem = item;
+        ref.copy(devicePose);
+        stillT = 0;
+        setShown(true);
+      } else if (!allowed) {
+        stillT = 0;
       } else if (deg > STILL_DEG) {
         ref.copy(devicePose);
         stillT = 0;
@@ -317,6 +360,7 @@ export function createGyroHint({ renderer }) {
 
   const hide = () => {
     forced = false;
+    firstItem = null;
     if (shown) setShown(false);
     fade = 0;
     hasRef = false;
@@ -330,9 +374,10 @@ export function createGyroHint({ renderer }) {
     render,
     hide,
     // Forget the "moved it N times" count (dev console)
-    reset: () => { moves = 0; writeMoves(0); },
+    // Forget which items have had their first-time hint too
+    reset: () => { moves = 0; writeMoves(0); seen.clear(); writeSeen(seen); },
     debug: () => ({
-      moves, shown, fade, stillT, kind, loaded: !!bones, failed,
+      moves, shown, fade, stillT, kind, loaded: !!bones, failed, item, firstItem, seen: [...seen],
       // Show it now with a kind, for a look (dev console: gyroHint.debug().show('cast'))
       show: async (k = 'swing') => { await load(); kind = k; forced = true; setShown(true); },
       setTime: (s) => { t = s; pose(); },
