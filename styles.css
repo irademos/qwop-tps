@@ -5654,3 +5654,50 @@ body.story-cut .story-hud > :not(.story-fade):not(.story-flash):not(.town-talk) 
   .gyro-hint-stage { width: 140px; height: 116px; }
   .gyro-hint-text { font-size: 13px; }
 }
+
+/* ── Town: diving under water (src/town/townDive.js) ───────────────────────── */
+.ps-dive-btn {
+  background: rgba(14, 116, 144, 0.6) !important;
+  color: #fff !important;
+  border: 1px solid rgba(165, 243, 252, 0.75) !important;
+}
+.ps-dive-btn.ps-dive-held {
+  background: rgba(8, 145, 178, 0.95) !important;
+  border-color: #fff !important;
+  transform: scale(1.12);
+}
+/* Under water: nothing to hold, throw or jump — Dive and the camera only */
+body.player-diving #ps-weapon-btn-1,
+body.player-diving #ps-bow-btn,
+body.player-diving #ps-shield-btn,
+body.player-diving #ps-broom-btn,
+body.player-diving #jump-button {
+  display: none !important;
+}
+/* The camera under the surface: a blue-green tint, darker toward the edges, and soft light
+   rippling down from above (the fog does the distance — townDive.js `createUnderwater`) */
+.underwater-tint {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(40, 140, 170, 0.10) 0%, rgba(6, 40, 70, 0.55) 100%),
+    linear-gradient(180deg, rgba(120, 210, 230, 0.22) 0%, rgba(10, 60, 100, 0.30) 100%);
+}
+.underwater-tint.on { opacity: 1; }
+.underwater-tint::after {
+  content: '';
+  position: absolute;
+  inset: -20%;
+  background: repeating-linear-gradient(105deg, rgba(255, 255, 255, 0.05) 0 18px, transparent 18px 60px);
+  animation: underwater-rays 7s linear infinite;
+  mask-image: linear-gradient(180deg, #000 0%, transparent 70%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 70%);
+}
+@keyframes underwater-rays {
+  from { transform: translateX(0); }
+  to { transform: translateX(60px); }
+}

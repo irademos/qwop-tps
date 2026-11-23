@@ -84,6 +84,7 @@ import { createStoryMode } from '../story/storyMode.js';
 import { OAR_REST_SWING, OAR_REST_TILT, OAR_TIP_AT, oarGripPoint, oarStrokeDuration, oarStrokePose } from '../items/oar.js';
 import { CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
 import { createBroomRide } from '../items/broom.js';
+import { createTownDive } from '../town/townDive.js';
 import { CANOE_STAND_Z, WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
 import { setBowDrawn } from '../combat/shieldThreats.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE, STAGE_BOSS_SCALE } from '../characters/pembertonBoss.js';
@@ -873,6 +874,7 @@ async function initCore(runtimeContext) {
   let _townLoadout = null;
   // Town's flying broom being ridden (src/items/broom.js; created with the town)
   let _broomRide = null;
+  let _townDive = null;   // Town: diving under water (src/town/townDive.js)
   // Asks for a gyro recalibration when a gyro item comes out (set further down, once the
   // calibration popup is in — _equipByPlayer / the broom)
   let _gyroItemCalibPrompt = null;
@@ -7227,6 +7229,28 @@ async function initCore(runtimeContext) {
     );
   };
 
+  // Town's dive (src/town/townDive.js): the phone's turn / tip since its pose at the last reset,
+  // the same quaternion math as the gun / shield aim above — { yaw (+ left), pitch (+ up) } or
+  // null (no gyro)
+  const _diveGyro = { neutralQ: new THREE.Quaternion(), earthToGameQ: new THREE.Quaternion(), set: false };
+  const _readDiveGyro = (reset) => {
+    const g = window.phoneSwordGyro;
+    if (!g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) { _diveGyro.set = false; return null; }
+    _pswDeviceQuat(Number.isFinite(g.alpha) ? g.alpha : 0, g.beta, g.gamma, _weaponAimDevQ);
+    if (reset || !_diveGyro.set) {
+      _diveGyro.set = true;
+      _diveGyro.neutralQ.copy(_weaponAimDevQ);
+      _pswEarthToGame(_diveGyro.neutralQ, _diveGyro.earthToGameQ);
+    }
+    const R = _weaponAimRelQ.copy(_weaponAimDevQ).multiply(_weaponAimTmpQ.copy(_diveGyro.neutralQ).invert());
+    R.premultiply(_diveGyro.earthToGameQ).multiply(_weaponAimTmpQ.copy(_diveGyro.earthToGameQ).invert());
+    if (R.w < 0) { R.x = -R.x; R.y = -R.y; R.z = -R.z; R.w = -R.w; }
+    const yaw = 2 * Math.atan2(R.y, R.w);
+    _weaponAimTmpQ.setFromAxisAngle(_PSW_UP, -yaw).multiply(R);
+    _weaponAimV.set(0, 0, 1).applyQuaternion(_weaponAimTmpQ);
+    return { yaw, pitch: Math.atan2(_weaponAimV.y, Math.hypot(_weaponAimV.x, _weaponAimV.z)) };
+  };
+
   const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
   const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
   const phoneSwordQrUrl = document.getElementById('phone-sword-qr-url');
@@ -7824,6 +7848,10 @@ async function initCore(runtimeContext) {
     } else if (action === 'broom') {
       // Town: on / off the flying broom
       _toggleBroom();
+    } else if (action === 'diveDown' || action === 'diveUp') {
+      // Town, swimming: under water while it's held (townDive.js)
+      _townDive?.setHeld(action === 'diveDown');
+      playerControls?.refreshActionButtons?.();
     } else if (action === 'boostDown' || action === 'boostUp') {
       // Town, on the broom: boost while the button's held (uses mana)
       _setBroomBoost(action === 'boostDown');
@@ -7904,6 +7932,9 @@ async function initCore(runtimeContext) {
       hasBroom: !!_townLoadout?.hasBroom,
       onBroom: !!_broomRide?.isRiding(),
       boosting: !!_broomRide?.isBoosting(),
+      // Town, swimming: the Dive button (held) — shown / held down
+      canDive: !!(_townDive?.canDive() || _townDive?.isUnder()),
+      diving: !!_townDive?.isHeld(),
       canUnequip: !!_townLoadout,
       // (the night octopus beaten: the 🗡/✋ button picks the oar back up — townOctopus.js)
       oarBack: !!town?.canoeArmedUntilOar?.() && !isOarEquipped(),
@@ -8587,6 +8618,11 @@ async function initCore(runtimeContext) {
     toggleBroom: () => _toggleBroom(),
     isBroomBoosting: () => !!_broomRide?.isBoosting(),
     setBroomBoost: (on) => _setBroomBoost(!!on),
+    // Town, swimming: Dive (held) — under water while it's held (src/town/townDive.js)
+    canDive: () => !!_townDive?.canDive(),
+    isDiving: () => !!_townDive?.isUnder(),
+    isDiveHeld: () => !!_townDive?.isHeld(),
+    setDiveHeld: (on) => { _townDive?.setHeld(!!on); _phoneSwordStatusNow?.(); },
     // Town: something grabbed — the Block bar is its mode (the hose's 'water'; null: none), held
     // down: useTownHeld(true), let go: false
     getTownHeldBar: () => (town?.isActive() ? town.heldBar() : null),
@@ -10070,6 +10106,7 @@ async function initCore(runtimeContext) {
   };
 
   const _resetForMenu = () => {
+    _townDive?.clear();
     playerControls?.swimReset?.();   // (swimming's out-of-breath sequence — _swimReset)
     giant.release();
     _fishCamTurn = null;
@@ -10960,6 +10997,7 @@ async function initCore(runtimeContext) {
   // and back up washed up on the nearest dry shore, one health less ──
   const SWIM_ENERGY_S = 30;        // s of swimming on a full bar
   const SWIM_TREAD_DRAIN = 0.5;    // treading water drains this × as fast
+  const SWIM_DIVE_DRAIN = 1.2;     // under water (Town's dive — townDive.js), this × as fast
   const SWIM_LOW = 0.25;           // the bar pulses red below this
   const SWIM_DROWN_DAMAGE = 1;     // health segments lost running out (not in Story — no health)
   const SWIM_SHORE_MAX_R = 160;    // m searched for dry land
@@ -11123,13 +11161,14 @@ async function initCore(runtimeContext) {
         _swimDrown = null;
       }
     }
-    const swimming = !!playerControls.isSwimming && !playerDead;
+    const diving = !!_townDive?.isUnder() && !playerDead;
+    const swimming = (!!playerControls.isSwimming || diving) && !playerDead;
     if (swimming && !_swimWas) _swimEnergy = 1;
-    if (swimming) _swimSplashes(dt, !_swimWas);
+    if (swimming && !diving) _swimSplashes(dt, !_swimWas);
     _swimSplash.update(dt);
     _swimWas = swimming;
     if (swimming && !_swimDrown) {
-      _swimEnergy -= (dt / SWIM_ENERGY_S) * (playerControls.swimMoving ? 1 : SWIM_TREAD_DRAIN);
+      _swimEnergy -= (dt / SWIM_ENERGY_S) * (diving ? SWIM_DIVE_DRAIN : playerControls.swimMoving ? 1 : SWIM_TREAD_DRAIN);
       if (_swimEnergy <= 0) _swimOutOfBreath();
     }
     const show = swimming && !(_swimDrown?.shoreDone);
@@ -11600,6 +11639,35 @@ async function initCore(runtimeContext) {
       _phoneSwordStatusNow?.();
     },
   });
+  // Town, swimming: hold Dive to swim under water — the gyro (or the stick) turns / tips the
+  // player, Dive held swims them the way they face (src/town/townDive.js)
+  _townDive = createTownDive({
+    scene,
+    getControls: () => playerControls,
+    getPlayerModel: () => playerModel,
+    getWaterLevel: (x, z) => {
+      const level = _activeMap?.water?.(x, z);
+      return Number.isFinite(level) ? level : null;
+    },
+    getBottom: (x, z) => {
+      const level = _activeMap?.water?.(x, z);
+      return Number.isFinite(level) ? level - _waterDepthAt(x, z) : _glbResolveHeight(x, z);
+    },
+    heightScale: () => glbCharacterConfig.heightScaleByUrl[playerModel?.userData?.qwopRig?.characterUrl] ?? 1,
+    readGyro: (reset) => _readDiveGyro(reset),
+    allowed: () => !!town?.isActive() && !playerDead && !town.isIndoors() && !_broomRide?.isRiding(),
+    putAway: () => { if (_heldWeaponId()) _putWeaponsAway(); },
+    getNight: () => town?.nightLevel?.() ?? 0,
+    onChange: () => { playerControls?.refreshActionButtons?.(); _phoneSwordStatusNow?.(); },
+    onDive: (c) => {
+      const level = _activeMap?.water?.(c.x, c.z);
+      if (!Number.isFinite(level)) return;
+      _swimSplash.drops({ x: c.x, y: level, z: c.z, n: 14, speed: 0.7, up: 2, spread: 0.8 });
+      _swimSplash.ring(c.x, level, c.z, 0.12, SWIM_RING);
+      audioManager.playSound?.('splash', { volume: 0.6 });
+    },
+  });
+  window.townDive = _townDive; // (dev console: townDive.debug())
   // Boost on the broom while held (climbing, faster, BOOST_MANA_PER_S mana a second — src/items/broom.js)
   const _setBroomBoost = (on) => {
     if (!_broomRide.isRiding() || on === _broomRide.isBoosting()) return;
@@ -12111,12 +12179,15 @@ async function initCore(runtimeContext) {
     giant.update(frameDelta, playerModel?.position);
     // (Town's cart the same way — townCart.js)
     town?.cartBeforeControls(frameDelta);
+    // (Town: diving under water — townDive.js; it places the player before the controls too)
+    _townDive?.update(frameDelta);
     playerControls.update();
     _updateSwim(frameDelta);
     _broomRide?.afterControls();
     town?.cartAfterControls();
     // (the camera moved along with where the body ended up this frame — no lag at speed)
     playerControls.followPlayerModel?.();
+    _townDive?.afterControls(frameDelta, camera);
     updateBloodEffects(frameDelta);
     updateBulletImpacts(frameDelta);
     updateExplosionEffects(frameDelta);
@@ -13141,7 +13212,7 @@ async function initCore(runtimeContext) {
       if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
-        if (!_classicMode && !_broomRide?.isRiding() && !town?.inCart() && !playerControls.isSwimming
+        if (!_classicMode && !_broomRide?.isRiding() && !town?.inCart() && !playerControls.isSwimming && !_townDive?.isUnder()
           && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic (or on the broom, or swimming)
           _psJumpVelY = PS_JUMP_FORCE;
           window.phoneSwordAirborne = true;
