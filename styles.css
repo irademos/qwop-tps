@@ -5582,3 +5582,43 @@ body.story-cut .story-hud > :not(.story-fade):not(.story-flash):not(.town-talk) 
   background: #eef3ff;
   pointer-events: none;
 }
+
+/* ── "Move your phone" hint (src/controls/gyroHint.js): an arm moving a phone, drawn by the
+   game's renderer into .gyro-hint-stage (the 3D shows through it — keep it transparent),
+   with a line of text under it. Over the world, low enough to clear the tutorial panel. */
+.gyro-hint {
+  position: fixed;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%) scale(0.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.gyro-hint.is-shown {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+.gyro-hint-stage {
+  width: 180px;
+  height: 150px;
+}
+.gyro-hint-text {
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--surface-hud);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: 600 14px/1.3 var(--font-ui);
+  text-align: center;
+}
+@media (max-width: 600px), (max-height: 480px) {
+  .gyro-hint-stage { width: 140px; height: 116px; }
+  .gyro-hint-text { font-size: 13px; }
+}

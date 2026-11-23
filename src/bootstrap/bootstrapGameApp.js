@@ -76,6 +76,7 @@ import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fill
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createCharacterChooser } from '../endless/characterChooser.js';
+import { createGyroHint } from '../controls/gyroHint.js';
 import { createTownMode } from '../town/townMode.js';
 import { createTownNet } from '../town/townNet.js';
 import { createSeaStart } from '../town/seaStart.js';
@@ -11880,6 +11881,45 @@ async function initCore(runtimeContext) {
     void story.enter();
   };
 
+  // ── The "move your phone" hint (src/controls/gyroHint.js): a gyro item (sword / wand / rod /
+  // oar / shield) or a ride steered by the phone's lean (broom, cart) out, the phone (not
+  // Use This Device) still for a while → an arm moving a phone shows how. Not over menus,
+  // lobbies, talks or the calibration popup; drawn after the world (the game loop).
+  const gyroHint = createGyroHint({ renderer });
+  window.gyroHint = gyroHint;
+  const _gyroHintPose = new THREE.Quaternion();
+  const _gyroHintKind = () => {
+    const id = _heldWeaponId();
+    if (id === OAR_ITEM_ID) return 'tilt';
+    if (id === FISHING_ROD_ITEM_ID) return 'cast';
+    if (id === MAGIC_WAND_ITEM_ID) return 'wand';
+    if (id === FOAM_SWORD_ITEM_ID) return 'swing';
+    if (id === SHIELD_ITEM_ID) return 'aim';
+    if (_broomRide?.isRiding() || town?.inCart?.()) return 'tilt';
+    return null;
+  };
+  const _GYRO_HINT_BLOCKERS = '.duel-lobby:not(.hidden), .match-results:not(.hidden), '
+    + '.endless-panel:not(.hidden), #game-over-overlay:not(.hidden), #classic-stage-overlay:not(.hidden)';
+  const _gyroHintFrame = (dt) => {
+    const g = window.phoneSwordGyro;
+    let kind = null;
+    if (g?.connected && !g.localDevice && Number.isFinite(g.beta) && Number.isFinite(g.gamma)
+      && startOverlay?.classList.contains('hidden') && !playerDead
+      && !_isSwordCalibPromptOpen() && !bossTalk.isOpen() && !village?.isOpen() && !town?.isTalking?.()
+      && !_bowDraw.active && !_bombAim.active && !document.body.classList.contains('story-cut')
+      && !document.querySelector(_GYRO_HINT_BLOCKERS)) {
+      kind = _gyroHintKind();
+    }
+    if (kind) _pswDeviceQuat(Number.isFinite(g.alpha) ? g.alpha : 0, g.beta, g.gamma, _gyroHintPose);
+    gyroHint.update(dt, {
+      wanted: !!kind,
+      kind: kind || 'swing',
+      pose: kind ? _gyroHintPose : null,
+      tutorial: !!showdownTutorial?.isActive(),
+    });
+    gyroHint.render();
+  };
+
   let _modeStartToken = 0;
   const _startMode = (gameMode) => {
     _birdsMode = false;
@@ -11955,6 +11995,7 @@ async function initCore(runtimeContext) {
       if (!_gamePaused) { _gamePaused = true; _pausedAtMs = Date.now(); }
       _syncSkyGlow();
       renderer.render(scene, camera);
+      gyroHint.hide();
       return;
     }
     if (_gamePaused) {
@@ -13544,6 +13585,7 @@ async function initCore(runtimeContext) {
     renderer.render(scene, camera);
     hitFeel.restoreShake(camera);
     _endlessChooserFrame(frameDelta);
+    _gyroHintFrame(frameDelta);
     const frameTotalMs = performance.now() - frameStartMs;
     if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
       frameOverrunStreak += 1;
