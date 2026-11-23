@@ -26,6 +26,7 @@ import { createChickenMeatMesh, createEggMesh, loadChickenMeat } from '../items/
 
 export const CHICKEN_MODEL_URL = '/assets/props/chicken.glb?v=1';
 const CHICKEN_COUNT = 7;
+const MODEL_YAW = Math.PI;         // the GLB faces −Z: turned round to face +Z (the way it walks)
 const CHICKEN_HEIGHT = 0.36;       // m (the player's ≈ 0.8)
 const CHICKEN_ROAM_R = 11;         // m round the farm they keep to
 const CHICKEN_HP = 1;              // hits
@@ -67,26 +68,13 @@ export function installTownChickens(T, ctx) {
     loadChickenMeat();
     return loading;
   };
-  // Its size (the skinned vertices as posed — Box3 precise) and which way its head points (the
-  // head bone vs the tail's, in the model's frame)
+  // Its size (the skinned vertices as posed — Box3 precise); the GLB faces −Z, so it's turned
+  // round (MODEL_YAW) to walk head first along +Z
   const measure = (scene) => {
     scene.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(scene, true);
     const h = Math.max(box.max.y - box.min.y, 1e-6);
-    let head = null;
-    let tail = null;
-    scene.traverse((o) => {
-      if (!head && /head/i.test(o.name)) head = o;
-      if (!tail && /^tail/i.test(o.name)) tail = o;
-    });
-    let yaw = 0;
-    if (head && tail) {
-      const a = head.getWorldPosition(new THREE.Vector3());
-      const b = tail.getWorldPosition(new THREE.Vector3());
-      // (turned so the tail → head way is +Z)
-      yaw = -Math.atan2(a.x - b.x, a.z - b.z);
-    }
-    return { scale: CHICKEN_HEIGHT / h, yaw, y: -box.min.y * (CHICKEN_HEIGHT / h) };
+    return { scale: CHICKEN_HEIGHT / h, yaw: MODEL_YAW, y: -box.min.y * (CHICKEN_HEIGHT / h) };
   };
 
   const hens = [];             // { root, model, mixer, actions, action, state, t, until, x, z, yaw, tx, tz, hp, eggAt, proxy, lastSwing }
