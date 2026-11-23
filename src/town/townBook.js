@@ -316,6 +316,7 @@ export function installTownBook(T, ctx) {
       if (name) drawLabel(g, name, px(p.x), pz(p.z) + 13, 10);
     };
     for (const f of P.fields ?? []) place(f, '🌾', null);
+    (P.plots ?? []).forEach((pl, i) => { if (T.ownsPlot?.(i)) place(pl, '🌱', null); });
     place(P.rooms?.shop?.door, '🛒', 'Shop');
     place(P.rooms?.jail?.door, '🔒', 'Jail');
     place(P.fire, '🔥', null);
@@ -511,7 +512,7 @@ export function installTownBook(T, ctx) {
       act('Eat', () => T.eat(it.id), { primary: true, disabled: full, title: full ? 'You\'re not hungry.' : '' });
     }
     if (it.plant) {
-      act('Plant', () => T.plantSeed?.(), { primary: true, disabled: !canPlant, title: canPlant ? '' : 'Stand on open, dry ground outdoors to plant.' });
+      act('Plant', () => T.plantSeed?.(), { primary: true, disabled: !canPlant, title: canPlant ? '' : (T.plantHint?.() ?? '') });
     }
     act('Drop one', () => T.dropItem?.(it.id, 1));
     if (it.n > 1) act(`Drop all (${it.n})`, () => T.dropItem?.(it.id, it.n));

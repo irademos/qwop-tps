@@ -212,6 +212,7 @@ export function installTownWire(T, ctx) {
     if (Number.isFinite(s.gangDay)) T.gangDay = s.gangDay;
     if (s.houses) T.applyHouses(s.houses);
     if (s.fieldOwners) { T.applyFieldOwners(s.fieldOwners); T.assignWork(); }
+    if (s.plotOwners) T.applyPlotOwners(s.plotOwners);
     T.restoreRuins(s, { live: true }); // (a building torn down — townRuins.js)
     if (Array.isArray(s.stands)) {
       T.dropRemoteStands();

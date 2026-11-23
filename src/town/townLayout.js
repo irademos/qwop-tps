@@ -1,6 +1,7 @@
 // Town: the layout, built once from the map — the walkability grid (townNav.js), the shop and the
 // jail (two of the houses) and the homes (the rest; each house with a known door opens into a
-// room — townRooms.js), the campfire, fields (the player can buy them — townFarming.js), the hose's tap, work
+// room — townRooms.js), the campfire, fields (planter boxes of crops; the player can buy them — townFarming.js), plots of land
+// for sale by them + the hoses' taps (townFarming.js), work
 // spots, the patrol loop, the market stalls outside the shop, the wizard's stall in the woods, the
 // bandit camp — and its props.
 
@@ -9,10 +10,12 @@ import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import { createDriveGrid } from './townDrive.js';
 import { createVeg } from '../items/vegModels.js';
+import { createPlanterBox, planterSoilY } from '../items/planterBox.js';
 
 const VEG_CROP_LENGTH = 0.24; // m, the longest side of a field crop's vegetable
+const FIELD_PLANTER_HEIGHT = 0.36; // m, the fields' planter boxes
 import {
-  BUILDING_RE, CABIN_RE, CAMP_CHASE_DIST, CAMP_DIST, DRIVE_BOUNDS, DOOR_ENTER_DIST, EXTRA_HOUSES, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, STUMP_RE, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CABIN_RE, CAMP_CHASE_DIST, CAMP_DIST, DRIVE_BOUNDS, DOOR_ENTER_DIST, EXTRA_HOUSES, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, PLOT_COUNT, STUMP_RE, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, WIZARD_CABIN_STALL, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
 } from './townConfig.js';
 
@@ -266,18 +269,29 @@ export function installTownLayout(T, ctx) {
       shore.push({ ...p, face: { x: nav.cellX(w), z: nav.cellZ(w) } });
       if (shore.length >= 4) break;
     }
-    // The hose's water tap (townFarming.js): an open patch of grass by the first field (or near
-    // the middle)
-    const anchor = fields[0] ?? C;
-    const tapCell = best(nav.cellsWhere((i) => {
-      const x = nav.cellX(i);
-      const z = nav.cellZ(i);
-      const d = dist2(x, z, anchor.x, anchor.z);
-      return offRoad(i) && nav.clearanceAt(i) >= 2 && dC(i) < 46 && d < 20 && d > 4
-        && fields.every((f) => dist2(x, z, f.x, f.z) > 4) && dist2(x, z, market.x, market.z) > 12
-        && dist2(x, z, jailDoor.x, jailDoor.z) > 8 && dist2(x, z, fire.x, fire.z) > 9;
-    }), (i) => Math.min(nav.clearanceAt(i), 6) - dist2(nav.cellX(i), nav.cellZ(i), anchor.x, anchor.z) * 0.12);
-    const tap = tapCell >= 0 ? cellPos(tapCell) : null;
+    // Plots of land for sale by the fields (townFarming.js — bought at their signpost, then up to
+    // PLOT_PLANTERS planter boxes built on them): open grass near a field, clear all round
+    const plots = [];
+    for (const i of nav.cellsWhere((j) => offRoad(j) && nav.kindAt(j) === 0 && nav.clearanceAt(j) >= 3 && dC(j) < 50)
+      .sort((a, b) => {
+        const near = (j) => Math.min(...fields.map((f) => dist2(nav.cellX(j), nav.cellZ(j), f.x, f.z)));
+        return near(a) - near(b);
+      })) {
+      const p = cellPos(i);
+      if (fields.some((f) => dist2(p.x, p.z, f.x, f.z) < 7.5) || !fields.some((f) => dist2(p.x, p.z, f.x, f.z) < 20)) continue;
+      if (dist2(p.x, p.z, market.x, market.z) < 12 || dist2(p.x, p.z, jailDoor.x, jailDoor.z) < 8 || dist2(p.x, p.z, fire.x, fire.z) < 9) continue;
+      if (plots.some((o) => dist2(o.x, o.z, p.x, p.z) < 7)) continue;
+      plots.push(p);
+      if (plots.length >= PLOT_COUNT) break;
+    }
+    // The hose's taps (townFarming.js — shown only by land the player owns): beside each field
+    // and plot, on walkable ground
+    const tapBeside = (x, z) => {
+      const i = nav.nearestWalkable(x, z);
+      return i >= 0 && dist2(nav.cellX(i), nav.cellZ(i), x, z) < 2 ? cellPos(i) : { x, z };
+    };
+    for (const f of fields) f.tap = tapBeside(f.x + 2.5, f.z);
+    for (const p of plots) p.tap = tapBeside(p.x + 1.9, p.z + 1.9);
     // Patrol: road spots spread around the middle (farthest-point picks), walked in a loop
     // (from the jail's door)
     const roadCells = nav.cellsWhere((i) => nav.kindAt(i) === 2 && dC(i) < 34);
@@ -408,7 +422,7 @@ export function installTownLayout(T, ctx) {
     const fishSpot = shore[0] ?? null;
     const places = {
       center: C, market, marketStalls, shops, rooms, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
-      homes, treeSpots, fields, tap, shore, fishSpot, patrol, entrance, camp, campFire, wizard,
+      homes, treeSpots, fields, plots, shore, fishSpot, patrol, entrance, camp, campFire, wizard,
       // the player arrives between the shop and the fire
       spawn: (() => {
         const i = nav.nearestWalkable((market.x + fire.x) / 2, (market.z + fire.z) / 2);
@@ -489,28 +503,27 @@ export function installTownLayout(T, ctx) {
     const star = makeTextSprite('✨', { height: 0.3, size: 96, bg: null, pad: 10 });
     star.position.set(hut.x, groundAt(hut.x, hut.z) + 2.1, hut.z);
     group.add(star);
-    // The hose's tap, the fields' for-sale signs (townFarming.js)
+    // The hoses' taps, the fields' signs, the plots' signposts and planter boxes (townFarming.js)
     T.buildFarm(group, places);
-    // Fields: rows of crops on dark soil
-    const soilMat = new THREE.MeshStandardMaterial({ color: 0x4a3420, roughness: 1, metalness: 0 });
-    const soilGeo = new THREE.BoxGeometry(3.6, 0.08, 0.5);
+    // Fields: rows of crops in planter boxes (planter_box.glb)
+    const soilY = planterSoilY(FIELD_PLANTER_HEIGHT);
     for (const [fieldNo, f] of places.fields.entries()) {
       f.crops = []; // { mesh, x, z, ripe, growAt } — picked by the player (townMode pick)
       for (let r = -1; r <= 1; r++) {
         const rz = f.z + r * 1.1;
-        const soil = new THREE.Mesh(soilGeo, soilMat);
-        soil.position.set(f.x, groundAt(f.x, rz) + 0.02, rz);
-        soil.receiveShadow = true;
-        group.add(soil);
+        const gy = groundAt(f.x, rz);
+        const box = createPlanterBox({ length: 3.6, width: 0.62, height: FIELD_PLANTER_HEIGHT });
+        box.position.set(f.x, gy, rz);
+        group.add(box);
         for (let c = -2; c <= 2; c++) {
-          const cx = f.x + c * 0.75;
+          const cx = f.x + c * 0.7;
           // A vegetable lying on the soil (vegetables.glb — a kind per row of each field, picked
           // by the field's spot)
           const crop = new THREE.Group();
           const veg = createVeg(fieldNo * 3 + r + 1, VEG_CROP_LENGTH);
           veg.rotation.y = 0.4 + c * 0.7;
           crop.add(veg);
-          crop.position.set(cx, groundAt(cx, rz) + 0.04, rz);
+          crop.position.set(cx, gy + soilY, rz);
           crop.rotation.y = c * 1.3 + r;
           group.add(crop);
           f.crops.push({ mesh: crop, x: cx, z: rz, ripe: true, growAt: 0 });
