@@ -113,6 +113,7 @@ import { installTownMissions } from './townMissions.js';
 import { installTownActs } from './townActs.js';
 import { installTownWire } from './townWire.js';
 import { installTownCooking } from './townCooking.js';
+import { installTownPopup } from './townPopup.js';
 import { installTownMemory, moodOf } from './townMemory.js';
 import { installTownQuests } from './townQuests.js';
 import { installTownHomes } from './townHomes.js';
@@ -849,6 +850,7 @@ export function createTownMode(ctx) {
     T.hideFishingHud();
     T.cooking = null;
     T.closeCookPanel();
+    T.hidePopup();
     T.resetMemoryHud();
     T.active = false;
     T.ready = false;
@@ -1022,6 +1024,7 @@ export function createTownMode(ctx) {
   installTownMissions(T, ctx);
   installTownActs(T, ctx);
   installTownWire(T, ctx);
+  installTownPopup(T);
   installTownCooking(T, ctx);
   installTownMemory(T, ctx);
   installTownQuests(T, ctx);

@@ -1566,9 +1566,37 @@ body.settings-open #inventory-button {
 
 .town-book-hint { grid-column: 1 / -1; font-size: 12px; }
 
-/* The campfire's Cook list (src/town/townCooking.js): the bag's grid, what each takes under its name */
+/* A brief popup for something got — a dish cooked, a fish landed (src/town/townPopup.js) */
+.town-popup {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 22px 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-strong);
+  background: rgba(10, 14, 24, 0.9);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  animation: town-popup 2.2s var(--ease) both;
+}
+.town-popup.hidden { display: none; }
+.town-popup-icon { font-size: 44px; line-height: 1; }
+.town-popup-title { font: 800 22px var(--font-display); color: var(--text); }
+.town-popup-sub { font-size: 15px; font-weight: 600; color: var(--accent); }
+@keyframes town-popup {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+  10% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); }
+  16% { transform: translate(-50%, -50%) scale(1); }
+  82% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+}
+
+/* The campfire's Cook list (src/town/townCooking.js): the raw goods in the bag's grid */
 .town-cook-grid { margin-top: 10px; }
-.town-cook-from { font-size: 11px; opacity: 0.85; }
 
 .town-book-item {
   margin-top: 10px;

@@ -56,7 +56,7 @@ import {
   FISH_CANOE_DRIFT, FISH_CAST_DIST, FISH_CAST_REACH, FISH_CAST_SWING, FISH_GESTURE_S, FISH_HINT_AFTER, FISH_HOOK_S,
   FISH_KEY_REEL, FISH_LAND_DIST, FISH_LATE_TENSION, FISH_LINE_MAX, FISH_MIN_DEPTH, FISH_NIBBLE_CHANCE, FISH_NIBBLE_S,
   FISH_PULL_KEEP, FISH_PULL_SWING, FISH_REEL_IDLE_S, FISH_REEL_M, FISH_RUN_SPEED, FISH_SETTLE_S,
-  FISH_SIDE_SPEED, FISH_SIZES, FISH_SPOT_RADIUS, FISH_SWIPE_SIDE, FISH_TENSION_DECAY, FISH_TURN_S, FISH_WAIT_S,
+  FISH_BASE_CM, FISH_SIDE_SPEED, FISH_SIZES, FISH_SPOT_RADIUS, FISH_SWIPE_SIDE, FISH_TENSION_DECAY, FISH_TURN_S, FISH_WAIT_S,
   FISH_WRONG_TENSION, NAV_CELL, dist2, el, rand,
 } from './townConfig.js';
 
@@ -383,7 +383,7 @@ export function installTownFishing(T, ctx) {
       const golden = !!T.questFish?.golden;
       f.phase = 'fight';
       f.t = 0;
-      f.fish = { size, scale: rand(...(size.scale ?? [1, 1])), stamina: golden ? Infinity : size.pulls, mode: 'turn', way: null, left: 0.5, lat: 0, tension: 0, idle: 0, golden };
+      f.fish = { size, kind: size.kinds?.[Math.floor(Math.random() * size.kinds.length)] ?? 'Fish', scale: rand(...(size.scale ?? [1, 1])), stamina: golden ? Infinity : size.pulls, mode: 'turn', way: null, left: 0.5, lat: 0, tension: 0, idle: 0, golden };
       rig?.hook();
       if (golden) rig?.golden(true);
       if (f.onBubbles) say(`Off the bubbles — ${size.label}!`);
@@ -540,6 +540,8 @@ export function installTownFishing(T, ctx) {
           ctx.playSfx?.('splash');
           const got = T.gain('fish', n);
           say(`Caught ${fish.size.label}! ${got > 1 ? `+${got} fish` : '+1 fish'} (${T.goods.fish})${got < n ? ' — no room in your bag for the other' : ''}`);
+          const cm = Math.round(FISH_BASE_CM * fish.scale * rand(0.95, 1.05));
+          if (got > 0) T.popup?.({ icon: '🐟', title: fish.kind, sub: `${cm} cm · +${got} fish` });
           T.questNote('fish');
         }
       }
