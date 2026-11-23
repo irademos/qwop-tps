@@ -1,18 +1,24 @@
 // Town: cooking at the campfire — a pot hangs over the town's fire (buildProps puts it there),
 // and the player cooks what they caught or picked into food that heals more and sells for more
-// (the cooked GOODS in townEconomy.js): fish → grilled fish, veg → stew. Cooking takes a few
-// seconds standing by the fire (walking off stops it), like fishing.
+// (the cooked GOODS in townEconomy.js): fish → grilled fish, veg → stew, a drumstick → roast
+// chicken, an egg → a fried egg. By the fire one Cook button opens the list of what can go on
+// the fire — the raw goods, a grid like the town book's bag: tap one and it's cooking (or the
+// acts: Cook <it> / › Next / Close, so E / the phone's interact work it too); done, a popup
+// (T.popup — townPopup.js) shows the dish and the health it gives. Cooking takes a few seconds standing by the
+// fire (walking off stops it), like fishing.
 
 import * as THREE from 'three';
 import { GOODS } from './townEconomy.js';
-import { dist2 } from './townConfig.js';
+import { dist2, el } from './townConfig.js';
 
 // from: goods it takes; secs: how long it cooks
 export const RECIPES = [
-  { id: 'grilledFish', from: { fish: 1 }, secs: 3, verb: 'Grill' },
-  { id: 'stew', from: { crops: 2 }, secs: 4, verb: 'Cook' },
+  { id: 'grilledFish', from: { fish: 1 }, secs: 3 },
+  { id: 'stew', from: { crops: 2 }, secs: 4 },
+  { id: 'roastChicken', from: { chicken: 1 }, secs: 4 },
+  { id: 'friedEgg', from: { egg: 1 }, secs: 2 },
 ];
-const COOK_DIST = 2.6;            // m from the fire for the 🍳 buttons
+const COOK_DIST = 2.6;            // m from the fire for the Cook button
 const COOK_CANCEL_DIST = 0.8;     // m walked off: cooking stops
 const STEAM_PUFFS = 5;
 
@@ -83,7 +89,83 @@ export function installTownCooking(T, ctx) {
     return dist2(p.x, p.z, f.x, f.z) < COOK_DIST;
   };
   const canMake = (r) => Object.entries(r.from).every(([g, n]) => T.goods[g] >= n);
-  const fromText = (r) => Object.entries(r.from).map(([g, n]) => `${n > 1 ? `${n} ` : ''}${GOODS[g].emoji}`).join(' + ');
+
+  // ── The Cook list: what can go on the fire — the raw goods (fish, veg, chicken, egg), the
+  // bag's grid look; tap one and it's cooking ──
+  const ingredientOf = (r) => Object.keys(r.from)[0];
+  const panel = el('div', 'town-market town-cook ui-panel hidden');
+  panel.addEventListener('pointerdown', (e) => e.stopPropagation());
+  T.hud.append(panel);
+  const head = el('div', 'town-market-head');
+  const closeBtn = el('button', 'ui-btn-secondary town-market-btn town-market-close', '✕');
+  closeBtn.type = 'button';
+  closeBtn.setAttribute('aria-label', 'Close');
+  closeBtn.addEventListener('click', () => closeCookPanel());
+  head.append(el('div', 'town-market-title', 'Cook'), closeBtn);
+  const sub = el('div', 'town-market-purse', 'Tap something to put it on the fire.');
+  const grid = el('div', 'town-book-bag town-cook-grid');
+  panel.append(head, sub, grid);
+  let open = false;
+  let picked = null;   // the recipe picked (by its ingredient) — for the acts: E / the phone's interact
+  let sig = '';
+  const cookPanelOpen = () => open;
+  const closeCookPanel = () => {
+    open = false;
+    panel.classList.add('hidden');
+    T.actsAt = 0;
+  };
+  const openCookPanel = () => {
+    open = true;
+    picked = (RECIPES.find(canMake) ?? RECIPES[0]).id;
+    sig = '';
+    panel.classList.remove('hidden');
+    renderCookPanel();
+    T.actsAt = 0;
+  };
+  const cook = (r) => {
+    if (!r || !canMake(r)) return;
+    closeCookPanel();
+    startCooking(r);
+  };
+  const pickedRecipe = () => RECIPES.find((r) => r.id === picked) ?? null;
+  const stepPick = (k) => {
+    const list = RECIPES.filter(canMake);
+    if (!list.length) return;
+    const i = list.findIndex((r) => r.id === picked);
+    picked = list[(i + k + list.length) % list.length].id;
+    sig = '';
+    renderCookPanel();
+    T.actsAt = 0;
+  };
+  const renderCookPanel = () => {
+    if (!open) return;
+    const s = JSON.stringify([RECIPES.map((r) => T.goods[ingredientOf(r)] || 0), picked]);
+    if (s === sig) return;
+    sig = s;
+    grid.replaceChildren(...RECIPES.map((r) => {
+      const g = ingredientOf(r);
+      const G = GOODS[g];
+      const n = T.goods[g] || 0;
+      const ok = canMake(r);
+      const b = el('button', `town-book-good${r.id === picked && ok ? ' is-active' : ''}${ok ? '' : ' is-empty'}`);
+      b.type = 'button';
+      b.title = r.from[g] > 1 ? `${G.label} (takes ${r.from[g]})` : G.label;
+      b.append(el('span', 'town-book-good-icon', G.emoji), el('span', 'town-book-good-n', String(n)),
+        el('span', 'town-book-good-label', G.label));
+      b.disabled = !ok;
+      if (ok) b.addEventListener('click', () => cook(r));
+      return b;
+    }));
+  };
+  // (the acts while the list is open — E / the phone's interact press the first)
+  const cookPanelActs = () => {
+    const out = [];
+    const r = pickedRecipe();
+    if (r && canMake(r)) out.push({ key: 'cook:go', label: `Cook ${GOODS[ingredientOf(r)].label.toLowerCase()}`, onClick: () => cook(r) });
+    if (RECIPES.filter(canMake).length > 1) out.push({ key: 'cook:next', label: '› Next', onClick: () => stepPick(1) });
+    out.push({ key: 'cook:close', label: 'Close', onClick: closeCookPanel });
+    return out;
+  };
 
   const startCooking = (r) => {
     if (T.cooking || !canMake(r)) return;
@@ -106,6 +188,11 @@ export function installTownCooking(T, ctx) {
         s.material.opacity += (target - s.material.opacity) * Math.min(1, dt * 4);
       }
     }
+    if (open) {
+      // (walked off / something came up: the list goes)
+      if (!nearFire() || T.cooking || T.sequence || T.jail || T.inRoom || ctx.isPlayerDead()) closeCookPanel();
+      else renderCookPanel();
+    }
     const c = T.cooking;
     if (!c) return;
     const p = T.playerPos();
@@ -123,20 +210,17 @@ export function installTownCooking(T, ctx) {
     T.renderGoods();
     const G = GOODS[r.id];
     T.feedLine(`${G.label}! Heals +${G.heal} health — and sells for more than it's made of.`);
+    T.popup?.({ icon: G.emoji, title: G.label, sub: `+${G.heal} health` });
     T.questNote('cook', { good: r.id });
   };
-  // The fire's buttons: what can be cooked with what the player carries
+  // The fire's button: Cook (the list) when the player carries anything that cooks
   const cookActs = () => {
     if (T.cooking) return [{ key: 'cooking', label: `Cooking… ${Math.ceil(T.cooking.left)}s`, onClick: stopCooking }];
-    if (!nearFire()) return [];
-    return RECIPES.filter(canMake).map((r) => ({
-      key: `cook:${r.id}`,
-      label: `${r.verb} ${fromText(r)} → ${GOODS[r.id].emoji}`,
-      onClick: () => startCooking(r),
-    }));
+    if (!nearFire() || !RECIPES.some(canMake)) return [];
+    return [{ key: 'cook:open', label: 'Cook', onClick: openCookPanel }];
   };
 
   Object.assign(T, {
-    cookActs, makeCookPot, updateCooking,
+    cookActs, cookPanelActs, cookPanelOpen, closeCookPanel, makeCookPot, updateCooking,
   });
 }

@@ -55,16 +55,16 @@ export const FIRST_DAY = [
       { do: 'seek', who: 'fisher', ifGone: 'goto:do' },
       {
         do: 'talk', who: 'fisher', onLeave: 'next',
-        lines: [['fisher', 'Ha, a fine catch! You\'re a natural, {name}. Now let\'s cook it. Raw fish won\'t do you much good — grilled over the town campfire it heals far more, and sells for more too. Follow me to the fire, then press Grill by the pot and stay close while it grills.']],
+        lines: [['fisher', 'Ha, a fine catch! You\'re a natural, {name}. Now let\'s cook it. Raw fish won\'t do you much good — grilled over the town campfire it heals far more, and sells for more too. Follow me to the fire, then press Cook by the pot, pick the fish and stay close while it grills.']],
         choices: [{ label: 'Lead the way', then: ['walk:on'] }, { label: 'I\'ll find my own way', then: ['walk:off'] }],
       },
       {
         do: 'goal', label: 'do', checkpoint: true, kind: 'cook', n: 1, at: 'fire', guide: 'fisher',
         progress: 'Grill a fish at the campfire',
         tips: [
-          'Walk up to the fire with your fish and press Grill.',
+          'Walk up to the fire with your fish, press Cook and pick Grilled Fish.',
           'Stay by the pot a few seconds while it cooks — wander off and it\'s ruined.',
-          'Two veg make a stew, if you\'ve no fish.',
+          'Two veg make a stew, if you\'ve no fish — and a drumstick or an egg cooks too.',
         ],
       },
       { do: 'pay', from: 'fisher', coins: 3, memory: 'Our fishing', say: 'Smells good! Cooked food heals more, and the merchant pays more for it too.' },

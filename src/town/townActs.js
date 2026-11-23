@@ -136,6 +136,8 @@ export function installTownActs(T, ctx) {
   const computeActs = () => {
     const out = [];
     if (T.sequence) return out;
+    // The campfire's Cook list (townCooking.js): cook what's picked, the next, close
+    if (T.cookPanelOpen()) return T.cookPanelActs();
     if (T.storage.isOpen()) {
       out.push({ key: 'closechest', label: T.storageKind?.() === 'cart' ? 'Close the cart' : 'Close chest', onClick: () => T.storage.close() });
       return out;
@@ -266,6 +268,7 @@ export function installTownActs(T, ctx) {
     if (!T.active || e.repeat) return;
     if (e.target?.closest?.('input, textarea, select')) return;
     if (document.body.classList.contains('settings-open')) return;
+    if (e.key === 'Escape' && T.cookPanelOpen()) { T.closeCookPanel(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.storage.isOpen()) { T.storage.close(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.stalls.focused()) { T.stalls.unfocus(); e.preventDefault(); return; }
     if (e.key === 'Escape' && T.jobTalk.isOpen()) { T.jobTalk.close(); e.preventDefault(); return; }
