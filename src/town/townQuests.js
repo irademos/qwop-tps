@@ -721,7 +721,7 @@ export function installTownQuests(T, ctx) {
       if (live(br) && pending(br)) { if (k < 0) order.push(br.id); }
       else if (!live(br) && k >= 0) order.splice(k, 1);
     }
-    if (branches.some(engaged) || busyReason()) { turn = null; return; }
+    if (branches.some(engaged) || busyReason() || T.defenseBusy?.()) { turn = null; return; }
     const cands = order.map(branchOf).filter((br) => br && live(br) && pending(br) && approachable(br));
     if (cands.includes(turn)) return;
     turn = cands.find((br) => { const n = giverOf(br); return n && T.distToPlayer(n) < SEEK_NEAR; }) ?? cands[0] ?? null;
@@ -876,6 +876,7 @@ export function installTownQuests(T, ctx) {
     questQuiet: () => started && branches.some((br) => engaged(br) && !!br.runner.quest()?.quiet && !!br.runner.q()?.failOnDown),
     questDone: (id) => started && questDone(id),
     // (a job under way — any branch but the first day, past its giver coming up: Town's job songs)
+    questEngaged: () => started && branches.some(engaged),
     questJobActive: () => started && branches.some((br) => br !== first && engaged(br)),
     // (whether that job plays songs: a quest's `songs: false` — the long, everyday ones like
     // gathering wood — keeps them off; a beat's own `songs` wins over its quest's)

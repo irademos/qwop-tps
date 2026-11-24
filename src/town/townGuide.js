@@ -7,6 +7,7 @@
 //   tree      — a standing tree near the guide's work (a felled one's logs once it's down)
 //   market    — in through the shop's door to its counter
 //   stall     — behind a free market stall (the first one free)
+//   point     — any spot (L.point = { x, z }): the sheriff's night defense start (townDefense.js)
 // A lead L = { at, autoWalk, crumbs, leadAt, treeId, stallKey, stuck, resting, speed } (one per goal
 // beat — townQuests.js keeps it): the guide walks to a spot by the goal (waiting when the player
 // falls behind, fetching them when they wander off, a tip now and then once there — leadFrame), and
@@ -126,6 +127,7 @@ export function installTownGuide(T, ctx) {
       }
       case 'market': return { icon: '📍', ...T.stalls.spot('shop', 'counter'), h: 1.6 };
       case 'stall': { const st = stallOf(L); return st ? { icon: '📍', ...st.keeper, h: 1.6 } : null; }
+      case 'point': return L.point ? { icon: '📍', x: L.point.x, z: L.point.z, h: 1.5 } : null;
       default: return null;
     }
   };
@@ -140,6 +142,7 @@ export function installTownGuide(T, ctx) {
     else if (L.at === 'fire') at = p.fire;
     else if (L.at === 'guideWork') at = g.work;
     else if (L.at === 'market') at = p.rooms.shop?.door ?? null;
+    else if (L.at === 'point') at = L.point ?? null;
     else if (L.at === 'stall') {
       const st = stallOf(L);
       if (st) { L.leadAt = { guideId: g.id, x: st.customer.x, z: st.customer.z, gx: st.x, gz: st.z }; return L.leadAt; }
@@ -239,6 +242,7 @@ export function installTownGuide(T, ctx) {
         goal = { x: log.x, z: log.z, stop: 0.9 };
       }
     } else if (L.at === 'fire') goal = { x: p.fire.x, z: p.fire.z, stop: 1.9 };
+    else if (L.at === 'point' && L.point) goal = { x: L.point.x, z: L.point.z, stop: 0.8 };
     else if (L.at === 'guideWork' && g?.work) {
       const ripe = (g.work.crops ?? []).filter((c) => c.ripe)
         .sort((a, b) => dist2(a.x, a.z, pos.x, pos.z) - dist2(b.x, b.z, pos.x, pos.z))[0];
@@ -246,7 +250,7 @@ export function installTownGuide(T, ctx) {
     }
     if (!goal) return null;
     // Behind the guide while they're still on the way (and the player's further from the goal)
-    if (g?.questing && g.qmode?.kind === 'lead' && !inRoom && L.leadAt && dist2(g.x, g.z, L.leadAt.x, L.leadAt.z) > 1.5
+    if (((g?.questing && g.qmode?.kind === 'lead') || g?.task?.type === 'defend') && !inRoom && L.leadAt && dist2(g.x, g.z, L.leadAt.x, L.leadAt.z) > 1.5
       && dist2(pos.x, pos.z, goal.x, goal.z) > dist2(g.x, g.z, goal.x, goal.z)) {
       let k = -1;
       let best = Infinity;
@@ -290,7 +294,7 @@ export function installTownGuide(T, ctx) {
     if (!tgt) return [];
     const p = T.playerPos();
     if (dist2(p.x, p.z, tgt.x, tgt.z) <= tgt.stop + 1) return [];
-    const following = g?.qmode?.kind === 'lead';
+    const following = g?.qmode?.kind === 'lead' || (!!g?.alive && g.task?.type === 'defend');
     return [{ key: 'introwalk', label: following ? `Follow ${firstName(g.name)}` : 'Walk me there', onClick: () => { L.autoWalk = true; T.actsAt = 0; L.stuck.gx = NaN; } }];
   };
 

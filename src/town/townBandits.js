@@ -1,5 +1,6 @@
 // Town: the bandits — their camp (warning, standoff, fight or robbery), the nightly raid on the
-// town (break-ins — the player's house too, now and then: its chest —, robberies, the fields; a
+// town (on a night the sheriff asks the player to defend it — townDefense.js — only as many as the
+// wave's bandits the player didn't stop come: `startRaidNight(max)`; held off, none) (break-ins — the player's house too, now and then: its chest —, robberies, the fields; a
 // raider who runs into the player fights an armed one and holds up an unarmed one — pay or run,
 // a fight —), the gang (the camp's bandits are the raiders: the ones beaten are gone, one more
 // turns up each morning, and a bigger gang carries more gear), and the sheriff's thanks the morning after the player beats some of them (he
@@ -10,7 +11,7 @@ import { GOODS, GOOD_IDS } from './townEconomy.js';
 import {
   BANDIT_CAMP_R, BANDIT_GEAR_FROM, BANDIT_GEAR_SHARE, BURGLE_CHEST_MAX, BURGLE_CHEST_SHARE, BURGLE_GOODS, BURGLE_MAX, BURGLE_S, BURGLE_SHARE,
   CAMP_ATTACK_DIST, CAMP_DEFENDERS, CAMP_GRACE_S, CAMP_REMIND_S, CAMP_ROB, CAMP_WARN_DIST, CROP_REGROW_S,
-  GANG_GROW_HOUR, GANG_GROW_PER_DAY, GANG_MAX, HOLDUP_REACH_S, NIGHT_KILL_REWARD, NIGHT_RAID_ACTS, NIGHT_RAID_HOURS, NIGHT_RAID_STAY,
+  DEFENSE_HOURS, GANG_GROW_HOUR, GANG_GROW_PER_DAY, GANG_MAX, HOLDUP_REACH_S, NIGHT_KILL_REWARD, NIGHT_RAID_ACTS, NIGHT_RAID_HOURS, NIGHT_RAID_STAY,
   NIGHT_ROB, NIGHT_ROB_EVERY_S, RAID_NOTICE_DIST, RAID_PLAYER_HOUSE_CHANCE, RAID_TAKE, SHERIFF_SEEK_S,
   TALK_RANGE, dist2, inHours, pickOf, rand,
 } from './townConfig.js';
@@ -169,7 +170,8 @@ export function installTownBandits(T, ctx) {
   };
   // A bandit's day: loiter at the camp; on a raid night, the next thing on their list in town
   // (startRaidNight), back to the camp with whatever they got in between
-  const raidHours = () => inHours(T.hour(), NIGHT_RAID_HOURS);
+  // (from the night defense's window on: a raid may set off as soon as the defense is lost — townDefense.js)
+  const raidHours = () => inHours(T.hour(), [DEFENSE_HOURS[0], NIGHT_RAID_HOURS[1]]);
   const decideBandit = (n) => {
     const P = T.layout.places;
     if (n.loot && dist2(n.x, n.z, P.camp.x, P.camp.z) > BANDIT_CAMP_R) {
@@ -261,14 +263,15 @@ export function installTownBandits(T, ctx) {
   const nightOf = () => (T.hour() >= 12 ? T.clock.day : T.clock.day - 1);
   const noteRaid = (kind) => { if (T.raidPlan?.tally) T.raidPlan.tally[kind] += 1; };
   // The gang sets off (the authority's): all but NIGHT_RAID_STAY (the chief first) into town,
-  // NIGHT_RAID_ACTS things each; tonight's break-ins include a player's house now and then
-  const startRaidNight = () => {
+  // NIGHT_RAID_ACTS things each; tonight's break-ins include a player's house now and then.
+  // (max: at most this many — the night defense's bandits the player didn't stop, townDefense.js)
+  const startRaidNight = (max = Infinity) => {
     T.raidNight = nightOf();
     const gang = T.npcs.filter((n) => n.alive && n.def.outlaw && T.mine(n) && !n.fighter && !n.campStandoff
       && n.jailedUntil <= T.simT && !n.following);
     const stay = gang.slice().sort((a, b) => (b.role === 'banditBoss') - (a.role === 'banditBoss'))
-      .slice(0, Math.min(NIGHT_RAID_STAY, gang.length - 1));
-    const raiders = gang.filter((n) => !stay.includes(n));
+      .slice(0, Number.isFinite(max) ? Math.max(0, gang.length - max) : Math.min(NIGHT_RAID_STAY, gang.length - 1));
+    const raiders = gang.filter((n) => !stay.includes(n)).slice(0, Math.max(0, max));
     const houses = Object.entries(T.houses).filter(([, h]) => h.b && Math.random() < RAID_PLAYER_HOUSE_CHANCE).map(([i]) => Number(i));
     T.raidPlan = { night: T.raidNight, houses, hit: new Set(), tally: { houses: 0, mugs: 0, fields: 0 }, reported: false };
     if (!raiders.length) return;
@@ -576,7 +579,14 @@ export function installTownBandits(T, ctx) {
   const updateNightRaid = () => {
     if (T.isHost()) {
       growGang();
-      if (raidHours() && T.raidNight !== nightOf()) startRaidNight();
+      T.tickDefense();
+      if (T.raidNight !== nightOf()) {
+        // (the night defense: no raid while the sheriff's asking / the fight's on; held off = none;
+        // lost / missed = the bandits who got past — townDefense.js)
+        const def = T.defenseRaid();
+        if (def === null) { if (inHours(T.hour(), NIGHT_RAID_HOURS)) startRaidNight(); }
+        else if (def !== 'wait' && raidHours()) startRaidNight(def);
+      }
     }
     watchForPlayer();
     updateMorning();

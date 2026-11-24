@@ -129,6 +129,7 @@ import { installTownDrive } from './townDrive.js';
 import { installTownTrees } from './townTrees.js';
 import { installTownRuins } from './townRuins.js';
 import { installTownBook } from './townBook.js';
+import { installTownDefense } from './townDefense.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -822,6 +823,7 @@ export function createTownMode(ctx) {
     save();
     flushCloud();
     T.resetQuests(); // (a job's people, actors, bandits put away — it starts over at its checkpoint)
+    T.resetDefense(); // (the night defense's wave taken away — townDefense.js)
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     T.resetPirates(); // (the pirate ship back at its anchor — the fisher's golden fish)
     T.resetOctopus(); // (the night octopus gone)
@@ -909,7 +911,8 @@ export function createTownMode(ctx) {
     if (!T.ready) return;
     dt = Math.min(dt, 0.1);
     T.simT += dt;
-    clock.minutes += dt * MINUTES_PER_SEC;
+    // (the night holds while the sheriff leads the player out / they fight the wave — townDefense.js)
+    if (!T.defenseHoldsClock()) clock.minutes += dt * MINUTES_PER_SEC;
     if (clock.minutes >= 1440) { clock.minutes -= 1440; clock.day += 1; }
     applyTime();
     updateLantern();
@@ -942,6 +945,7 @@ export function createTownMode(ctx) {
     T.updateFishing(dt);
     T.updateCanoe(dt);
     T.updateQuests(dt);
+    T.updateDefense(dt);
     T.updatePirates(dt);
     T.updateOctopus(dt);
     T.updateDrive(dt);
@@ -996,6 +1000,7 @@ export function createTownMode(ctx) {
   // The player went down: wanted → busted, otherwise knocked out. True when handled.
   const onPlayerDown = () => {
     if (!T.active) return false;
+    T.defenseDown(); // (the night defense's wave lost — townDefense.js)
     // (shared town: a player brought us down — wanted, that's their bounty)
     const hunter = T.lastPvp && T.simT - T.lastPvp.at < PVP_CREDIT_S ? T.lastPvp.id : null;
     T.lastPvp = null;
@@ -1041,6 +1046,7 @@ export function createTownMode(ctx) {
   installTownCart(T, ctx);
   installTownDrive(T, ctx);
   installTownBook(T, ctx);
+  installTownDefense(T, ctx);
 
   // ── The town book's Town page (townBook.js): everyone in town, their coins and a few stats ──
   const TASK_STATUS = {
@@ -1188,7 +1194,7 @@ export function createTownMode(ctx) {
     nightLevel: () => (T.active ? T.nightLevel : 0),
     // A job under way (townQuests.js — not the first day's goals): songs play meanwhile
     jobActive: () => !!(T.active && T.ready && T.questJobActive?.()),
-    jobSongs: () => !!(T.active && T.ready && T.questSongs?.()),
+    jobSongs: () => !!(T.active && T.ready && (T.questSongs?.() || T.defenseFighting())),
     // In a house's room / the jail (under the map — no sky; the birds stay away)
     isIndoors: () => !!(T.active && (T.inRoom || T.jail)),
     // The phone's Block bar label while there's something to do (undefined: it stays Block; null:

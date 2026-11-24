@@ -92,7 +92,7 @@ export function installTownLife(T, ctx) {
       const sleepy = n.def.nightOwl ? (h >= 3 && h < 11) : (h >= 21.5 || h < 6);
       const done = t.type === 'sleep'
         ? (n.def.law ? inHours(h, n.def.hours) : !sleepy && nd.energy > 0.5)
-        : t.t > 20 && n.fear <= 0;
+        : t.t > 20 && n.fear <= 0 && !T.defenseFighting?.(); // (the night defense's wave on: they stay in)
       if (done) {
         n.inside = false;
         // (up and out of their room on foot — a house without one: out of its door)
