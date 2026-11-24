@@ -207,6 +207,8 @@ export function installTownFolk(T, ctx) {
     const h = T.hour();
     const def = n.def;
     const night = h >= 21.5 || h < 6;
+    // (taken by the pirates — a job's: townQuests.js capture; out of the world till a job frees them)
+    if (n.captive) { n.questing = true; n.qmode = { kind: 'captive', t: 0 }; setTask(n, { type: 'quest', dur: Infinity }); return; }
     // In the cell / lost / following the player / a bandit: their own routines
     if (n.jailedUntil > T.simT) { setTask(n, { type: 'jailed', dur: Infinity }); return; }
     if (n.lost) { setTask(n, { type: 'lost', dur: Infinity }); return; }
@@ -392,11 +394,13 @@ export function installTownFolk(T, ctx) {
     const b = n.body;
     if (!b) return;
     const lying = sleepPose(n);
-    // (seated — a passenger crouched in the cart's bed, townQuests.js: n.seat() → { pos, quat })
+    // (seated — a passenger crouched in the cart's bed, townQuests.js: n.seat() → { pos, quat,
+    // pose? } — pose: the clip held instead of the crouch, e.g. swimming in a job's dive)
     const seat = n.seat?.() ?? null;
-    if (!!seat !== !!b.seated) {
-      b.seated = !!seat;
-      if (seat) b.character.playPose(glbCharacterConfig.crouchClip);
+    const pose = seat ? seat.pose ?? glbCharacterConfig.crouchClip : null;
+    if (pose !== (b.seated || null)) {
+      b.seated = pose;
+      if (pose) b.character.playPose(pose);
       else b.character.endPose();
     }
     if (seat) {
@@ -421,7 +425,7 @@ export function installTownFolk(T, ctx) {
   };
   // Drawn at all: out and about where the player is — in town, or in the same room (where
   // those at home are seen too: asleep on the bed, hiding)
-  const drawable = (n, room) => !n.fighter && T.rooms.roomAt(n.x, n.z) === room && (!n.inside || !!room);
+  const drawable = (n, room) => !n.fighter && !n.hidden && T.rooms.roomAt(n.x, n.z) === room && (!n.inside || !!room);
   const updateLod = () => {
     const p = playerPos();
     const room = T.rooms.roomAt(p.x, p.z);

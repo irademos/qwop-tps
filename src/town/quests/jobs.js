@@ -49,7 +49,8 @@
 //           canoe's within r — stop: it's stopped there and the rod comes out
 //   fishHere { golden?, text } — a fish caught there (quick bites); golden: the golden fish hooked
 //           (it won't come in — the next beat takes it away)
-//   ship    { mode }          — the pirate ship: 'park' (out on the horizon, waiting)
+//   ship    { mode }          — the pirate ship: 'park' (out on the horizon, waiting), 'lurk' (all at
+//           once a little way off the canoe — out of sight while the player's under water)
 //   pirates { who, bombers, archers } — in comes the ship, a bomb shakes the golden fish off, then
 //           the chase: `who` paddles, the crew (bomb throwers and archers, one at a time) attack, the
 //           player knocks their bombs / arrows back; done once they're all down (townPirates.js)
@@ -57,6 +58,25 @@
 //           talk box, no buttons; the job goes straight on
 //   pilotHome { who, text }   — `who` paddles the canoe home to its mooring
 //   canoeLand { who }         — the player and `who` ashore, the canoe moored
+//   needItem { item, who?, ifMissing } — the player has it (a town item: 'gun' = the bow — a bow
+//           with no arrows gets a few from `who`) → on; else goto the `ifMissing` label
+//   potion  { on }            — the wizard's potion: air under water for the player and the job's
+//           swimmers till it's off (or the job ends)
+//   diveOut { who }           — `who` climbs out of the canoe into the water; done once the player's
+//           out and under too (Get out works anywhere on the water)
+//   diveLead { who, to, r, text } — `who` swims down to a place under water ('diveA' / 'diveB'),
+//           waiting if the player falls behind; done once both are there
+//   diveFish { at, count?, golden?, text } — fish put there; done once one's speared with the bow
+//           and wound in (golden: the golden fish)
+//   surface { who, text }     — back up: `who` beside the canoe, the player up out of the dive
+//   pirateBombs { who, count } — the ship (moved there while the player was under — ship 'lurk')
+//           throws `count` bombs on the player and `who`; black; the player wakes lying in the
+//           canoe, `who` taken by the pirates (out of the world — townQuests.js capture), the
+//           ship off out to sea
+//   chaseShip { s?, text }    — arrows on the water after the ship as it gets away; done once it's
+//           gone or s seconds are up
+//   feed    { lines, banner? } — lines in the feed (and a banner: [title, sub])
+//   seek's `needs: '<item>'` (+ needsText): the giver won't come till the player has it
 //   wait    { until? } — the runner's own: nothing happens till a talk / action moves on
 // Any beat: talks: { <role>: talk } — what that townsperson says if talked to while it's the beat
 // (open-ended — talk to someone whenever); entry: the tracker's line.
@@ -67,7 +87,9 @@
 // Places (`to` / `from` / `at`): 'wizard' (his stall up the mountain), 'camp' (the bandit camp), 'town'
 // (by the shop, where the cart's parked), 'cart', 'entrance' (the newcomers' way into town),
 // 'fishSpot' (the fishing spot, where the canoe's moored), 'sea1' / 'sea2' (out on the water past
-// it — townPirates.js' sea plan: part way out, and the far side of a ring of open water).
+// it — townPirates.js' sea plan: part way out, and the far side of a ring of open water), 'dive'
+// (where it gets deep past them), 'diveA' / 'diveB' (spots under water on out from there — the
+// dive plan), 'mooring' (the canoe's mooring).
 // Text: {name} = the player's name, {<role>} = that townsperson's first name, {<role>.dad} /
 // .father / .he / .him / .his / .man / .sir = the word for them (Dad or Mum…; capitalised as written).
 
@@ -317,6 +339,77 @@ const FISHER_JOBS = [
       },
       { do: 'pay', from: 'fisher', coins: 60, memory: 'The pirates and the golden fish' },
       { do: 'release', who: 'fisher' },
+    ],
+  },
+  // ── After the golden fish got away: down after her with a bow — and the pirates again ──
+  {
+    id: 'goldenDive', title: 'Under the waves', waitS: 120, failWaitS: 45, restartAt: 'retry',
+    downText: 'You went down — {fisher} got you both back to shore somehow. {fisher.He}\'ll want another go.',
+    beats: [
+      { do: 'seek', who: 'fisher' },
+      {
+        do: 'talk', who: 'fisher', reward: 'Diving with {fisher}',
+        lines: [
+          ['fisher', '{name}! I can\'t stop thinking about her. The golden fish. She won\'t take a hook — so we go down after her.'],
+          ['fisher', 'Under the water, with a bow. An arrow on a string — spear her and wind her in. Have you got a bow?'],
+        ],
+        choices: [{ label: 'Let\'s see' }, { label: 'Later', then: ['later'] }],
+      },
+      { do: 'needItem', item: 'gun', who: 'fisher', ifMissing: 'nobow' },
+      { do: 'talk', who: 'fisher', lines: [['fisher', 'A bow! Perfect. Down to the canoe, then.']], choices: [{ label: 'Let\'s go', then: ['goto:crew'] }] },
+      // (no bow yet: he comes back once there is one — the seek's `needs`)
+      {
+        do: 'talk', label: 'nobow', who: 'fisher',
+        lines: [['fisher', 'No bow? The weaponsmith in the shop sells them. Come find me once you\'ve bought one.']],
+        choices: [{ label: 'I will', then: ['later'] }],
+      },
+      { do: 'seek', label: 'retry', who: 'fisher', queue: true, needs: 'gun', needsText: 'Buy a bow at the shop, then go and see {fisher}' },
+      {
+        do: 'talk', who: 'fisher', reward: 'Diving with {fisher}',
+        lines: [['fisher', 'Ready to go down after the golden fish, {name}? Bring your bow.']],
+        choices: [{ label: 'Let\'s go' }, { label: 'Later', then: ['later'] }],
+      },
+      { do: 'needItem', item: 'gun', who: 'fisher', ifMissing: 'nobow' },
+      { do: 'canoeCrew', label: 'crew', checkpoint: true, who: 'fisher' },
+      { do: 'say', who: 'fisher', lines: ['Follow the arrows out past the herring grounds — where it gets deep.'] },
+      { do: 'paddle', to: 'dive', r: 5, text: 'Paddle out to where it gets deep' },
+      {
+        do: 'say', who: 'fisher',
+        lines: [
+          'Here. Now — I bought a potion off the wizard this morning. Cost me a week\'s catch.',
+          'A drop each, and we\'ll have a bubble of air round our heads under water. Lasts till the job\'s done.',
+          'Over the side with you, then hold Dive to go under. Stay close!',
+        ],
+      },
+      { do: 'potion', on: true },
+      { do: 'diveOut', who: 'fisher' },
+      { do: 'diveLead', who: 'fisher', to: 'diveA', r: 5, text: 'Follow {fisher} under water' },
+      {
+        do: 'say', who: 'fisher',
+        lines: [
+          'See them? Hold the Bow to aim — let go and the arrow flies on its string.',
+          'Spear one, then wind it in on the reel. Go on — try it.',
+        ],
+      },
+      { do: 'diveFish', at: 'diveA', count: 2, text: 'Spear a fish with the bow — hold Bow to aim, let go to shoot' },
+      { do: 'say', who: 'fisher', lines: ['That\'s it! A natural.', 'Now follow me — she keeps deeper. I can feel it.'] },
+      { do: 'diveLead', who: 'fisher', to: 'diveB', r: 5, text: 'Follow {fisher} deeper' },
+      { do: 'say', who: 'fisher', lines: ['THERE! Golden as the sun… Easy now. Take your time.'] },
+      { do: 'diveFish', at: 'diveB', golden: true, text: 'Spear the golden fish!' },
+      // (while the player's still under: the pirate ship's there all at once, out of sight in the murk)
+      { do: 'ship', mode: 'lurk' },
+      { do: 'say', who: 'fisher', lines: ['WE GOT HER! Grandad, you should see this!', 'Up we go — let\'s show the whole town!'] },
+      { do: 'surface', who: 'fisher', text: 'Swim back up to the surface' },
+      { do: 'pirateBombs', who: 'fisher', count: 3 },
+      {
+        do: 'feed', banner: ['TAKEN', 'The pirates have {fisher}'],
+        lines: ['You come to in the canoe. Your head\'s ringing.', 'The pirates have {fisher} — and the golden fish. Their ship\'s making off!'],
+      },
+      { do: 'chaseShip', text: 'After the pirate ship!' },
+      { do: 'feed', lines: ['They\'re too fast — the ship\'s gone over the horizon.', 'You\'ll never catch them in a canoe. Back to shore…'] },
+      { do: 'paddle', to: 'mooring', r: 6, text: 'Paddle back to shore' },
+      { do: 'canoeLand' },
+      { do: 'feed', lines: ['{fisher} is gone. Somewhere out there, the pirates have {fisher.him}.'] },
     ],
   },
 ];

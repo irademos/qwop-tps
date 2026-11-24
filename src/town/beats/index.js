@@ -9,7 +9,8 @@ import { waveBeats } from './wave.js';
 import { rewardsBeats } from './rewards.js';
 import { craftBeats } from './craft.js';
 import { seaBeats } from './sea.js';
+import { diveBeats } from './dive.js';
 
 export const townBeats = (W) => ({
-  ...peopleBeats(W), ...goalBeats(W), ...cartBeats(W), ...sceneBeats(W), ...ambushBeats(W), ...waveBeats(W), ...rewardsBeats(W), ...craftBeats(W), ...seaBeats(W),
+  ...peopleBeats(W), ...goalBeats(W), ...cartBeats(W), ...sceneBeats(W), ...ambushBeats(W), ...waveBeats(W), ...rewardsBeats(W), ...craftBeats(W), ...seaBeats(W), ...diveBeats(W),
 });

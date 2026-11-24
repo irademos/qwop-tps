@@ -131,6 +131,7 @@ import { installTownRuins } from './townRuins.js';
 import { installTownBook } from './townBook.js';
 import { installTownDefense } from './townDefense.js';
 import { installTownAllies } from './townAllies.js';
+import { installTownDiver } from './townDiver.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -1049,6 +1050,7 @@ export function createTownMode(ctx) {
   installTownDrive(T, ctx);
   installTownBook(T, ctx);
   installTownAllies(T, ctx);
+  installTownDiver(T, ctx);
   installTownDefense(T, ctx);
 
   // ── The town book's Town page (townBook.js): everyone in town, their coins and a few stats ──
@@ -1129,7 +1131,9 @@ export function createTownMode(ctx) {
     // Town's dive (townDive.js): an arrow on a string in a fish — the reel ({ onTurns, text } / null)
     // and the catch landed (its length in m) → how many fish went in the bag
     setDiveReel: (reel) => { if (T.ready) T.setExtReel(reel); },
-    landDiveFish: (len) => (T.active && T.ready ? T.landDiveFish(len) : 0),
+    landDiveFish: (len, info) => (T.active && T.ready ? T.landDiveFish(len, info) : 0),
+    // (a job's potion — the fisher's dive: air under water for nothing, the swim bar held — beats/dive.js)
+    questAir: () => !!(T.active && T.ready && T.questAir),
     feed: (text) => { if (T.active) T.feedLine(text); },
     getWeaponTargets: T.getWeaponTargets,
     // (a wave's swordsman going for an ally beside the player instead — townAllies.js)

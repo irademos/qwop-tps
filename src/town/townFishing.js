@@ -661,7 +661,15 @@ export function installTownFishing(T, ctx) {
   T.extReel = null;
   const setExtReel = (reel) => { T.extReel = reel || null; refreshHud(); };
   // A fish speared under water brought in (len: its length in m — koi 0.5 … 0.9)
-  const landDiveFish = (len) => {
+  // (info: { id, golden } — a job's fish: beats/dive.js counts it; the golden one is no goods)
+  const landDiveFish = (len, info = {}) => {
+    if (info?.golden) {
+      ctx.playSfx?.('splash');
+      say('The golden fish! Speared!');
+      T.popup?.({ icon: '🐟', title: 'The golden fish', sub: `${Math.round(len * 100)} cm · gleaming gold` });
+      T.questNote('diveFish', info);
+      return 0;
+    }
     const size = FISH_SIZES[len < 0.62 ? 0 : len < 0.78 ? 1 : 2];
     const n = size.n;
     ctx.playSfx?.('splash');
@@ -671,6 +679,7 @@ export function installTownFishing(T, ctx) {
     say(`Speared ${size.label}! ${got > 1 ? `+${got} fish` : got ? '+1 fish' : 'No room in your bag'}${got ? ` (${T.goods.fish})` : ''}`);
     if (got > 0) T.popup?.({ icon: '🐟', title: kind, sub: `${cm} cm · +${got} fish` });
     T.questNote('fish');
+    T.questNote('diveFish', info ?? {});
     return got;
   };
 

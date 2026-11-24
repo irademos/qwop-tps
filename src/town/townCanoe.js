@@ -13,9 +13,10 @@
 // Paddling and how it moves on the water: canoeBoat.js (shared with the guest's sea start). The
 // joystick / WASD steer it the same way — without a gyro that's the only way.
 // It won't go where the water is shallower than CANOE_MIN_DEPTH (runs aground). 🛶 Get out
-// with dry ground within CANOE_SHORE_DIST: the player steps onto it, the canoe stays there
-// (back at its mooring the next time Town opens). Dying / an arrest / leaving Town gets them
-// out too. Only the player's own: in a shared town the others don't see it move (they'd see
+// anywhere: with dry ground within CANOE_SHORE_DIST the player steps onto it, else over the side
+// into the water (swimming — townDive.js to go under); swimming up to it (within CANOE_BOARD_DIST)
+// 🛶 Get in the canoe climbs back in. The canoe stays where it's left (back at its mooring the
+// next time Town opens). Dying / an arrest / leaving Town gets them out too. Only the player's own: in a shared town the others don't see it move (they'd see
 // the player standing on the water).
 // There's no canoe in Town till the fisher's built it (his first job — quests/jobs.js, the `build`
 // beat → T.setCanoeBuilt(true), kept with the quests' save as a flag): hidden, no Get in.
@@ -26,7 +27,8 @@
 // paddles again) it's them paddling: their own oar stroking on alternate sides, the canoe steered
 // toward the target, whatever the player holds (T.setCanoeArmed(true): the sword, to knock the
 // pirates' bombs back). T.canoeRock(at) — a blast beside it rocks it and pushes it off. No Get
-// out while someone's aboard with the player: the job lands them (T.canoeLand).
+// out while the passenger's paddling (the job lands them — T.canoeLand); otherwise out and back in
+// whenever (the fisher's dive: out over the side, both of them).
 
 import * as THREE from 'three';
 import { registerTerrainHeightOverride } from '../environment/terrainHeight.js';
@@ -101,6 +103,8 @@ export function installTownCanoe(T, ctx) {
   // ── Getting in and out ──
   const board = () => {
     if (!canoe || canoe.aboard || ctx.isPlayerDead() || T.sequence || T.jail || T.inRoom) return;
+    // (climbing in from the water: up from under it first, out of the swim)
+    ctx.endDive?.();
     if (T.fishing) { T.fishing = null; T.stopFishingRig(); }
     if (T.held) T.dropHeld();
     canoe.aboard = true;
@@ -155,13 +159,33 @@ export function installTownCanoe(T, ctx) {
       searching = false;
     }
   };
+  // Over the side into the water: beside it on whichever side the water's deep enough to swim
+  const waterSpot = () => {
+    const s = canoe.standPoint();
+    const across = { x: Math.cos(canoe.yaw), z: -Math.sin(canoe.yaw) }; // (its left)
+    for (const side of [1, -1]) {
+      for (const d of [CANOE_HALF_WIDTH + 0.9, CANOE_HALF_WIDTH + 1.4]) {
+        const x = s.x + across.x * side * d;
+        const z = s.z + across.z * side * d;
+        if (ctx.waterDepth(x, z) > 1.1) return { x, z, yaw: canoe.yaw };
+      }
+    }
+    return null;
+  };
   const getOut = () => {
     if (!canoe?.aboard) return;
-    const spot = shoreSpot();
-    if (!spot) { T.feedLine('Paddle closer to the shore to get out.'); return; }
     const s = canoe.standPoint();
+    const spot = shoreSpot();
+    if (spot) {
+      leave();
+      ctx.teleport(spot.x, spot.z, Math.atan2(spot.x - s.x, spot.z - s.z));
+      return;
+    }
+    const w = waterSpot();
+    if (!w) { T.feedLine('Paddle closer to the shore to get out.'); return; }
     leave();
-    ctx.teleport(spot.x, spot.z, Math.atan2(spot.x - s.x, spot.z - s.z));
+    ctx.teleport(w.x, w.z, w.yaw);
+    ctx.playSfx?.('splash');
   };
 
   // ── Each frame: the oar's push, the joystick's, drag, moving it (and the player in it) ──
@@ -208,8 +232,8 @@ export function installTownCanoe(T, ctx) {
   // ── Acts (townActs.js): 🛶 Get in by it; aboard, 🛶 Get out by the shore ──
   const canoeActs = (calm) => {
     if (!canoe || (!built && !canoe.aboard)) return [];
-    if (canoe.aboard) return !passenger && shoreSpot() ? [{ key: 'canoeout', label: 'Get out', onClick: getOut }] : [];
-    if (!calm || T.inRoom || T.jail || T.held || T.fishing || ctx.isPlayerDead()) return [];
+    if (canoe.aboard) return !pilot && (shoreSpot() || waterSpot()) ? [{ key: 'canoeout', label: 'Get out', onClick: getOut }] : [];
+    if (!calm || T.inRoom || T.jail || T.held || T.fishing || ctx.isPlayerDead() || ctx.getControls?.()?.swimLocked) return [];
     const p = T.playerPos();
     return dist2(p.x, p.z, canoe.x, canoe.z) < CANOE_BOARD_DIST ? [{ key: 'canoein', label: 'Get in the canoe', onClick: board }] : [];
   };
@@ -365,10 +389,12 @@ export function installTownCanoe(T, ctx) {
   };
 
   Object.assign(T, {
-    canoeActs, canoeBuilt: () => built, fishAnywhere, fishWater, inCanoe, resetCanoe, setCanoeBuilt, updateCanoe,
+    canoeActs, canoeBuilt: () => built, canoeBoard: () => { board(); return !!canoe?.aboard; }, fishAnywhere, fishWater, inCanoe, resetCanoe, setCanoeBuilt, updateCanoe,
     canoeStop, canoePassenger, canoeHasPassenger: () => !!passenger, canoePilot, canoeSeat, canoeRock, canoePose, canoeLand, moorCanoe,
     setCanoeArmed, canoeArmed: () => !!armed && !!canoe?.aboard,
     canoeArmedUntilOar: () => armed === 'untilOar' && !!canoe?.aboard,
+    // (dev console: town.debug().T.canoeDebug() — the boat itself; .moveTo(x, z) puts it there)
+    canoeDebug: () => canoe && Object.assign(canoe, { moveTo: (x, z) => { canoe.x = x; canoe.z = z; canoe.stop(); canoe.place(T.simT); } }),
     canoeFaceSide: (side) => { faceSide = side ? Math.sign(side) : 0; },
   });
 }

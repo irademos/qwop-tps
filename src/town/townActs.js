@@ -188,6 +188,9 @@ export function installTownActs(T, ctx) {
       return out.slice(0, 3);
     }
     const calm = T.calmNow();
+    // (swimming by the canoe: 🛶 Get in first — out of it anywhere, back in anywhere)
+    const swimming = !!ctx.getControls?.()?.isSwimming || !!ctx.isDiving?.();
+    if (swimming && calm) out.push(...T.canoeActs(true));
     // The houses (walked into through the door — updateRooms): inside, 🚪 Leave by the doorway;
     // the shops' back counter buttons
     if (T.inRoom) {
@@ -228,7 +231,7 @@ export function installTownActs(T, ctx) {
       out.push(...T.cookActs());
       if (!T.inCart()) {
         out.push(...T.cartActs(true));
-        out.push(...T.canoeActs(true));
+        if (!swimming) out.push(...T.canoeActs(true));
         out.push(...T.grabActs());
       }
       // (only a field the player may pick: their own, or the farmer's on the first day)

@@ -5,7 +5,7 @@
 const ARRIVE_FAR = 60; // m off before `arrive` brings them in by its place
 
 export const peopleBeats = (W) => {
-  const { T, ctx, P, placeOf, mayApproach, dist2, roleNpc, roleGone, canTake, control, release, stand, fill, calm, isNight, npcMark, actors, open, talker, firstName, SNOOZE_S, SEEK_STOP, SEEK_STUCK_S } = W;
+  const { T, ctx, P, placeOf, mayApproach, hasItem, dist2, roleNpc, roleGone, canTake, control, release, stand, fill, calm, isNight, npcMark, actors, open, talker, firstName, SNOOZE_S, SEEK_STOP, SEEK_STUCK_S } = W;
   return {
     // The giver comes to find the player (❗ over them); talking to them first does too
     seek: {
@@ -37,7 +37,8 @@ export const peopleBeats = (W) => {
             n.path = null;
           }
         }
-        const off = (isNight() && !b.anyTime) || T.law.stars > 0 || T.jail || ctx.isPlayerDead() || !canTake(n, b.anyTime);
+        // (needs: they won't come till the player has it — the fisher's bow; talking to them still does)
+        const off = (b.needs && !hasItem(b.needs)) || (isNight() && !b.anyTime) || T.law.stars > 0 || T.jail || ctx.isPlayerDead() || !canTake(n, b.anyTime);
         if (off) { if (n.questing && ['seek', 'wait'].includes(n.qmode?.kind)) release(n); return false; }
         if (!n.questing || !['seek', 'wait'].includes(n.qmode?.kind)) control(n, 'seek');
         // (the player indoors and they aren't: met at the door outside)
@@ -56,6 +57,7 @@ export const peopleBeats = (W) => {
         const n = c.s.n;
         if (!n) return 'Look around town';
         const who = `${firstName(n.name)} the ${n.def.label.toLowerCase()}`;
+        if (c.beat.needs && !hasItem(c.beat.needs)) return fill(c.beat.needsText ?? `Get what ${who} asked for, then go and see ${who}`, c.q);
         if (n.inside && !n.questing) return `${who} is home — back in the morning`;
         if (isNight() && !c.beat.anyTime) return `${who} will come and find you in the morning`;
         if (n.qmode?.kind === 'wait') return `Go and see ${who}`;
