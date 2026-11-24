@@ -338,7 +338,7 @@ export function updateProjectiles({
     }
 
     // PvP: other players (legacy — not when the targets above are the players)
-    if (!pvpAlsoEnemies) for (const [id, { model }] of Object.entries(otherPlayers)) {
+    if (!pvpAlsoEnemies && !proj.userData.onlyHits) for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
       if (!leftShooter || wallHit) continue;
       const playerBox = getObjectBox(model);
@@ -374,6 +374,8 @@ export function updateProjectiles({
         if (enemy.isDead) continue;
         // (homing back at its shooter: through anyone else on the way)
         if (proj.userData.homeOn && enemy !== proj.userData.homeOn) continue;
+        // (an ally's arrow — Town's sheriff: only the fight's foes, never townsfolk)
+        if (proj.userData.onlyHits && !proj.userData.onlyHits(enemy)) continue;
         const enemyBox = getObjectBox(enemy.group);
         if (!enemyBox) continue;
         if ((!wallHit && projBox.intersectsBox(enemyBox)) || sweptHitsEnemy(prevPos, segEnd, enemy)) {
@@ -382,7 +384,7 @@ export function updateProjectiles({
           const damage = getDamage(proj);
           const dir = vel.clone().normalize();
           const killed = enemy.applyDamage(Math.max(1, Math.round(damage)));
-          if (!enemy._tutorial) window._phoneBuzz?.(killed ? 'kill' : 'hit'); // (the phone buzzes)
+          if (!enemy._tutorial && proj.userData.shooterId !== 'ally') window._phoneBuzz?.(killed ? 'kill' : 'hit'); // (the phone buzzes)
           if (killed) {
             enemy.applyDirectKnockback({ direction: dir, horizSpeed: 9, upVelocity: 3.5, torqueMag: 70, ragdoll: true });
           } else {

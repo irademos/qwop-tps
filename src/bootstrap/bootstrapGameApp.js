@@ -5277,9 +5277,9 @@ async function initCore(runtimeContext) {
         },
       }];
     }
-    // A Town job's ally (the wizard's wand — townQuests.js): only the job's bandits
+    // A Town ally's (the wizard's wand — townAllies.js): only fight foes (a wave's, a job's bandits)
     if (blast.side === 'ally') {
-      return hordeEnemies.filter((e) => e._questFoe && !e.isDead && e.group?.parent).map((enemy) => ({
+      return hordeEnemies.filter((e) => e._fightFoe && !e.isDead && e.group?.parent).map((enemy) => ({
         center: enemy.getCenterWorldPos(),
         radius: (enemy.bodyHitRadius ?? 0.45) * 0.9,
         blocks: (b) => !!enemy.blocksBlast?.(b),
@@ -5919,6 +5919,7 @@ async function initCore(runtimeContext) {
     _psKillHud.classList.toggle('hidden', !visible || _classicMode || !!town?.isActive() || (!_endless && _psIsFinalStage(_psStage)));
     if (_classicMode) _classicUpdateScore();
   };
+  const PS_ALLY_FIGHT_HOLD_DIST = 10; // m — a foe this near going for an ally (Town): the auto-walk waits
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
   // Bow / wand out in Showdown / Endless: an enemy closer than PS_RANGED_TRIGGER_DIST sends the
   // player back in a quick hop (PS_RANGED_BACK_SPEED, until all are PS_RANGED_KEEP_DIST away or
@@ -10215,7 +10216,7 @@ async function initCore(runtimeContext) {
     return near.length ? near[Math.floor(Math.random() * near.length)] : best;
   };
   // The stretch of the walk from (x, z): TOWN_WAVE_PATH_LEN m on round the loop, either way
-  const _townWavePath = (x, z) => {
+  const _townWavePath = (x, z, pathLen = TOWN_WAVE_PATH_LEN) => {
     let pts = _endlessLoop();
     if (!pts) return null;
     if (Math.random() < 0.5) pts = pts.slice().reverse();
@@ -10234,7 +10235,7 @@ async function initCore(runtimeContext) {
     const out = [{ x, z }];
     let total = 0;
     let prev = out[0];
-    for (let step = 1; step <= pts.length && total < TOWN_WAVE_PATH_LEN; step++) {
+    for (let step = 1; step <= pts.length && total < pathLen; step++) {
       const p = pts[(k + step) % pts.length];
       const len = Math.hypot(p.x - prev.x, p.z - prev.z);
       if (len < 0.05) continue;
@@ -10245,17 +10246,28 @@ async function initCore(runtimeContext) {
     }
     return out.length >= 2 ? out : null;
   };
-  // The wave starts: { x, z } the spot, level (the Endless wave it plays), onEnd({ won, killed, total }) → its size
-  const _townWaveStart = ({ x, z, level = 1, onEnd = null }) => {
-    if (_townWave || !playerModel) return 0;
-    const def = _endlessWave(Math.max(1, level));
+  // A wave starts (any fight out on the walk — the night defense, a job's ambush): { x, z } the
+  // spot, level (the Endless wave it plays), count (its size instead of the level's), champion
+  // (false: none), pathLen (m of the walk), banner { title, sub } (null: none), isOn() (false: it's
+  // dropped — default Town running), onEnd({ won, killed, total }) → its size (0: couldn't start).
+  // Its enemies are `_fightFoe` (what allies — src/town/townAllies.js — fight, and their spells /
+  // arrows hit); plain swordsmen may go for an ally instead of the player (allyTargetFor).
+  const _townWaveStart = ({ x, z, level = 1, count = null, champion = null, pathLen = TOWN_WAVE_PATH_LEN,
+    banner = undefined, isOn = null, onEnd = null }) => {
+    if (_townWave || !playerModel || _endless) return 0;
+    let def = _endlessWave(Math.max(1, level));
+    if (Number.isFinite(count) || champion != null) {
+      const ch = champion ?? def.champion;
+      def = { ...def, count: Math.max(1, Math.round(count ?? def.count)), champion: !!ch };
+    }
     const kinds = _endlessLineup(def);
     _townWave = {
       wave: Math.max(1, level), def, diff: def.diff, kinds, toSpawn: kinds.length, total: kinds.length,
       enemies: [], nextSpawnAt: performance.now() + 1800, onEnd, wasNight: _psCurrentIsNight,
+      isOn: isOn ?? (() => !!town?.isActive()),
     };
     [...ENDLESS_CHAMPION_CHARACTERS].forEach((k) => preloadCharacterModel(MATCH_CHARACTERS[k].url));
-    const pts = _townWavePath(x, z);
+    const pts = _townWavePath(x, z, pathLen);
     if (pts) {
       const path = createPolyline(pts);
       _psPath = path;
@@ -10276,7 +10288,8 @@ async function initCore(runtimeContext) {
     comboMeter.reset();
     // (empty hands: the sword out, if they have one)
     if (!_heldWeaponId() && _townLoadout?.hasSword) _equipByPlayer(FOAM_SWORD_ITEM_ID);
-    _showWorldBanner('DEFEND THE TOWN', `${_townWave.total} bandits are coming`, 2600);
+    const bn = banner === undefined ? { title: 'DEFEND THE TOWN', sub: `${_townWave.total} bandits are coming` } : banner;
+    if (bn) _showWorldBanner(bn.title, bn.sub ?? '', 2600);
     _psUpdateKillHud(true);
     return _townWave.total;
   };
@@ -10304,7 +10317,7 @@ async function initCore(runtimeContext) {
   const _townWaveUpdate = () => {
     const W = _townWave;
     if (!W) return;
-    if (!town?.isActive()) { _townWaveEnd(false, { silent: true }); return; }
+    if (!W.isOn()) { _townWaveEnd(false, { silent: true }); return; }
     if (playerDead) return;
     let alive = 0;
     for (const e of W.enemies) {
@@ -10324,6 +10337,11 @@ async function initCore(runtimeContext) {
       if (enemy) {
         enemy._town = true;       // (no Showdown kill stats)
         enemy._coinDropped = true; // (counted / coins dropped above)
+        enemy._fightFoe = true;    // (what allies fight — townAllies.js)
+        // (a plain swordsman may go for an ally beside the player instead)
+        if (!(enemy instanceof BombThrowerEnemy) && !enemy.wand && !enemy.ranged && !(_psBoss?.enemy === enemy)) {
+          enemy.questTarget = () => town?.allyTargetFor?.(enemy) ?? null;
+        }
         W.enemies.push(enemy);
         W.kinds.pop();
         W.toSpawn -= 1;
@@ -11557,6 +11575,7 @@ async function initCore(runtimeContext) {
     camera,
     domElement: renderer.domElement,
     getPlayerPosition: () => playerModel.position,
+    getPlayerYaw: () => playerModel?.rotation.y ?? 0, // (the way the body faces — allies stand beside it, townAllies.js)
     // (the market's shop camera frames a counter from where the player stands)
     setPlayerHidden: (hidden) => { playerModel.visible = !hidden; },
     getPlayerName: () => playerName || 'friend',
@@ -11660,12 +11679,33 @@ async function initCore(runtimeContext) {
     // The night defense (townDefense.js): an Endless wave out on the Showdown walk — its size at a
     // level, a start spot on the walk near (x, z) (ok: the town's nav grid), start / stop, how it's going
     defenseWaveSize: (level) => _endlessWave(Math.max(1, level)).count,
-    defenseStart: (x, z, ok) => _townWaveStartSpot(x, z, ok),
-    startDefenseWave: (opts) => _townWaveStart(opts),
-    stopDefenseWave: ({ silent = false } = {}) => _townWaveEnd(false, { silent }),
-    defenseWaveState: () => (_townWave ? { killed: _townWave.enemies.filter((e) => e.isDead).length, total: _townWave.total } : null),
-    // A Town job's ally casting (the wizard beside the player — townQuests.js): a wand blast from
-    // `origin` ({ x, y, z }) along `dir` ({ x, z }) that only hits the job's bandits (side 'ally')
+    // A wave out on the walk (the night defense, a job's fight — the `wave` beat): a start spot on
+    // the walk near (x, z), start (see _townWaveStart) / stop, how it's going
+    waveSpot: (x, z, ok) => _townWaveStartSpot(x, z, ok),
+    startWave: (opts) => _townWaveStart(opts),
+    stopWave: ({ silent = false } = {}) => _townWaveEnd(false, { silent }),
+    waveState: () => (_townWave ? { killed: _townWave.enemies.filter((e) => e.isDead).length, total: _townWave.total } : null),
+    // Who allies fight (townAllies.js): a wave's enemies + a job's ambush bandits, alive
+    fightFoes: () => hordeEnemies.filter((e) => e._fightFoe && !e.isDead && e.group?.parent),
+    // An ally's arrow (the sheriff's bow) from `origin` at `foe` (one of fightFoes): homes in on
+    // it and hits only fight foes — never the player, townsfolk or other players
+    allyShoot: (origin, foe) => {
+      const o = new THREE.Vector3(origin.x, origin.y, origin.z);
+      const to = foe.group.position.clone().setY(foe.group.position.y + 0.9);
+      const dir = to.sub(o);
+      if (dir.lengthSq() < 1e-6) return;
+      dir.normalize();
+      spawnProjectileWithPerfFlags(scene, projectiles, o, dir, 'ally', arrowShotOptions({ speed: BOT_ARROW_SPEED, gravityScale: 0 }));
+      const shot = projectiles[projectiles.length - 1];
+      if (shot) {
+        shot.userData.onlyHits = (e) => !!e._fightFoe;
+        shot.userData.homeOn = foe;
+        shot.userData.reflected = true; // (no PvP targets)
+      }
+      audioManager?.playSynth?.('bowRelease');
+    },
+    // A Town ally casting (the wizard beside the player — townAllies.js): a wand blast from
+    // `origin` ({ x, y, z }) along `dir` ({ x, z }) that only hits fight foes (side 'ally')
     castAllySpell: (origin, dir) => {
       const forward = new THREE.Vector3(dir.x, 0, dir.z);
       if (forward.lengthSq() < 1e-6) return;
@@ -13126,10 +13166,12 @@ async function initCore(runtimeContext) {
       if (_psAutoWalking && (_psBossTalking || _psRangedHold)) {
         playerControls.isMoving = false;
       } else if (_psAutoWalking) {
+        // (…or one near going for an ally beside the player — Town's townAllies.js: the walk
+        // waits for that fight too, so the ally isn't walked away from it)
         const _hasNearAttacker = hordeEnemies.some(e =>
-          !e.isDead &&
-          e._aiState === 'attack' &&
-          e.group.position.distanceTo(playerModel.position) < 3.5
+          !e.isDead && (
+            (e._aiState === 'attack' && e.group.position.distanceTo(playerModel.position) < 3.5)
+            || (e.questTarget && e.targetHitHandler && e.group.position.distanceTo(playerModel.position) < PS_ALLY_FIGHT_HOLD_DIST))
         );
         if (_psFindIncomingThreat()) {
           playerControls.isMoving = false;
@@ -13617,7 +13659,7 @@ async function initCore(runtimeContext) {
         if (_he instanceof BombThrowerEnemy) _he.throwsPaused = _othersTurn;
         // (a Town job's bandit going for someone else — the wizard beside the player, townQuests.js)
         const _qt = _he.questTarget?.() ?? null;
-        if (_he.questTarget) _he.targetHitHandler = _qt ? _qt.onHit : null;
+        if (_he.questTarget) { _he.targetHitHandler = _qt ? _qt.onHit : null; _he.targetHitRadius = _qt?.hitRadius ?? null; }
         if (_qt) {
           _he.update(frameDelta, _qt.model, null, false, !_attacksHeld(), false);
         } else if (_attacksHeld()) {

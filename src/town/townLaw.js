@@ -163,7 +163,7 @@ export function installTownLaw(T, ctx) {
   };
   // (from: what they run from — the player by default)
   const flee = (n, from = null) => {
-    if (!n.alive || n.fighter || n.questing || n.jailedUntil > T.simT || !T.take(n)) return;
+    if (!n.alive || n.fighter || n.questing || n.ally || n.jailedUntil > T.simT || !T.take(n)) return;
     n.fear = 12;
     T.clearTalk(n);
     T.endBrawl(n);

@@ -1547,7 +1547,8 @@ export class EnemyPlayer {
 
     // Multiplayer bot swinging at someone other than the local player
     if (this.targetHitHandler) {
-      if (dist > SWORD_TIP_HIT_RADIUS) return;
+      // (targetHitRadius: a target of another size — Town's allies, townAllies.js)
+      if (dist > (this.targetHitRadius ?? SWORD_TIP_HIT_RADIUS)) return;
       this.group.getWorldQuaternion(_rootQ);
       _swingDirWorld.subVectors(this._swingPreset.to, this._swingPreset.from).applyQuaternion(_rootQ);
       const result = this.targetHitHandler(targetModel, _swingDirWorld);

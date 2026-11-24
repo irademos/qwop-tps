@@ -130,6 +130,7 @@ import { installTownTrees } from './townTrees.js';
 import { installTownRuins } from './townRuins.js';
 import { installTownBook } from './townBook.js';
 import { installTownDefense } from './townDefense.js';
+import { installTownAllies } from './townAllies.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -824,6 +825,7 @@ export function createTownMode(ctx) {
     flushCloud();
     T.resetQuests(); // (a job's people, actors, bandits put away — it starts over at its checkpoint)
     T.resetDefense(); // (the night defense's wave taken away — townDefense.js)
+    T.resetAllies(); // (anyone still fighting beside the player — townAllies.js)
     T.resetCanoe(); // (out of it before the town's gear is put back: its oar goes away)
     T.resetPirates(); // (the pirate ship back at its anchor — the fisher's golden fish)
     T.resetOctopus(); // (the night octopus gone)
@@ -982,7 +984,7 @@ export function createTownMode(ctx) {
     if (hen) return hen;
     for (const n of T.npcs) {
       // (someone in a job with the player — the wizard fighting beside them — isn't hit)
-      if (!n.alive || !n.body || n.fighter || n.questing || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
+      if (!n.alive || !n.body || n.fighter || n.questing || n.ally || n.inside || n.dying || T.rooms.roomAt(n.x, n.z)) continue;
       // (once per swing — swordCombo.js' swingId — so quick swings each land)
       if (T.simT - n.lastHitAt < 0.18 || (swingId != null && n.lastSwing === swingId)) continue;
       const cy = T.groundY(n) + 0.55 * heightScale(n.url);
@@ -1046,6 +1048,7 @@ export function createTownMode(ctx) {
   installTownCart(T, ctx);
   installTownDrive(T, ctx);
   installTownBook(T, ctx);
+  installTownAllies(T, ctx);
   installTownDefense(T, ctx);
 
   // ── The town book's Town page (townBook.js): everyone in town, their coins and a few stats ──
@@ -1129,6 +1132,8 @@ export function createTownMode(ctx) {
     landDiveFish: (len) => (T.active && T.ready ? T.landDiveFish(len) : 0),
     feed: (text) => { if (T.active) T.feedLine(text); },
     getWeaponTargets: T.getWeaponTargets,
+    // (a wave's swordsman going for an ally beside the player instead — townAllies.js)
+    allyTargetFor: (foe) => (T.active ? T.allyTargetFor(foe) : null),
     getMagicTargets: T.getMagicTargets,
     onPlayerDown,
     interact: T.interact,

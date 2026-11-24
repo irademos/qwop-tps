@@ -1,8 +1,8 @@
 // Town: the night defense. From DEFENSE_HOURS[0], for three town hours, the sheriff goes looking
 // for the player (❗ over him) to ask for help holding the bandits off tonight. Accepted, he leads
 // the player (townGuide.js' lead, `at: 'point'`) to a spot on the Endless walk — the Showdown stage
-// routes joined up — not far from where he asked (ctx.defenseStart), and there the wave begins
-// (ctx.startDefenseWave → bootstrapGameApp.js `_townWave`: the player auto-walks a stretch of the
+// routes joined up — not far from where he asked (ctx.waveSpot), and there the wave begins
+// (ctx.startWave → bootstrapGameApp.js `_townWave`: the player auto-walks a stretch of the
 // walk from there while an Endless wave comes at them — the player's own Town gear, no auto-buy;
 // every DEFENSE_HARDER_EVERY nights a step harder). The wave's bandits aren't the camp's: they're
 // there for the wave only, and beating them doesn't shrink the gang.
@@ -10,6 +10,8 @@
 //   lost    — (the player went down) the wave's bandits they didn't beat raid the town
 //   missed  — (the window went by, or "Not tonight") the whole wave's worth raid it
 // The raid itself is townBandits.js' (startRaidNight(max) — as many of the camp's gang as that).
+// The sheriff fights beside the player with his bow (townAllies.js); badly hurt he runs home and
+// hides like everyone else, and the bandits after him turn back on the player.
 // While the wave's on, every townsperson (the law too; not the bandits, nor the wizard up his
 // mountain) runs home and hides in their room till it's over (`hideFromWave` — townFolk.js' decide
 // sends them back if anything else comes up, townLife.js keeps them in).
@@ -31,6 +33,12 @@ const ACCEPTED = ['Good. Follow me — we meet them out on the trail.', 'Knew I 
 const DECLINED = ['Then lock your door tonight.', 'Suit yourself. Pray they pass you by.'];
 const LEAD_TIPS = ['Stay close. They\'ll come down the trail.', 'Keep your blade ready.'];
 const AT_START = ['Here they come! Hold the line!', 'This is it — don\'t let them through!'];
+// The sheriff fighting beside the player (townAllies.js): his bow; badly hurt, he runs home to hide
+const SHERIFF_ALLY = {
+  hp: 10, attack: 'bow',
+  lowHp: { at: 3, then: 'flee', line: 'I\'m done for — I\'ll bar the door! Give \'em hell, {name}!' },
+  shouts: ['Hold the line, {name}!', 'Behind you!', 'Not in my town!', 'Keep at \'em!', 'That\'s one less!'],
+};
 
 export function installTownDefense(T, ctx) {
   T.defense = null; // { night, phase: seek | lead | fight | won | lost | missed | none, level, total, left, start, lead, sheriffId }
@@ -123,7 +131,7 @@ export function installTownDefense(T, ctx) {
   const accept = (n, D) => {
     const p = T.playerPos();
     const nav = T.layout.nav;
-    const start = ctx.defenseStart(n.x, n.z, (x, z) => nav.isWalkable(x, z)) ?? { x: p.x, z: p.z };
+    const start = ctx.waveSpot(n.x, n.z, (x, z) => nav.isWalkable(x, z)) ?? { x: p.x, z: p.z };
     D.start = { x: start.x, z: start.z };
     D.lead = newLead('point', true);
     D.lead.point = D.start;
@@ -146,7 +154,7 @@ export function installTownDefense(T, ctx) {
   };
   // Off home to hide (true: sent)
   const hideFromWave = (n) => {
-    if (!n.alive || n.fighter || n.questing || n.def.outlaw || n.def.hermit || !n.home || n.jailedUntil > T.simT) return false;
+    if (!n.alive || n.fighter || n.questing || n.ally || n.def.outlaw || n.def.hermit || !n.home || n.jailedUntil > T.simT) return false;
     if (n.inside && n.task?.type === 'hide') return true;
     const to = n.home.room ? T.rooms.somewhereIn(n.home.room) : n.home;
     T.setTask(n, { type: 'flee', to, dur: 0, run: true, hide: true });
@@ -154,7 +162,7 @@ export function installTownDefense(T, ctx) {
   };
   const hideEveryone = () => {
     for (const n of T.npcs) {
-      if (!n.alive || n.fighter || n.questing || n.def.outlaw || n.def.hermit || !T.mine(n)) continue;
+      if (!n.alive || n.fighter || n.questing || n.ally || n.def.outlaw || n.def.hermit || !T.mine(n)) continue;
       if (n.inside && (n.task?.type === 'hide' || n.task?.type === 'sleep')) continue;
       if (!T.take(n)) continue;
       if (T.talking?.npc === n && T.jobTalk.isOpen()) T.jobTalk.close();
@@ -166,11 +174,19 @@ export function installTownDefense(T, ctx) {
   };
   const startFight = (D, sheriff) => {
     D.phase = 'fight';
+    D.total = ctx.startWave({ x: D.start.x, z: D.start.z, level: D.level, onEnd: (res) => endFight(D, res) }) || D.total;
     if (sheriff) {
       T.say(sheriff, pickOf(AT_START), { big: true });
-      if (sheriff.task?.type === 'defend') { sheriff.task = null; T.decide(sheriff); }
+      if (sheriff.task?.type === 'defend') sheriff.task = null;
+      // (beside the player with his bow; badly hurt: off home to hide — the bandits after him let him go)
+      T.allyJoin(sheriff, {
+        ...SHERIFF_ALLY,
+        onFlee: (n) => {
+          T.feedLine(`${firstName(n.name)} is badly hurt — he runs for home.`);
+          if (!hideFromWave(n)) T.decide(n);
+        },
+      });
     }
-    D.total = ctx.startDefenseWave({ x: D.start.x, z: D.start.z, level: D.level, onEnd: (res) => endFight(D, res) }) || D.total;
     hideEveryone();
     T.feedLine('The townsfolk bar their doors.');
     T.actsAt = 0;
@@ -178,12 +194,14 @@ export function installTownDefense(T, ctx) {
   const endFight = (D, { won, killed = 0, total = D.total }) => {
     if (D.phase !== 'fight') return;
     D.total = total;
+    const ally = sheriffById(D.sheriffId);
     if (won) {
       D.phase = 'won';
       D.left = 0;
       const coins = DEFENSE_REWARD[0] + DEFENSE_REWARD[1] * D.level;
       ctx.addCoins(coins);
       ctx.playSfx('coin');
+      if (ally && T.isAlly(ally)) T.say(ally, 'We did it! Nobody\'s raiding this town tonight.', { big: true });
       ctx.showBanner('TOWN DEFENDED', `The bandits won't come tonight · 🪙 +${coins}`, 3200);
       T.feedLine(`You held the bandits off — the sheriff pays you ${coins} coins.`);
       const s = sheriffById(D.sheriffId);
@@ -195,16 +213,20 @@ export function installTownDefense(T, ctx) {
         ? `${D.left} bandit${D.left > 1 ? 's' : ''} got past you — they're heading into town!`
         : 'You went down, but none of them got past you.');
     }
+    // (the fight's over: the sheriff back to his rounds)
+    if (ally) T.allyLeave(ally);
     T.save();
   };
 
   // The player went down (townMode onPlayerDown): a fight going on is lost
   const defenseDown = () => {
-    if (T.defense?.phase === 'fight') ctx.stopDefenseWave();
+    if (T.defense?.phase === 'fight') ctx.stopWave();
   };
   // Leaving Town: the wave taken away, nothing counted
   const resetDefense = () => {
-    if (T.defense?.phase === 'fight') ctx.stopDefenseWave({ silent: true });
+    if (T.defense?.phase === 'fight') ctx.stopWave({ silent: true });
+    const s = T.defense?.sheriffId != null ? T.npcById?.(T.defense.sheriffId) : null;
+    if (s) T.allyLeave(s, { decide: false });
     T.defense = null;
   };
 
@@ -223,7 +245,7 @@ export function installTownDefense(T, ctx) {
     if (!D) return null;
     if (D.phase === 'lead') return { title: 'Defend the town', progress: 'Follow the sheriff', icon: '📍' };
     if (D.phase === 'fight') {
-      const s = ctx.defenseWaveState?.();
+      const s = ctx.waveState?.();
       return { title: 'Defend the town', progress: s ? `${s.killed} / ${s.total} bandits` : 'Hold them off', icon: '⚔️' };
     }
     return null;

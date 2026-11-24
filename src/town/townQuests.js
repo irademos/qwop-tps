@@ -46,9 +46,7 @@ const BOARD_TIMEOUT_S = 10;   // s walking to the cart before they're simply in 
 const BOARD_REACH = 1.4;      // m from the cart's side they climb in
 const KNOCK_S = 2.4;          // s down after being thrown out of the cart
 const ALLY_HP = 8;            // hits an ally takes in a fight before going down (the job fails)
-const ALLY_KEEP = [4.5, 9];   // m an ally with a wand keeps from the nearest foe
-const ALLY_CAST_S = [1.7, 2.6]; // s between their blasts
-const ALLY_CAST_RANGE = 15;
+const ALLY_LOW = 3;           // hits left: a job's ally keeps further back (townAllies.js 'retreat')
 const ALLY_SHOUTS = ['Fire and frost!', 'Mind yourself, {name}!', 'I taught that boy better than this…', 'Stand back, you ruffians!', 'Hah! Still got it.'];
 const FOE_HEARTS = 2;
 const FOE_SPAWN_DIST = [11, 15]; // m from the player, on the camp's side
@@ -459,19 +457,44 @@ export function installTownQuests(T, ctx) {
     control(n, { kind: 'knocked', until: T.simT + KNOCK_S, after: 'stand' });
     if (n.body) { n.body.seated = false; n.body.character.endPose(); n.body.character.playDeath(); }
   };
-  // An ally hit by a foe: their health is the job's; at 0 they're down and the job fails
-  const hitAlly = (c, n, dir) => {
-    const hp = (c.q.allyHp[n.id] ?? ALLY_HP) - 1;
-    c.q.allyHp[n.id] = hp;
-    n.x += (dir?.x ?? 0) * 0.35;
-    n.z += (dir?.z ?? 0) * 0.35;
-    n.body?.character.playReaction?.(glbCharacterConfig.smallHitClip);
-    ctx.playSfx?.('hit', { x: n.x, y: T.groundY(n) + 1, z: n.z });
-    if (hp === 3) T.say(n, 'Ugh — {name}, I can\'t take much more of this!'.replace('{name}', playerName()), { big: true });
-    if (hp > 0) return;
-    control(n, { kind: 'knocked', until: Infinity });
-    if (n.body) n.body.character.playDeath();
-    c.fail(`${firstName(n.name)} went down. ${T.isFeminine(n) ? 'She' : 'He'} limps back home — the job's off for now.`);
+  // ── A fight's allies: the job's townsfolk fighting beside the player (townAllies.js — this file
+  // runs their frame: the 'fight' qmode → T.allyFrame). Hurt, they keep further back; down (0
+  // hits) and the job fails. Returns them. ──
+  const joinAllies = (c, roles = []) => {
+    const list = roles.map((r) => roleNpc(c.q, r)).filter(Boolean);
+    c.s.allies = list.map((n) => n.id);
+    for (const n of list) {
+      if (n.qmode?.kind === 'seated') unseat(n);
+      if (n.qmode?.kind !== 'knocked') control(n, 'fight');
+      else n.qmode.after = 'fight';
+      T.allyJoin(n, {
+        drive: false, hp: ALLY_HP, attack: 'wand', shouts: ALLY_SHOUTS,
+        lowHp: { at: ALLY_LOW, then: 'retreat', line: 'Ugh — {name}, I can\'t take much more of this!' },
+        onDown: (who) => {
+          T.allyLeave(who, { decide: false });
+          control(who, { kind: 'knocked', until: Infinity });
+          who.body?.character.playDeath();
+          c.fail(`${firstName(who.name)} went down. ${T.isFeminine(who) ? 'She' : 'He'} limps back home — the job's off for now.`);
+        },
+      });
+    }
+    return list;
+  };
+  // (the fight's over: the allies back to standing by)
+  const leaveAllies = (c) => {
+    for (const id of c.s.allies ?? []) {
+      const n = T.npcById(id);
+      if (!n) continue;
+      T.allyLeave(n, { decide: false });
+      if (n.questing && n.qmode?.kind === 'fight') control(n, 'stand');
+    }
+    c.s.allies = [];
+  };
+  // A job's wave out on the walk (the `wave` beat — ctx.startWave): on while `questWave.on`
+  const questWave = { on: false, res: null };
+  const stopQuestWave = () => {
+    if (questWave.on) ctx.stopWave?.({ silent: true });
+    questWave.on = false;
   };
 
   // ── A cast member's frame (the 'quest' task) ──
@@ -519,7 +542,10 @@ export function installTownQuests(T, ctx) {
         }
         return true;
       }
-      case 'fight': return allyFight(n, m, dt);
+      case 'fight':
+        if (T.isAlly(n)) return T.allyFrame(n, dt);
+        stand(n, p.x, p.z, dt);
+        return true;
       case 'canoe': {
         // (kneeling in the canoe's bow — carried with it)
         const sp = T.canoeSeat?.();
@@ -546,40 +572,6 @@ export function installTownQuests(T, ctx) {
       default: stand(n, p.x, p.z, dt); return true;
     }
   };
-  // An ally with a wand: keeping a few metres off the nearest foe, a blast every couple of seconds
-  const allyFight = (n, m, dt) => {
-    const list = liveFoes();
-    if (!list.length) { stand(n, T.playerPos().x, T.playerPos().z, dt); return true; }
-    let foe = null;
-    let best = Infinity;
-    for (const f of list) {
-      const fp = f.e.group.position;
-      const d = dist2(n.x, n.z, fp.x, fp.z);
-      if (d < best) { best = d; foe = fp; }
-    }
-    if (best > ALLY_KEEP[1]) go(n, foe.x, foe.z, dt, best > 14);
-    else if (best < ALLY_KEEP[0]) {
-      // (backing off, straight away from it)
-      const dx = n.x - foe.x;
-      const dz = n.z - foe.z;
-      const d = Math.hypot(dx, dz) || 1;
-      const tx = n.x + (dx / d) * 2;
-      const tz = n.z + (dz / d) * 2;
-      if (T.walkable(tx, tz)) { m.direct = true; go(n, tx, tz, dt, true); }
-      n.yaw = Math.atan2(foe.x - n.x, foe.z - n.z);
-    } else stand(n, foe.x, foe.z, dt);
-    if (best < ALLY_CAST_RANGE && T.simT > (m.castAt ?? 0)) {
-      m.castAt = T.simT + ALLY_CAST_S[0] + Math.random() * (ALLY_CAST_S[1] - ALLY_CAST_S[0]);
-      n.yaw = Math.atan2(foe.x - n.x, foe.z - n.z);
-      n.body?.character.playAction(glbCharacterConfig.throwClip);
-      const d = Math.hypot(foe.x - n.x, foe.z - n.z) || 1;
-      const dir = { x: (foe.x - n.x) / d, z: (foe.z - n.z) / d };
-      ctx.castAllySpell?.({ x: n.x + dir.x * 0.6, y: T.groundY(n) + 0.95, z: n.z + dir.z * 0.6 }, dir);
-      if (Math.random() < 0.3) T.say(n, pickOf(ALLY_SHOUTS).replace('{name}', playerName()), { big: true });
-    }
-    return true;
-  };
-
   // ── The world the runner works in ──
   const cartState = { load: null, locked: false }; // what a job's put in the cart's bed ('veg' / null); held
   const world = {
@@ -602,6 +594,7 @@ export function installTownQuests(T, ctx) {
       T.driveTo(null);
       clearActors();
       clearFoes();
+      stopQuestWave();
       sayQueue.length = 0;
       if (cartState.locked) { T.lockCart?.(false); cartState.locked = false; }
       // (out on the water: the canoe's passenger out, no paddling for the player, the pirate ship
@@ -615,6 +608,7 @@ export function installTownQuests(T, ctx) {
     for (const id of Object.values(q?.cast ?? {})) {
       const n = T.npcById(id);
       if (!n?.questing) continue;
+      T.allyLeave?.(n, { decide: false });
       unseat(n);
       if (n.qmode?.kind === 'knocked') n.body?.character.revive();
       // (out of the canoe: back on the bank by the fishing spot)
@@ -632,7 +626,7 @@ export function installTownQuests(T, ctx) {
   // ── Town's quest world for the beats (src/town/beats/) ──
   const W = {
     T, ctx, P, THREE, roleNpc, roleGone, canTake, control, release, go, stand, fill, calm, isNight, npcMark, placeOf, cartAt,
-    actors, spawnActor, actorSay, sayNow, sayLines, foes, liveFoes, clearFoes, seat, unseat, hitAlly, sendHome, open, talker, tipTalk,
+    actors, spawnActor, actorSay, sayNow, sayLines, foes, liveFoes, clearFoes, seat, unseat, joinAllies, leaveAllies, questWave, stopQuestWave, sendHome, open, talker, tipTalk,
     guideBuys, goalHighlight, cartState, newLead, glbCharacterConfig, BANDIT_NAMES, firstName, pickOf, dist2,
     mayApproach, make: (what, on) => makers[what]?.(on), SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
     BOMB_THROW_AT_S, BOMB_AFTER_S, FOE_HEARTS, FOE_SPAWN_DIST, FOE_GEAR, FOE_COINS,
@@ -692,7 +686,7 @@ export function installTownQuests(T, ctx) {
     const b = quest?.beats[firstSeek(quest)];
     return b ? roleNpc(br.runner.q(), b.who) : null;
   };
-  const underAttack = () => liveFoes().length > 0
+  const underAttack = () => liveFoes().length > 0 || questWave.on
     || T.npcs.some((n) => n.alive && n.fighter && !n.fighter.isDead && !n.campStandoff && T.distToPlayer(n) < ATTACK_DIST);
   // (why nobody may come up now — null: they may)
   const busyReason = () => {
