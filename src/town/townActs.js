@@ -223,6 +223,7 @@ export function installTownActs(T, ctx) {
     }
     // (the first day / a job: walk the player to the goal again — townQuests.js / townGuide.js)
     if (calm) out.push(...T.questActs());
+    if (calm) out.push(...T.defenseActs()); // (following the sheriff out — townDefense.js)
     if (calm) {
       out.push(...T.cookActs());
       if (!T.inCart()) {

@@ -318,6 +318,17 @@ export const BANDIT_GEAR_FROM = { bombs: 5, shield: 6, gun: 7, wand: 8, bubble: 
 export const BANDIT_GEAR_SHARE = 0.5;       // of the bandits who carry each piece unlocked
 // The sheriff's thanks: the morning after the player beats bandits at night, he comes over with a
 // reward (a job ready to be paid — townMissions.js 'nightThanks')
+// The night defense (townDefense.js): from the first hour, for three hours, the sheriff looks for
+// the player to help hold the bandits off — accepted, he leads them to a spot on the Endless walk
+// near where he asked and a wave comes at them along it (their own gear, no auto-buy). Missed,
+// turned down or lost: the wave's bandits the player didn't beat raid the town (as many of the
+// camp's gang as that); won: no raid tonight
+export const DEFENSE_HOURS = [21, 24];      // the sheriff's window to find the player
+export const DEFENSE_HARDER_EVERY = 3;      // nights: every this many the wave is a step harder
+export const DEFENSE_LEVEL_MAX = 15;        // (the Endless wave it plays at most)
+export const DEFENSE_START_R = 3;           // m from the start spot: the wave begins
+export const DEFENSE_REASK_S = 10;          // s after walking off his question before he asks again
+export const DEFENSE_REWARD = [20, 10];     // coins for holding them off: base + per level
 export const NIGHT_KILL_REWARD = 15;        // coins a bandit beaten at night (the chief: double)
 export const SHERIFF_SEEK_S = 120;          // s the sheriff looks for the player before leaving it to them (❓ / ❗ stays)
 

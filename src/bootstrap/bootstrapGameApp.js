@@ -4690,7 +4690,7 @@ async function initCore(runtimeContext) {
   const _psMaxAttackers = (stage) => (stage <= 7 ? 1 : Math.min(4, 2 + Math.floor((stage - 8) / 4)));
   const _psSwingChance = (stage) => Math.min(0.6, 0.2 + Math.max(0, stage - 1) * 0.02);
   // The stage the enemies' difficulty follows (Endless: its wave's — _endlessWave)
-  const _psDiffStage = () => (_endless ? _endless.diff : _psStage);
+  const _psDiffStage = () => (_endless ? _endless.diff : _townWave ? _townWave.diff : _psStage);
   const _spawnHordeEnemy = (opts = {}) => {
     const angle = Math.random() * Math.PI * 2;
     const dist  = 5 + Math.random() * 4;
@@ -5872,7 +5872,7 @@ async function initCore(runtimeContext) {
   // A sword swing steps the player forward (into a blocked swing / a missed one) — in Town only
   // while walked along or fighting someone within TOWN_SWING_STEP_RANGE
   const TOWN_SWING_STEP_RANGE = 6;    // m
-  const _swingStepAllowed = () => !story?.isActive() && (!town?.isActive() || performance.now() - _townAutoWalkAt < 250
+  const _swingStepAllowed = () => !story?.isActive() && (!town?.isActive() || !!_townWave || performance.now() - _townAutoWalkAt < 250
     || town.threats(TOWN_SWING_STEP_RANGE).length > 0);
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
@@ -5891,6 +5891,7 @@ async function initCore(runtimeContext) {
   const _attacksHeld = () => playerDead || _psBossTalking || performance.now() < _pauseGraceUntil;
   // Endless Showdown's run (startEndlessMode, before _resetForMenu): null outside it
   let _endless = null;
+  let _townWave = null;            // Town's night defense wave (see _townWaveStart, after Endless)
   let _endlessPanel = null;        // its start / results card
   let _endlessPanelAction = null;  // the card's main button (Start / Play Again)
   let _endlessStats = null;        // { best, bestWave, runs, cleared } (the better of this device's / the profile's)
@@ -5914,7 +5915,8 @@ async function initCore(runtimeContext) {
       _psKillHud.textContent = `⚔️ ${Math.min(_psStageKills, _psStageTotal)} / ${_psStageTotal}`;
     }
     _psKillHud.classList.toggle('ps-kill-best', !!_endless && _psStageKills > (_endlessStats?.best || 0));
-    _psKillHud.classList.toggle('hidden', !visible || _classicMode || (!_endless && _psIsFinalStage(_psStage)));
+    // (Town's night defense: the quest tracker counts them — the top bar is where this would go)
+    _psKillHud.classList.toggle('hidden', !visible || _classicMode || !!town?.isActive() || (!_endless && _psIsFinalStage(_psStage)));
     if (_classicMode) _classicUpdateScore();
   };
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
@@ -6026,7 +6028,7 @@ async function initCore(runtimeContext) {
   const PS_RANGED_TURN_GAP_MS = 350;  // between one turn and the next
   let _psRangedTurn = null;
   let _psRangedTurnGapUntil = 0;
-  const _psRangedTurnsWanted = () => !_classicMode && !showdownTutorial?.isActive() && !town?.isActive()
+  const _psRangedTurnsWanted = () => !_classicMode && !showdownTutorial?.isActive() && (!town?.isActive() || !!_townWave)
     && !duelMode?.isActive() && (_psStageActive || !!_endless || !!_voyage);
   // Before the horde loop each frame (`incoming`: a bomb / blast is already on its way)
   function _psUpdateRangedTurns(incoming) {
@@ -9920,7 +9922,7 @@ async function initCore(runtimeContext) {
     const p = playerModel.position;
     // Walking the routes: always up ahead on the path, off to one side of it, so the player
     // walks into them (one behind would only chase and never catch up)
-    if (_psPath && _psAutoWalking) {
+    if (_psPath && _psAutoWalking && (_psPath.cyclic || _psPathProgress < _psPath.length - ENDLESS_SPAWN_DIST[0])) {
       const here = _psPath.at(_psPathProgress);
       for (let tries = 0; tries < 30; tries++) {
         // (further on and closer to the path the more tries fail; past the loop's end = its start)
@@ -9955,8 +9957,8 @@ async function initCore(runtimeContext) {
     return null;
   };
 
-  const _endlessSpawnOne = (champion) => {
-    const e = _endless;
+  // (e: the run — Endless's, or Town's night defense wave: _townWave; returns the enemy spawned)
+  const _endlessSpawnOne = (champion, e = _endless) => {
     const W = e.def;
     // (the next of the wave's line-up — taken off it once it's really spawned)
     const kind = champion ? 'champion' : (e.kinds?.[e.kinds.length - 1] ?? 'sword');
@@ -9993,12 +9995,11 @@ async function initCore(runtimeContext) {
       const fighter = createBossFighter({ ..._bossFighterCtx(enemy), name: '', gear, hud: false, glow: false });
       enemy.onAfterUpdate = () => fighter.update();
     }
-    return true;
+    return enemy;
   };
 
-  const _endlessStartWave = (w) => {
-    const def = _endlessWave(w);
-    // The wave's line-up, in a random order (popped from the end); the champion comes last
+  // A wave's line-up, in a random order (popped from the end); the champion comes last
+  const _endlessLineup = (def) => {
     const kinds = [];
     for (const [k, n] of Object.entries(def.kinds)) for (let i = 0; i < n; i++) kinds.push(k);
     while (kinds.length < def.count - (def.champion ? 1 : 0)) kinds.push('sword');
@@ -10008,6 +10009,12 @@ async function initCore(runtimeContext) {
       [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
     }
     if (def.champion) kinds.unshift('champion');
+    return kinds;
+  };
+
+  const _endlessStartWave = (w) => {
+    const def = _endlessWave(w);
+    const kinds = _endlessLineup(def);
     Object.assign(_endless, { wave: w, def, diff: def.diff, kinds, toSpawn: kinds.length, phase: 'fight', nextSpawnAt: performance.now() + 600 });
     const news = [ENDLESS_NEWS[w], def.champion && 'A champion is coming'].filter(Boolean).join(' · ') || `${def.count} enemies`;
     _showWorldBanner(`WAVE ${w}`, news, 2200);
@@ -10175,7 +10182,160 @@ async function initCore(runtimeContext) {
     _endlessRestoreAside();
   };
 
+  // ── Town's night defense (src/town/townDefense.js): the sheriff led the player to a spot on
+  // the Endless walk (the stage routes joined up) and an Endless wave comes at them there — the
+  // player auto-walks a stretch of the walk from it (one way or the other, at random), the
+  // enemies spawning ahead of them as in Endless. Their own Town gear, no auto-buy (Town has
+  // none), no XP; kills drop coins. Not the camp's bandits: just there for the wave. ──
+  const TOWN_WAVE_START_NEAR = [8, 60]; // m from where the sheriff asked: a start spot picked at random this far
+  const TOWN_WAVE_START_MAX = 160;      // m — none that near: the nearest within this
+  const TOWN_WAVE_PATH_LEN = 260;       // m of the walk the wave plays along
+  const TOWN_WAVE_SAMPLE = 2;           // m between the walk's spots looked at
+  // A spot on the walk near (x, z) that `ok(x, z)` takes (the town's nav grid), dry: { x, z } or null
+  const _townWaveStartSpot = (x, z, ok = () => true) => {
+    const pts = _endlessLoop();
+    if (!pts) return null;
+    const near = [];
+    let best = null;
+    let bestD = Infinity;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const len = Math.hypot(b.x - a.x, b.z - a.z);
+      if (len > 40) continue; // (the jump from one route's end to the next one's start)
+      for (let d = 0; d < len; d += TOWN_WAVE_SAMPLE) {
+        const px = a.x + (b.x - a.x) * (d / len);
+        const pz = a.z + (b.z - a.z) * (d / len);
+        const dd = Math.hypot(px - x, pz - z);
+        if (dd > TOWN_WAVE_START_MAX || _isOverWater(px, pz) || !ok(px, pz)) continue;
+        if (dd >= TOWN_WAVE_START_NEAR[0] && dd <= TOWN_WAVE_START_NEAR[1]) near.push({ x: px, z: pz });
+        if (dd < bestD) { bestD = dd; best = { x: px, z: pz }; }
+      }
+    }
+    return near.length ? near[Math.floor(Math.random() * near.length)] : best;
+  };
+  // The stretch of the walk from (x, z): TOWN_WAVE_PATH_LEN m on round the loop, either way
+  const _townWavePath = (x, z) => {
+    let pts = _endlessLoop();
+    if (!pts) return null;
+    if (Math.random() < 0.5) pts = pts.slice().reverse();
+    let k = 0;
+    let bd = Infinity;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const l2 = dx * dx + dz * dz;
+      const t = l2 > 1e-9 ? Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / l2)) : 0;
+      const d = Math.hypot(a.x + dx * t - x, a.z + dz * t - z);
+      if (d < bd) { bd = d; k = i; }
+    }
+    const out = [{ x, z }];
+    let total = 0;
+    let prev = out[0];
+    for (let step = 1; step <= pts.length && total < TOWN_WAVE_PATH_LEN; step++) {
+      const p = pts[(k + step) % pts.length];
+      const len = Math.hypot(p.x - prev.x, p.z - prev.z);
+      if (len < 0.05) continue;
+      if (len > 40) break; // (a jump between routes: the stretch ends there)
+      out.push({ x: p.x, z: p.z });
+      total += len;
+      prev = p;
+    }
+    return out.length >= 2 ? out : null;
+  };
+  // The wave starts: { x, z } the spot, level (the Endless wave it plays), onEnd({ won, killed, total }) → its size
+  const _townWaveStart = ({ x, z, level = 1, onEnd = null }) => {
+    if (_townWave || !playerModel) return 0;
+    const def = _endlessWave(Math.max(1, level));
+    const kinds = _endlessLineup(def);
+    _townWave = {
+      wave: Math.max(1, level), def, diff: def.diff, kinds, toSpawn: kinds.length, total: kinds.length,
+      enemies: [], nextSpawnAt: performance.now() + 1800, onEnd, wasNight: _psCurrentIsNight,
+    };
+    [...ENDLESS_CHAMPION_CHARACTERS].forEach((k) => preloadCharacterModel(MATCH_CHARACTERS[k].url));
+    const pts = _townWavePath(x, z);
+    if (pts) {
+      const path = createPolyline(pts);
+      _psPath = path;
+      _psPathProgress = path.project(playerModel.position.x, playerModel.position.z, 0, PS_ROUTE_WALK_IN_MAX);
+      const last = pts[pts.length - 1];
+      _psPathEnd.set(last.x, getTerrainHeight(last.x, last.z) ?? playerModel.position.y, last.z);
+      _psAutoWalking = true;
+    } else {
+      _psPath = null;
+      _psAutoWalking = false;
+    }
+    _psEnemyQueue = [];
+    _psStageActive = true;
+    _psCurrentIsNight = true;
+    _psWinShown = false;
+    _psStageKills = 0;
+    _psStageTotal = _townWave.total;
+    comboMeter.reset();
+    // (empty hands: the sword out, if they have one)
+    if (!_heldWeaponId() && _townLoadout?.hasSword) _equipByPlayer(FOAM_SWORD_ITEM_ID);
+    _showWorldBanner('DEFEND THE TOWN', `${_townWave.total} bandits are coming`, 2600);
+    _psUpdateKillHud(true);
+    return _townWave.total;
+  };
+  // Over: won (all beaten), lost (the player went down — town.onPlayerDown) or dropped (silent:
+  // leaving Town). The ones still standing are taken away.
+  const _townWaveEnd = (won, { silent = false } = {}) => {
+    const W = _townWave;
+    if (!W) return null;
+    _townWave = null;
+    const killed = W.enemies.filter((e) => e.isDead).length;
+    if (_psBoss && W.enemies.includes(_psBoss.enemy)) { _psBoss.dispose(); _psBoss = null; }
+    for (const e of W.enemies) if (!e.isDead) _tutorialRemoveEnemy(e);
+    _psPath = null;
+    _psAutoWalking = false;
+    _psStageActive = false;
+    _psCurrentIsNight = W.wasNight;
+    _psEnemyQueue = [];
+    comboMeter.end();
+    _psUpdateKillHud(false);
+    const res = { won: !!won, killed, total: W.total };
+    if (!silent) W.onEnd?.(res);
+    return res;
+  };
+  // Each frame (game loop, by _endlessUpdate): kills counted, the next one spawned, all beaten = won
+  const _townWaveUpdate = () => {
+    const W = _townWave;
+    if (!W) return;
+    if (!town?.isActive()) { _townWaveEnd(false, { silent: true }); return; }
+    if (playerDead) return;
+    let alive = 0;
+    for (const e of W.enemies) {
+      if (!e.isDead) { alive += 1; continue; }
+      if (e._waveCounted) continue;
+      // (a kill: counted here — the stage code's count / XP are off for it, _coinDropped)
+      e._waveCounted = true;
+      _psStageKills += 1;
+      _psUpdateKillHud(true);
+      const pos = e.group.position.clone();
+      spawnCoinPickup(pos);
+      if (Math.random() < 0.4) spawnCoinPickup(pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.5, 0, (Math.random() - 0.5) * 1.5)));
+    }
+    const now = performance.now();
+    if (W.toSpawn > 0 && now >= W.nextSpawnAt && alive < W.def.maxAlive) {
+      const enemy = _endlessSpawnOne(W.toSpawn === 1 && W.def.champion, W);
+      if (enemy) {
+        enemy._town = true;       // (no Showdown kill stats)
+        enemy._coinDropped = true; // (counted / coins dropped above)
+        W.enemies.push(enemy);
+        W.kinds.pop();
+        W.toSpawn -= 1;
+        W.nextSpawnAt = now + W.def.gapMs;
+      }
+      return;
+    }
+    if (W.toSpawn === 0 && alive === 0) _townWaveEnd(true);
+  };
+
   const _resetForMenu = () => {
+    _townWaveEnd(false, { silent: true });
     _townDive?.clear();
     playerControls?.swimReset?.();   // (swimming's out-of-breath sequence — _swimReset)
     giant.release();
@@ -11497,6 +11657,13 @@ async function initCore(runtimeContext) {
       return enemy;
     },
     setFighterPassive: (enemy, on) => _townSetFighterPassive(enemy, on),
+    // The night defense (townDefense.js): an Endless wave out on the Showdown walk — its size at a
+    // level, a start spot on the walk near (x, z) (ok: the town's nav grid), start / stop, how it's going
+    defenseWaveSize: (level) => _endlessWave(Math.max(1, level)).count,
+    defenseStart: (x, z, ok) => _townWaveStartSpot(x, z, ok),
+    startDefenseWave: (opts) => _townWaveStart(opts),
+    stopDefenseWave: ({ silent = false } = {}) => _townWaveEnd(false, { silent }),
+    defenseWaveState: () => (_townWave ? { killed: _townWave.enemies.filter((e) => e.isDead).length, total: _townWave.total } : null),
     // A Town job's ally casting (the wizard beside the player — townQuests.js): a wand blast from
     // `origin` ({ x, y, z }) along `dir` ({ x, z }) that only hits the job's bandits (side 'ally')
     castAllySpell: (origin, dir) => {
@@ -12284,6 +12451,7 @@ async function initCore(runtimeContext) {
     // A voyage on the pirate ship: it sails, carrying everyone aboard (before the player moves)
     _voyageUpdate(frameDelta);
     _endlessUpdate();
+    _townWaveUpdate();
     // Town's flying broom: it moves the player (before the controls place them), then sits
     // under them (after)
     _updateBroom(frameDelta);
@@ -13034,7 +13202,7 @@ async function initCore(runtimeContext) {
 
       // Win detection
       // (a voyage ends back at anchor instead — _voyageUpdate)
-      if (_psStageActive && !_psWinShown && !_voyage && !_endless && _psEnemyQueue.length === 0 && (hordeEnemies.length > 0 || _psSparedEnemies.length > 0)
+      if (_psStageActive && !_psWinShown && !_voyage && !_endless && !_townWave && _psEnemyQueue.length === 0 && (hordeEnemies.length > 0 || _psSparedEnemies.length > 0)
         && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;

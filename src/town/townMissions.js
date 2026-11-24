@@ -95,7 +95,7 @@ export function installTownMissions(T, ctx) {
   const updateJobs = () => {
     if (T.simT > T.jobsAt) { T.jobsAt = T.simT + JOB_REFRESH_S; offerJobs(); }
     // (the first day's goal / the job going on, on top — townQuests.js)
-    const quest = T.questEntry();
+    const quest = T.defenseEntry() ?? T.questEntry();
     T.tracker.render([...(quest ? [quest] : []), ...takenJobs().map((j) => ({ title: j.title, progress: jobProgress(j), icon: j.status === 'done' ? '❓' : '📍' }))]);
   };
   const jobProgress = (j) => {
@@ -118,11 +118,12 @@ export function installTownMissions(T, ctx) {
     return { icon: j.status === 'done' ? '❓' : '❗', x: giver.x, z: giver.z, h: 1.7 * heightScale(giver.url) + 0.5 };
   };
   // (the town book's map: the same marks — { icon, x, z })
-  const jobMarks = () => [...T.jobs.map(markerFor), ...T.questMarkers()].filter(Boolean);
+  const jobMarks = () => [...T.jobs.map(markerFor), ...T.questMarkers(), ...T.defenseMarkers()].filter(Boolean);
   const updateMarkers = () => {
     const live = new Set();
     const marks = T.jobs.map((j) => [j.id, markerFor(j)]);
     T.questMarkers().forEach((m, i) => marks.push([`quest${i}`, m]));
+    T.defenseMarkers().forEach((m, i) => marks.push([`defense${i}`, m]));
     for (const [id, t] of marks) {
       if (!t) continue;
       const key = `${id}:${t.icon}`;
