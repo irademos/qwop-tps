@@ -225,6 +225,8 @@ export function installTownFolk(T, ctx) {
     // (a claim's over: back to the host's town)
     if (T.netMode === 'client') { release(n); return; }
     if (def.outlaw) { T.decideBandit(n); return; }
+    // (the sheriff's night defense under way: everyone stays hidden at home — townDefense.js)
+    if (T.defenseFighting?.() && T.hideFromWave(n)) return;
     // The wizard keeps to his place up the mountain (no walk joins it to the town): his stall
     // in his hours, bed at night, else a stroll round it
     if (def.hermit) {

@@ -10,6 +10,9 @@
 //   lost    — (the player went down) the wave's bandits they didn't beat raid the town
 //   missed  — (the window went by, or "Not tonight") the whole wave's worth raid it
 // The raid itself is townBandits.js' (startRaidNight(max) — as many of the camp's gang as that).
+// While the wave's on, every townsperson (the law too; not the bandits, nor the wizard up his
+// mountain) runs home and hides in their room till it's over (`hideFromWave` — townFolk.js' decide
+// sends them back if anything else comes up, townLife.js keeps them in).
 // The authority's game only (own town / a shared town's host — its own player); not saved: leaving
 // Town mid-fight drops it. In the player's own town the clock holds while they're led / fighting.
 
@@ -141,6 +144,26 @@ export function installTownDefense(T, ctx) {
       if (!T.inRoom && playerFree() && dist2(p.x, p.z, D.start.x, D.start.z) < DEFENSE_START_R) startFight(D, g);
     }
   };
+  // Off home to hide (true: sent)
+  const hideFromWave = (n) => {
+    if (!n.alive || n.fighter || n.questing || n.def.outlaw || n.def.hermit || !n.home || n.jailedUntil > T.simT) return false;
+    if (n.inside && n.task?.type === 'hide') return true;
+    const to = n.home.room ? T.rooms.somewhereIn(n.home.room) : n.home;
+    T.setTask(n, { type: 'flee', to, dur: 0, run: true, hide: true });
+    return true;
+  };
+  const hideEveryone = () => {
+    for (const n of T.npcs) {
+      if (!n.alive || n.fighter || n.questing || n.def.outlaw || n.def.hermit || !T.mine(n)) continue;
+      if (n.inside && (n.task?.type === 'hide' || n.task?.type === 'sleep')) continue;
+      if (!T.take(n)) continue;
+      if (T.talking?.npc === n && T.jobTalk.isOpen()) T.jobTalk.close();
+      T.clearTalk(n);
+      T.endBrawl?.(n);
+      n.following = false;
+      hideFromWave(n);
+    }
+  };
   const startFight = (D, sheriff) => {
     D.phase = 'fight';
     if (sheriff) {
@@ -148,6 +171,8 @@ export function installTownDefense(T, ctx) {
       if (sheriff.task?.type === 'defend') { sheriff.task = null; T.decide(sheriff); }
     }
     D.total = ctx.startDefenseWave({ x: D.start.x, z: D.start.z, level: D.level, onEnd: (res) => endFight(D, res) }) || D.total;
+    hideEveryone();
+    T.feedLine('The townsfolk bar their doors.');
     T.actsAt = 0;
   };
   const endFight = (D, { won, killed = 0, total = D.total }) => {
@@ -220,7 +245,7 @@ export function installTownDefense(T, ctx) {
   };
 
   Object.assign(T, {
-    tickDefense, updateDefense, updateDefenseNpc, defenseDown, resetDefense, defenseRaid,
+    tickDefense, updateDefense, hideFromWave, updateDefenseNpc, defenseDown, resetDefense, defenseRaid,
     defenseEntry, defenseMarkers, defenseActs,
     defenseBusy: busy,
     defenseFighting: () => T.defense?.phase === 'fight',
