@@ -4302,7 +4302,7 @@ async function initCore(runtimeContext) {
       lastPsBubbleButtonLabel = label;
     }
     button.classList.toggle('ps-bubble-active', active);
-    button.classList.toggle('ps-bubble-empty', !active && (air ? getMana() < DIVE_AIR_MANA_PER_S : getBubbleCount() <= 0));
+    button.classList.toggle('ps-bubble-empty', !active && (air ? getMana() < 1 : getBubbleCount() <= 0));
   };
   const _bubbleMagicPalm = new THREE.Vector3();
   const _bubbleMagicCenter = new THREE.Vector3();
@@ -4343,10 +4343,10 @@ async function initCore(runtimeContext) {
     updatePsBubbleButton();
   };
   // ── Town, diving: an air bubble over the head (the Bubble button / the phone's while under
-  // water). DIVE_AIR_MANA_PER_S mana a second; while it's up the swim energy bar doesn't drain
+  // water). 1 mana every DIVE_AIR_S_PER_MANA seconds; while it's up the swim energy bar doesn't drain
   // (_updateSwim). Tapped again it pops; it pops by itself when the mana runs out or the dive
   // ends. Just air — it stops no hits. ──
-  const DIVE_AIR_MANA_PER_S = 1;
+  const DIVE_AIR_S_PER_MANA = 3;
   const DIVE_AIR_RADIUS = 0.42;
   let _diveAir = null;            // { mesh, spent } while up
   const _diveAirOn = () => !!_diveAir;
@@ -4362,7 +4362,7 @@ async function initCore(runtimeContext) {
   let _diveAirMesh = null;
   const _toggleDiveAir = () => {
     if (_diveAir) { _endDiveAir('tap'); return true; }
-    if (playerDead || getMana() < DIVE_AIR_MANA_PER_S) {
+    if (playerDead || getMana() < 1) {
       showPickupToast('mana_potion', 1, '', { text: 'No mana for an air bubble' });
       return false;
     }
@@ -4384,7 +4384,7 @@ async function initCore(runtimeContext) {
     if (!_diveAir) return;
     if (playerDead || !_townDive?.isUnder()) { _endDiveAir('dive'); return; }
     // (the mana taken a whole one at a time — the pill shows whole numbers)
-    _diveAir.spent += Math.max(0, dt || 0) * DIVE_AIR_MANA_PER_S;
+    _diveAir.spent += Math.max(0, dt || 0) / DIVE_AIR_S_PER_MANA;
     while (_diveAir.spent >= 1) {
       _diveAir.spent -= 1;
       if (getMana() < 1) { _endDiveAir('mana'); return; }
@@ -7977,8 +7977,8 @@ async function initCore(runtimeContext) {
     }
     return {
       bombs: getPlayerBombCount(),
-      // (under water in Town the button is the air bubble: 1 mana a second)
-      bubbles: _townDive?.isUnder() ? (getMana() >= DIVE_AIR_MANA_PER_S ? 1 : 0) : getBubbleCount(),
+      // (under water in Town the button is the air bubble: 1 mana every DIVE_AIR_S_PER_MANA s)
+      bubbles: _townDive?.isUnder() ? (getMana() >= 1 ? 1 : 0) : getBubbleCount(),
       bubbleActive: _townDive?.isUnder() ? _diveAirOn() : isPlayerBubbleActive(),
       // (Town: bubbles run on mana — no count on the button)
       bubbleMana: _bubblesOnMana(),
