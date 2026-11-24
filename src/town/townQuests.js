@@ -647,7 +647,7 @@ export function installTownQuests(T, ctx) {
     T, ctx, P, THREE, roleNpc, roleGone, canTake, control, release, go, stand, fill, calm, isNight, npcMark, placeOf, cartAt,
     actors, spawnActor, actorSay, sayNow, sayLines, foes, liveFoes, clearFoes, seat, unseat, joinAllies, leaveAllies, questWave, stopQuestWave, sendHome, open, talker, tipTalk,
     guideBuys, goalHighlight, cartState, newLead, glbCharacterConfig, BANDIT_NAMES, firstName, pickOf, dist2,
-    mayApproach, make: (what, on) => makers[what]?.(on), capture, hasItem, SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
+    mayApproach, make: (what, on) => makers[what]?.(on), capture: (n) => capture(n), hasItem, SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
     BOMB_THROW_AT_S, BOMB_AFTER_S, FOE_HEARTS, FOE_SPAWN_DIST, FOE_GEAR, FOE_COINS,
   };
   const BEATS = townBeats(W);
