@@ -32,7 +32,7 @@
     "vite": "^6.3.4"
   },
   "dependencies": {
-    "@dimforge/rapier3d-compat": "^0.18.2",
+    "@dimforge/rapier3d": "0.18.2",
     "firebase": "^11.6.1",
     "jszip": "^3.10.2",
     "qrcode": "^1.5.4",
