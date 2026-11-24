@@ -27,11 +27,17 @@
 // wind it in; brought within HOOK_LAND_DIST it's landed (+fish, `onCatch`); left unreeled for
 // HOOK_FREE_S it shakes free. The dive ending (the surface, out of breath…) cuts the line.
 //
+// A job's fish (the fisher's dive — beats/dive.js): spawnQuestFish({ id, x, y, z, len, golden })
+// puts one there that stays — wandering round its spot (QUEST_FISH_R), not swimming off or
+// counted among the passers-by — until it's speared and landed (onCatch(len, { id, golden })) or
+// the job clears it (clearQuestFish); one that shakes free / is cut off is gone (hasQuestFish → false:
+// the job puts another).
+//
 // The controls side: PlayerControls.ride { y, yaw, pitch, pivot, camPitch } + holdStill (like
 // the broom), `diveAnim` for the clip (src/controls/controls.js).
 
 import * as THREE from 'three';
-import { createKoiFishMesh } from '../items/fishModels.js';
+import { createGoldenFishMesh, createKoiFishMesh } from '../items/fishModels.js';
 
 // ── Movement ──
 const SWIM_SPEED = 2.4;         // m/s holding Dive
@@ -98,6 +104,8 @@ const HOOK_PULL_SPEED = 0.8;    // m/s a speared fish swims off on the line (up 
 const HOOK_LAND_DIST = 1.1;     // m: this close it's landed
 const HOOK_FREE_S = 14;         // s without reeling and it shakes free
 const HOOK_RADIUS = 0.4;        // × the fish's length: how near its middle the arrow has to pass
+const QUEST_FISH_R = 2.5;       // m a job's fish wanders from its spot
+const QUEST_FISH_SPEED = 0.55;  // m/s (slow: easy to spear)
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -155,9 +163,9 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
       return;
     }
   };
-  const addFish = (x, y, z, len, center) => {
+  const addFish = (x, y, z, len, center, quest = null) => {
     const holder = new THREE.Group();
-    const mesh = createKoiFishMesh(len);
+    const mesh = quest?.golden ? createGoldenFishMesh(len) : createKoiFishMesh(len);
     holder.add(mesh);
     holder.position.set(x, y, z);
     scene.add(holder);
@@ -168,7 +176,11 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
       heading: toward + (Math.random() < 0.5 ? 1 : -1) * rand(0.5, 1.2),
       speed: rand(FISH_SPEED[0], FISH_SPEED[1]),
       turn: 0, turnT: 0, ph: Math.random() * 6, life: rand(FISH_LIFE_S[0], FISH_LIFE_S[1]),
+      // (a job's: stays round its spot — `home`)
+      quest: quest ? { id: quest.id, golden: !!quest.golden, home: new THREE.Vector3(x, y, z) } : null,
     });
+    if (quest) fish[fish.length - 1].speed = QUEST_FISH_SPEED;
+    return fish[fish.length - 1];
   };
   const removeFish = (f) => {
     f.holder.removeFromParent();
@@ -177,7 +189,7 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
   const updateFish = (dt, center, under) => {
     if (under && center) {
       fishWait -= dt;
-      if (fishWait <= 0 && fish.length < FISH_MAX) {
+      if (fishWait <= 0 && fish.filter((f) => !f.quest).length < FISH_MAX) {
         spawnFish(center);
         fishWait = rand(FISH_EVERY_S[0], FISH_EVERY_S[1]);
       }
@@ -187,10 +199,16 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
       f.life -= dt;
       const p = f.holder.position;
       const far = !center || Math.hypot(p.x - center.x, p.z - center.z) > FISH_GONE_DIST;
-      if (!under || f.life <= 0 || far) { removeFish(f); fish.splice(i, 1); continue; }
+      if (!f.quest && (!under || f.life <= 0 || far)) { removeFish(f); fish.splice(i, 1); continue; }
       // (a gentle wander, turning back from shallows / the bottom / the surface)
       f.turnT -= dt;
       if (f.turnT <= 0) { f.turn = rand(-0.5, 0.5); f.turnT = rand(1, 3); }
+      // (a job's fish: turned back toward its spot once it's strayed)
+      if (f.quest) {
+        const h = f.quest.home;
+        if (Math.hypot(p.x - h.x, p.z - h.z) > QUEST_FISH_R) f.turn = wrap(Math.atan2(h.x - p.x, h.z - p.z) - f.heading) > 0 ? 1.4 : -1.4;
+        p.y += (h.y - p.y) * Math.min(1, dt * 0.5);
+      }
       const ahead = 1.5;
       const ax = p.x + Math.sin(f.heading) * ahead, az = p.z + Math.cos(f.heading) * ahead;
       const levA = getWaterLevel(ax, az), botA = getBottom(ax, az);
@@ -265,9 +283,21 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
     return null;
   };
 
+  const questIndex = (id) => fish.findIndex((f) => f.quest?.id === id);
   return {
     takeFishOn,
     removeFish,
+    // A job's fish (see the header)
+    spawnQuestFish: ({ id, x, y, z, len = 0.7, golden = false }) => {
+      const k = questIndex(id);
+      if (k >= 0) { removeFish(fish[k]); fish.splice(k, 1); }
+      addFish(x, y, z, len, new THREE.Vector3(x + 1, y, z), { id, golden });
+    },
+    hasQuestFish: (id) => questIndex(id) >= 0,
+    questFishPos: (id) => fish[questIndex(id)]?.holder.position ?? null,
+    clearQuestFish: () => {
+      for (let i = fish.length - 1; i >= 0; i--) if (fish[i].quest) { removeFish(fish[i]); fish.splice(i, 1); }
+    },
     /** (dev) a fish at x, y, z — townDive.debug().fishAt(…) */
     fishAt: (x, y, z, len = 0.7) => addFish(x, y, z, len, new THREE.Vector3(x, y, z - 1)),
     update(dt, { camera, under, center, head, moving, night }) {
@@ -513,8 +543,9 @@ export function createTownDive(ctx) {
       f.holder.rotation.y = Math.atan2(_away.x, _away.z) - Math.PI / 2 + Math.sin(f.ph) * 0.45;
       if (nd <= HOOK_LAND_DIST) {
         const len = f.len;
+        const info = f.quest ? { id: f.quest.id, golden: f.quest.golden } : {};
         cutLine();
-        ctx.onCatch?.(len);
+        ctx.onCatch?.(len, info);
         return;
       }
       if (s.idle >= HOOK_FREE_S) { cutLine(); ctx.onFree?.(); return; }
@@ -674,6 +705,10 @@ export function createTownDive(ctx) {
     isHooked: () => shot?.phase === 'hooked',
     canDive,
     end,
+    spawnQuestFish: (o) => look.spawnQuestFish(o),
+    hasQuestFish: (id) => look.hasQuestFish(id),
+    questFishPos: (id) => look.questFishPos(id),
+    clearQuestFish: () => look.clearQuestFish(),
     clear() { end(); held = false; look.clear(); },
     debug: () => ({ under, held, speed, shot: shot && { phase: shot.phase, pos: shot.pos.clone(), fish: !!shot.fish }, yaw: ride.yaw, pitch: aimPitch, shownPitch: ride.pitch, center: center.clone(), gyroOn,
       cameraUnder: look.isCameraUnder(), fish: look.fishCount(), start, end, fishAt: look.fishAt }),

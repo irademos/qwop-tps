@@ -4364,9 +4364,12 @@ async function initCore(runtimeContext) {
     _phoneSwordStatusNow?.();
   };
   let _diveAirMesh = null;
+  // (a job's potion — the fisher's dive: town.questAir() — gives one for nothing, and it can't be popped)
+  const _questAir = () => !!town?.questAir?.();
   const _toggleDiveAir = () => {
-    if (_diveAir) { _endDiveAir('tap'); return true; }
-    if (playerDead || getMana() < 1) {
+    if (_diveAir) { if (_diveAir.free && _questAir()) return true; _endDiveAir('tap'); return true; }
+    const free = _questAir();
+    if (playerDead || (!free && getMana() < 1)) {
       showPickupToast('mana_potion', 1, '', { text: 'No mana for an air bubble' });
       return false;
     }
@@ -4377,7 +4380,7 @@ async function initCore(runtimeContext) {
       scene.add(_diveAirMesh);
     }
     _diveAirMesh.visible = true;
-    _diveAir = { mesh: _diveAirMesh, spent: 0 };
+    _diveAir = { mesh: _diveAirMesh, spent: 0, free };
     audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'player-bubble', cooldownMs: 200 });
     updatePsBubbleButton();
     _phoneSwordStatusNow?.();
@@ -4385,10 +4388,13 @@ async function initCore(runtimeContext) {
   };
   const _diveAirHead = new THREE.Vector3();
   const _updateDiveAir = (dt) => {
+    // (a job's potion: the bubble's up by itself whenever the player's under water)
+    if (!_diveAir && _questAir() && _townDive?.isUnder() && !playerDead) _toggleDiveAir();
     if (!_diveAir) return;
     if (playerDead || !_townDive?.isUnder()) { _endDiveAir('dive'); return; }
+    if (_diveAir.free && !_questAir()) _diveAir.free = false;
     // (the mana taken a whole one at a time — the pill shows whole numbers)
-    _diveAir.spent += Math.max(0, dt || 0) / DIVE_AIR_S_PER_MANA;
+    if (!_diveAir.free) _diveAir.spent += Math.max(0, dt || 0) / DIVE_AIR_S_PER_MANA;
     while (_diveAir.spent >= 1) {
       _diveAir.spent -= 1;
       if (getMana() < 1) { _endDiveAir('mana'); return; }
@@ -11435,7 +11441,7 @@ async function initCore(runtimeContext) {
     if (swimming && !diving) _swimSplashes(dt, !_swimWas);
     _swimSplash.update(dt);
     _swimWas = swimming;
-    if (swimming && !_swimDrown && !(diving && _diveAirOn())) {
+    if (swimming && !_swimDrown && !(diving && _diveAirOn()) && !_questAir()) {
       _swimEnergy -= (dt / SWIM_ENERGY_S) * (diving ? SWIM_DIVE_DRAIN : playerControls.swimMoving ? 1 : SWIM_TREAD_DRAIN);
       if (_swimEnergy <= 0) _swimOutOfBreath();
     }
@@ -11841,6 +11847,23 @@ async function initCore(runtimeContext) {
     // The map's pirate ship (the floating prop with a deck — MAPS.islandTown.floating): { holder
     // (moved to sail it; its bow is local −X), anchor { position, yaw }, deck, model, box } or null
     getShip: () => (_voyage ? null : _activeMap?.ship ?? null),
+    // Diving (townDive.js): under water now, up out of it (climbing back into the canoe), and a
+    // job's fish down there (the fisher's dive — beats/dive.js)
+    isDiving: () => !!_townDive?.isUnder(),
+    endDive: () => _townDive?.end(),
+    dive: {
+      spawnQuestFish: (o) => _townDive?.spawnQuestFish(o),
+      hasQuestFish: (id) => !!_townDive?.hasQuestFish(id),
+      questFishPos: (id) => _townDive?.questFishPos(id) ?? null,
+      clearQuestFish: () => _townDive?.clearQuestFish(),
+      isHooked: () => !!_townDive?.isHooked(),
+    },
+    // Lying flat where they are (knocked out — the death clip's last frame) / back up
+    lieDown: (on) => {
+      const glb = playerModel?.userData?.qwopRig?.glbCharacter;
+      if (on) glb?.playDeath?.({ atEnd: true });
+      else if (!playerDead) glb?.revive?.();
+    },
     // A bomb thrower who isn't a townsperson (a Town job's — the pirates on the ship's deck):
     // stands where it's put (`stationary` — the job carries it with the ship) and lobs bombs at
     // the player; a bomb the sword knocks back always kills it
@@ -11972,8 +11995,8 @@ async function initCore(runtimeContext) {
       audioManager.playSound?.('splash', { volume: 0.35, at });
       _phoneBuzz('hit');
     },
-    onCatch: (len) => {
-      town?.landDiveFish?.(len);
+    onCatch: (len, info) => {
+      town?.landDiveFish?.(len, info);
       _phoneBuzz('kill');
     },
     onFree: () => town?.feed?.('It shook free of the arrow.'),

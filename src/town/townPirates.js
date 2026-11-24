@@ -14,6 +14,15 @@
 //   'chase'    — round the wide ring after the canoe (the fisher paddling it round the narrow
 //                one), a little behind it — the crew on the near rail
 //   'leave'    — off out to sea; put back at its anchor once it's well away from the player
+//   'lurk'     — out of sight, it's there all at once: a little way off the canoe on the open-sea
+//                side, broadside on (the fisher's dive — moved while the player's under water)
+//   'flee'     — away out to sea, faster and faster — faster than the canoe can follow (the
+//                fisher taken); back at its anchor once it's well away
+//
+// The dive plan (T.divePlan(), for the fisher's dive — beats/dive.js): `dive` (where the canoe
+// stops, over the seabed past the first fishing spot), `diveA` / `diveB` (spots under water on out
+// from it — { x, y, z }: the first fish, then the golden one, deeper). Places 'dive' / 'diveA' /
+// 'diveB' (townQuests.js placeOf).
 // and puts it back at its anchor afterwards (T.resetPirates — also on leaving Town / a job
 // dropped). The crew (T.spawnCrew({ bombers, archers })): bomb throwers (ctx.spawnBomber —
 // BombThrowerEnemy) and archers (ctx.spawnArcher — a bow-only fighter on ranged turns this module
@@ -44,6 +53,15 @@ const CHASE_MAX_SPEED = 4.6;    // m/s round its ring
 const LEAVE_SPEED = 4;          // m/s off out to sea
 const LEAVE_GONE_DIST = 70;     // m from the player: back at anchor
 const TURN_RATE = 0.7;          // rad/s it turns at most
+const LURK_DIST = 24;           // m off the canoe it turns up (under water: out of sight in the murk)
+const FLEE_SPEED = [3, 9];      // m/s it sets off at … ends up at (the canoe can't keep up)
+const FLEE_ACCEL = 0.35;        // m/s²
+const FLEE_GONE_DIST = 120;     // m from the player: back at anchor
+const DIVE_MIN_DEPTH = 4.5;     // m of water where the canoe stops for the dive
+const DIVE_A_OUT = 8;           // m on out from there: the first fish…
+const DIVE_B_OUT = 11;          // …and on from that, the golden one
+const DIVE_A_UNDER = 2.2;       // m under the surface the first fish swims
+const DIVE_B_UNDER = 4;         // m (at most — kept 1.2 m over the bottom) the golden one
 const CREW_URLS = ['frogManUrl', 'url', 'pumpkinUrl', 'antlerGuyUrl'];
 const CREW_HEARTS = 1;
 const CREW_BOMB_DAMAGE = 1;     // health segments a bomb takes off the player
@@ -117,7 +135,48 @@ export function installTownPirates(T, ctx) {
     if (name === 'sea1') return p.sea1;
     if (name === 'sea2') return p.sea2;
     if (name === 'seaPark') return p.park;
+    if (name === 'dive' || name === 'diveA' || name === 'diveB') return divePlan()?.[name] ?? null;
     return null;
+  };
+  // ── The dive plan ──
+  let dplan;
+  const depthAt = (x, z) => ctx.waterDepth?.(x, z) ?? 0;
+  const under = (x, z, below) => {
+    const level = ctx.getWaterY?.(x, z) ?? 0;
+    const d = depthAt(x, z);
+    const room = Number.isFinite(d) ? d - 1.2 : below;
+    return level - Math.max(0.8, Math.min(below, room));
+  };
+  const buildDivePlan = () => {
+    const p = seaPlan();
+    const fs = T.layout?.places.fishSpot;
+    if (!p || !fs) return null;
+    // (out from the shore through the ring's middle: the first spot along it deep enough)
+    const dx = p.center.x - fs.x;
+    const dz = p.center.z - fs.z;
+    const dl = Math.hypot(dx, dz) || 1;
+    const ux = dx / dl;
+    const uz = dz / dl;
+    let dive = null;
+    for (let d = 20; d <= dl + p.R; d += 2) {
+      const x = fs.x + ux * d;
+      const z = fs.z + uz * d;
+      if (depthAt(x, z) >= DIVE_MIN_DEPTH && [[3, 0], [-3, 0], [0, 3], [0, -3]].every(([ox, oz]) => depthAt(x + ox, z + oz) >= DIVE_MIN_DEPTH - 1)) { dive = { x, z }; break; }
+    }
+    if (!dive) dive = { ...p.center };
+    const ax = dive.x + ux * DIVE_A_OUT - uz * 2.5;
+    const az = dive.z + uz * DIVE_A_OUT + ux * 2.5;
+    const bx = ax + ux * DIVE_B_OUT + uz * 3.5;
+    const bz = az + uz * DIVE_B_OUT - ux * 3.5;
+    return {
+      dive, out: { x: ux, z: uz },
+      diveA: { x: ax, z: az, y: under(ax, az, DIVE_A_UNDER) },
+      diveB: { x: bx, z: bz, y: under(bx, bz, DIVE_B_UNDER) },
+    };
+  };
+  const divePlan = () => {
+    if (dplan === undefined && T.layout) dplan = buildDivePlan();
+    return dplan ?? null;
   };
 
   // ── The ship ──
@@ -166,6 +225,27 @@ export function installTownPirates(T, ctx) {
       sail = { mode, t: 0, dir };
       return true;
     }
+    if (mode === 'lurk') {
+      // (off the canoe on the open-sea side — away from the shore — broadside on to it)
+      const c = T.canoePose?.() ?? divePlan()?.dive ?? p.center;
+      const fs = T.layout.places.fishSpot;
+      let ox = c.x - fs.x;
+      let oz = c.z - fs.z;
+      const ol = Math.hypot(ox, oz) || 1;
+      ox /= ol;
+      oz /= ol;
+      let at = null;
+      for (const turn of [0, 0.5, -0.5, 1, -1]) {
+        const hx = ox * Math.cos(turn) + oz * Math.sin(turn);
+        const hz = -ox * Math.sin(turn) + oz * Math.cos(turn);
+        const q = { x: c.x + hx * LURK_DIST, z: c.z + hz * LURK_DIST, hx, hz };
+        if (deep(q.x, q.z, SHIP_RING_DEPTH)) { at = q; break; }
+      }
+      if (!at) return false;
+      setShipPose(at.x, at.z, yawFor(-at.hz, at.hx));
+      sail = { mode, t: 0, dir, to: { x: at.x, z: at.z, yaw: yawFor(-at.hz, at.hx) }, arrived: true };
+      return true;
+    }
     const theta = Math.atan2(pose.x - p.center.x, pose.z - p.center.z);
     sail = { mode, t: 0, dir, from: pose, theta };
     if (mode === 'approach') {
@@ -201,6 +281,22 @@ export function installTownPirates(T, ctx) {
       sail.theta += THREE.MathUtils.clamp(wrap(want - sail.theta), -step, step);
       const at = ring(p.center, rr, sail.theta);
       setShipPose(at.x, at.z, turnToward(pose.yaw, tangentYaw(sail.theta, sail.dir), dt * 2));
+    } else if (sail.mode === 'flee') {
+      // (straight out to sea — away from the island's shore — faster and faster)
+      const fs = T.layout.places.fishSpot;
+      let ax = pose.x - fs.x;
+      let az = pose.z - fs.z;
+      const al = Math.hypot(ax, az) || 1;
+      ax /= al;
+      az /= al;
+      sail.speed = Math.min(FLEE_SPEED[1], (sail.speed ?? FLEE_SPEED[0]) + FLEE_ACCEL * dt);
+      const yaw = turnToward(pose.yaw, yawFor(ax, az), dt);
+      const hx = -Math.cos(yaw);
+      const hz = Math.sin(yaw);
+      const nx = pose.x + hx * sail.speed * dt;
+      const nz = pose.z + hz * sail.speed * dt;
+      setShipPose(deep(nx, nz, SHIP_RING_DEPTH) ? nx : pose.x + ax * sail.speed * dt, deep(nx, nz, SHIP_RING_DEPTH) ? nz : pose.z + az * sail.speed * dt, yaw);
+      if (T.distToPlayer(pose) > FLEE_GONE_DIST) { clearCrew(); resetShip(); sail = { mode: 'gone', t: 0 }; }
     } else if (sail.mode === 'leave') {
       // (on round and out, away from the player; back at anchor once well off)
       const away = { x: pose.x - p.center.x, z: pose.z - p.center.z };
@@ -383,7 +479,7 @@ export function installTownPirates(T, ctx) {
   };
 
   Object.assign(T, {
-    seaPlan, seaPlace, shipSail, shipArrived: () => !!sail?.arrived, shipPose, shipMode: () => sail?.mode ?? null,
+    seaPlan, seaPlace, divePlan, shipSail, shipArrived: () => !!sail?.arrived, shipPose, shipMode: () => sail?.mode ?? null,
     spawnCrew, crewLoose, liveCrew, crewCount: () => crew.length, pirateThreats, updatePirates, resetPirates,
     // (dev console: town.debug().T.pirateDebug())
     pirateDebug: () => ({ plan: seaPlan(), sail, moved, turns: turnLog.slice(-20), crew: crew.map((m) => ({ kind: m.kind, lx: m.lx, lz: m.lz, dead: m.e.isDead, want: !!m.e.wantsRangedTurn, turn: loose?.turn === m })) }),
