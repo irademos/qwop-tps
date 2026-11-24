@@ -220,7 +220,12 @@ export function installTownCanoe(T, ctx) {
     else if (pilot && canoe.aboard) {
       const steer = pilotSteer();
       canoe.paddle(dt, pOar, steer, pilotStroke(dt, steer));
-    } else if (rodOut) { canoe.paddle(dt, null, NO_STEER); canoe.settle(dt); }
+    } else if (rodOut || (canoe.aboard && T.questHoldsVehicle?.('canoe'))) {
+      // (the rod out — or a job holding it where it's brought them till the next step's done:
+      // townQuests.js — no paddling, it comes to rest)
+      canoe.paddle(dt, null, NO_STEER);
+      canoe.settle(dt);
+    }
     else if (canoe.aboard) canoe.paddle(dt, ctx.getOarModel(), ctx.getSteer(), ctx.getOarStroke());
     else if (passenger) canoe.settle(dt);
     const oldYaw = canoe.move(dt, T.simT);

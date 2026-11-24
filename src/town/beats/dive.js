@@ -47,6 +47,8 @@ export const diveBeats = (W) => {
     if (n && !n.dive) intoWater(n);
     return n;
   };
+  // (the Dive button — on screen and the phone's — ringed while the player's not under)
+  const diveHl = () => (ctx.isDiving?.() ? null : { gear: 'dive', phone: 'dive' });
   const fishIds = (c) => (c.beat.golden ? ['golden'] : Array.from({ length: c.beat.count ?? 2 }, (_, i) => `${c.beat.at}${i}`));
 
   return {
@@ -84,7 +86,9 @@ export const diveBeats = (W) => {
         return !!ctx.isDiving?.();
       },
       entry: (c) => (T.inCanoe() ? 'Get out of the canoe — over the side' : `Dive under — hold Dive — beside ${c.s.n ? firstName(c.s.n.name) : 'the canoe'}`),
-      highlight: () => (T.inCanoe() ? { act: 'canoeout' } : null),
+      // (Get out over the side, then Dive; the canoe held still meanwhile — townQuests.js)
+      highlight: () => (T.inCanoe() ? { act: 'canoeout' } : diveHl()),
+      halt: () => T.inCanoe(),
       icon: '🤿',
     },
     // `who` swims down to a place under water; the player follows (they wait if left behind);
@@ -111,6 +115,7 @@ export const diveBeats = (W) => {
         const at = c.s.n ? T.diverAt(c.s.n) : null;
         return at ? { icon: '📍', x: at.x, z: at.z, h: 1.2 } : null;
       },
+      highlight: () => diveHl(),
       icon: '🤿',
     },
     // A fish speared with the bow under water at `at` (job fish put there — townDive.js); golden:
@@ -159,7 +164,10 @@ export const diveBeats = (W) => {
         return fill(c.beat.text ?? 'Spear a fish with the bow — hold Bow to aim, let go to shoot', c.q);
       },
       marker: (c) => (c.s.to ? { icon: '📍', x: c.s.to.x, z: c.s.to.z, h: 1 } : null),
-      highlight: () => (ctx.isDiving?.() && !ctx.dive?.isHooked() && ctx.heldWeapon?.() !== 'pistol' ? { gear: 'pistol' } : null),
+      highlight: () => {
+        if (!ctx.isDiving?.()) return diveHl();
+        return !ctx.dive?.isHooked() && ctx.heldWeapon?.() !== 'pistol' ? { gear: 'pistol' } : null;
+      },
       icon: '🏹',
     },
     // Back up: `who` swims up beside the canoe; done once the player's up out of the dive too

@@ -125,6 +125,27 @@ export const NOTES = {
   noShore: "Couldn't find the shore of Tree Island.",
 };
 
+// The button each step needs, ringed like the tutorial's (storyMode.js — refreshActs): from the
+// state view (+ held: 'rod' | 'oar' | 'sword' | null, fishing, gyro, fishAct) → { act: an act's key }
+// / { gear: an item id — 'fishing_rod', 'foamSword' } / null (nothing to press now)
+export const HIGHLIGHTS = {
+  crow: () => ({ act: 'crow' }),
+  fish: (v) => {
+    if (!v.hasRod) return { act: 'rod' };
+    if (v.fish > 0) return { act: 'crow' };
+    if (v.fishing) return v.gyro ? null : { act: v.fishAct ?? 'fishpull' };
+    if (v.held !== 'rod') return { gear: 'fishing_rod' };
+    return v.gyro ? null : { act: 'fishcast' };
+  },
+  tree: () => ({ act: 'tree' }),
+  wood: (v) => {
+    if (!v.hasSword) return { act: 'tree' };
+    if (v.wood >= WOOD_NEEDED) return v.canoeFixed ? null : { act: 'fix' };
+    if (v.held !== 'sword') return { gear: 'foamSword' };
+    return v.gyro ? null : { act: 'chop' };
+  },
+};
+
 // The buttons (Town's acts, bottom centre)
 export const ACTS = {
   crow: 'Talk to the Crow',

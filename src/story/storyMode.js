@@ -37,7 +37,7 @@ import { createFrogMom } from './frogMom.js';
 import { findStoryLayout, SEAT_RADIUS, SEAT_TOP } from './storyLayout.js';
 import { fitSeatStone, makeSeatStone, makeLeaningRod, makeCanoeDamage, makeNote, pulseGlint, removeProp } from './storyProps.js';
 import {
-  CHAPTER, STEPS, stepAtLeast, WOOD_NEEDED, CROW, TREE, VOICES, TALKS, NOTES, ACTS, BANNERS,
+  CHAPTER, STEPS, stepAtLeast, WOOD_NEEDED, CROW, TREE, VOICES, TALKS, NOTES, ACTS, BANNERS, HIGHLIGHTS,
   FIX_CANOE_THEN, QUEST,
 } from './chapter1.js';
 import { createJobTalk, createQuestTracker } from '../town/townJobs.js';
@@ -764,13 +764,24 @@ export function createStoryMode(ctx) {
     if (simT < lobbyOfferUntil) out.push({ key: 'lobby', label: ACTS.lobby, run: () => ctx.onLobby() });
     return out.slice(0, 3);
   };
+  // The button the step needs (chapter1.js HIGHLIGHTS): ringed like the tutorial's — an act here,
+  // the weapon button / the phone's (ctx.setHighlight — Town's ring)
+  const PHONE_FOR_GEAR = { fishing_rod: 'rod', foamSword: 'sword' };
+  const stepHighlight = () => {
+    if (!active || cut || ending || talker.isOpen() || ctx.isPlayerDead?.()) return null;
+    const f = HIGHLIGHTS[S.step];
+    return f ? f({ ...view(), held, fishing: !!F.fishing, gyro: ctx.hasGyro(), fishAct: F.fishActKey?.() }) ?? null : null;
+  };
   const refreshActs = () => {
     acts = computeActs();
-    const key = acts.map((a) => `${a.key}|${a.label}`).join(',');
+    const hl = stepHighlight();
+    const lit = hl?.act ? acts.findIndex((a) => a.key === hl.act) : -1;
+    ctx.setHighlight?.(hl ? { gear: hl.gear ?? null, phone: PHONE_FOR_GEAR[hl.gear] ?? (lit === 0 ? 'interact' : null) } : null);
+    const key = `${lit}#${acts.map((a) => `${a.key}|${a.label}`).join(',')}`;
     if (key === actsKey) return;
     actsKey = key;
     actsEl.replaceChildren(...acts.map((a, i) => {
-      const b = el('button', `${i > 0 ? 'ui-btn-secondary' : 'ui-btn'} town-act`, a.label);
+      const b = el('button', `${i > 0 ? 'ui-btn-secondary' : 'ui-btn'} town-act${i === lit ? ' tutorial-highlight' : ''}`, a.label);
       b.type = 'button';
       b.addEventListener('click', (e) => { e.stopPropagation(); if (active) { a.run(); actAt = 0; } });
       return b;
@@ -1206,6 +1217,7 @@ export function createStoryMode(ctx) {
   const exit = () => {
     if (!active) return;
     save();
+    ctx.setHighlight?.(null);
     active = false;
     ready = false;
     ++token;

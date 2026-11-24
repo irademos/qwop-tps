@@ -42,7 +42,11 @@ export const craftBeats = (W) => {
         return got >= b.count && c.s.n ? `${base} — take it to ${firstName(c.s.n.name)}` : base;
       },
       marker: (c) => (have(c.beat.good) >= c.beat.count ? npcMark(c.s.n, '📍') : null),
-      highlight: (c) => (have(c.beat.good) < c.beat.count && c.beat.good === 'wood' ? goalHighlight('wood') : null),
+      highlight: (c) => {
+        // (enough: talk to them — their button in reach; short: go and get it)
+        if (have(c.beat.good) >= c.beat.count) return c.s.n ? { act: `talk:${c.s.n.id}` } : null;
+        return c.beat.good === 'wood' ? goalHighlight('wood') : null;
+      },
       icon: '🪵',
     },
     // `who` goes to a place and works there `s` seconds; then what it `makes` is there (W.make)

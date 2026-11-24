@@ -17,6 +17,7 @@
 //   marker(c)       → { icon, x, z, h } (❗ / 📍 over something) or null
 //   acts(c)         → [{ key, label, onClick }] buttons it offers
 //   highlight(c)    → the button to ring (Town's: { gear, phone, act }) or null
+//   halt(c)         → true: the vehicle the player's in held still; false: let go (Town's — townQuests.js)
 //   talkTo(c, who)  → true: talking to `who` is this beat's (it opened its own talk)
 //   npc(c, n, dt)   → true: this beat runs townsperson n's frame
 //   event(c, kind, data) → true: it counted (a goal's 'fish' / 'deliver'…)
@@ -202,6 +203,8 @@ export function createQuestRunner({ quests, beats, world, onChange = () => {} })
     marker: () => ask('marker'),
     acts: () => ask('acts') ?? [],
     highlight: () => ask('highlight') ?? null,
+    // (whether the beat holds the vehicle the player's in still — true / false — or has no say: undefined)
+    halt: () => ask('halt'),
     // Talking to `who`: the beat type's own (a seek's giver, a guide's tips…), else its `talks`
     talkTo: (who) => {
       if (ask('talkTo', who)) return true;

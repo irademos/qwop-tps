@@ -792,7 +792,7 @@ Dive</button>
         : 'BLOCK';
       // Tutorial: ring the button the game is asking for
       // (Town's first day too: the rod / sword it asks for, the interact bar)
-      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, wand: btnWand, rod: btnRod, sword: btnSword };
+      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, wand: btnWand, rod: btnRod, sword: btnSword, dive: btnDive };
       Object.entries(highlightTargets).forEach(([name, el]) => {
         el.classList.toggle('tutorial-highlight', st.highlight === name);
       });

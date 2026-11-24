@@ -3,10 +3,82 @@
 // after a night's fighting — townBandits.js — is the one kind left), progress, markers
 // (❗ / 📍 / ❓) and the job talk.
 
+import * as THREE from 'three';
 import { MAX_ACTIVE_JOBS } from './townJobs.js';
 import { firstName } from './townPeople.js';
 import { makeTextSprite } from '../village/villageMode.js';
 import { JOB_REFRESH_S, heightScale } from './townConfig.js';
+
+// ── A goal's 📍: the pin, a soft halo round it and a beam of light up from the ground — unlit and
+// out of the fog, brighter at night (T.nightLevel), so it's easy to find in the dark ──
+const PIN_BEAM_H = 7;          // m the beam reaches over the pin
+const PIN_BEAM_R = 0.16;       // m — the beam's radius
+const PIN_GLOW = { day: 0.3, night: 0.95 };   // the halo / beam's brightness, by T.nightLevel
+let pinShared = null;
+const pinParts = () => {
+  if (pinShared) return pinShared;
+  // (the halo: a round soft spot; the beam: bright at its foot, fading out up its length)
+  const halo = document.createElement('canvas');
+  halo.width = halo.height = 128;
+  const hg = halo.getContext('2d');
+  const rg = hg.createRadialGradient(64, 64, 0, 64, 64, 64);
+  rg.addColorStop(0, 'rgba(255,230,160,1)');
+  rg.addColorStop(0.35, 'rgba(255,190,80,0.55)');
+  rg.addColorStop(1, 'rgba(255,160,40,0)');
+  hg.fillStyle = rg;
+  hg.fillRect(0, 0, 128, 128);
+  const beam = document.createElement('canvas');
+  beam.width = 4;
+  beam.height = 128;
+  const bg = beam.getContext('2d');
+  const lg = bg.createLinearGradient(0, 128, 0, 0);
+  lg.addColorStop(0, 'rgb(255,215,120)');
+  lg.addColorStop(0.45, 'rgb(150,100,30)');
+  lg.addColorStop(1, 'rgb(0,0,0)');
+  bg.fillStyle = lg;
+  bg.fillRect(0, 0, 4, 128);
+  const geo = new THREE.CylinderGeometry(PIN_BEAM_R, PIN_BEAM_R, 1, 12, 1, true);
+  geo.translate(0, 0.5, 0);
+  pinShared = { halo: new THREE.CanvasTexture(halo), beam: new THREE.CanvasTexture(beam), geo };
+  pinShared.halo.colorSpace = THREE.SRGBColorSpace;
+  pinShared.beam.colorSpace = THREE.SRGBColorSpace;
+  return pinShared;
+};
+const makeGoalPin = () => {
+  const parts = pinParts();
+  const group = new THREE.Group();
+  const pin = makeTextSprite('📍', { height: 0.6, size: 96, bg: null, pad: 10 });
+  pin.material.fog = false;
+  pin.material.toneMapped = false;
+  pin.renderOrder = 8;
+  const glow = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false };
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: parts.halo, ...glow }));
+  halo.scale.set(1.7, 1.7, 1);
+  halo.renderOrder = 7;
+  halo.userData.sharedMap = true;
+  const beam = new THREE.Mesh(parts.geo, new THREE.MeshBasicMaterial({ map: parts.beam, side: THREE.DoubleSide, ...glow }));
+  beam.renderOrder = 6;
+  beam.userData.sharedMap = true;
+  beam.userData.sharedGeo = true;
+  group.add(beam, halo, pin);
+  // (its pin `h` over the ground at `night` 0…1, pulsing a little)
+  group.userData.place = (h, night, t) => {
+    pin.position.y = h;
+    halo.position.y = h;
+    beam.scale.y = h + PIN_BEAM_H;
+    const k = (PIN_GLOW.day + (PIN_GLOW.night - PIN_GLOW.day) * night) * (0.85 + 0.15 * Math.sin(t * 3));
+    halo.material.opacity = k;
+    beam.material.opacity = k * 0.8;
+    const s = 1.5 + 0.5 * night;
+    halo.scale.set(s, s, 1);
+  };
+  return group;
+};
+const disposeMarker = (m) => m.traverse((o) => {
+  if (!o.material) return;
+  if (!o.userData.sharedMap) o.material.map?.dispose();
+  o.material.dispose();
+});
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownMissions(T, ctx) {
@@ -130,9 +202,7 @@ export function installTownMissions(T, ctx) {
       live.add(key);
       let m = T.markers.get(key);
       if (!m) {
-        m = t.icon === '📍'
-          ? makeTextSprite('📍', { height: 0.5, size: 96, bg: null, pad: 10 })
-          : makeTextSprite(t.icon, GIVER_MARKER);
+        m = t.icon === '📍' ? makeGoalPin() : makeTextSprite(t.icon, GIVER_MARKER);
         m.renderOrder = 8;
         T.root.add(m);
         T.markers.set(key, m);
@@ -140,13 +210,17 @@ export function installTownMissions(T, ctx) {
       // (someone in a room the player isn't in: over its house's door outside)
       const room = T.rooms.roomAt(t.x, t.z);
       const at = room && room !== T.inRoom ? { ...T.layout.places.rooms[room].door, h: 2.95 } : t;
-      m.position.set(at.x, T.groundAt(at.x, at.z) + at.h + Math.sin(T.simT * 3) * 0.08, at.z);
+      const bob = Math.sin(T.simT * 3) * 0.08;
+      if (m.userData.place) {
+        // (a goal's 📍: on the ground, its pin up at h with the halo and the beam — makeGoalPin)
+        m.position.set(at.x, T.groundAt(at.x, at.z), at.z);
+        m.userData.place(at.h + bob, Math.max(0, Math.min(1, T.nightLevel ?? 0)), T.simT);
+      } else m.position.set(at.x, T.groundAt(at.x, at.z) + at.h + bob, at.z);
     }
     for (const [key, m] of T.markers) {
       if (live.has(key)) continue;
       m.parent?.remove(m);
-      m.material.map?.dispose();
-      m.material.dispose();
+      disposeMarker(m);
       T.markers.delete(key);
     }
   };

@@ -37,7 +37,10 @@ export const cartBeats = (W) => {
       },
       highlight: (c) => {
         const cp = cartAt();
-        return T.goods?.[c.beat.good] > 0 && cp && T.distToPlayer(cp) < 4 && !T.storage?.isOpen() ? { act: 'cartstore' } : null;
+        if (T.storage?.isOpen()) return null;
+        if (T.goods?.[c.beat.good] > 0) return cp && T.distToPlayer(cp) < 4 ? { act: 'cartstore' } : null;
+        // (none carried: go and get some — the wood: the sword out, then Chop without a gyro)
+        return c.beat.good === 'wood' && !T.inCart() ? W.goalHighlight('wood') : null;
       },
       icon: '🪵',
     },
@@ -103,7 +106,10 @@ export const cartBeats = (W) => {
         if (b.need && shortOf(b.need)) { if (b.ifShort) c.goto(b.ifShort); return false; }
         if (T.simT > c.s.planAt) { c.s.planAt = T.simT + 0.5; T.driveTo({ x: to.x, z: to.z, r: Math.min(4, b.r * 0.5) }); }
         const cp = cartAt();
-        return !!cp && dist2(cp.x, cp.z, to.x, to.z) < b.r && (T.inCart() || T.distToPlayer(cp) < 5);
+        const there = !!cp && dist2(cp.x, cp.z, to.x, to.z) < b.r && (T.inCart() || T.distToPlayer(cp) < 5);
+        // (there: the cart held still till the next step's done — townQuests.js)
+        if (there) W.arrive('cart');
+        return there;
       },
       end: () => T.driveTo(null),
       entry: (c) => {
