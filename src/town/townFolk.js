@@ -222,6 +222,8 @@ export function installTownFolk(T, ctx) {
     }
     // (showing the player round on their first day / in a job of theirs — townQuests.js runs their frame)
     if (n.questing) { setTask(n, { type: 'quest', dur: Infinity }); return; }
+    // (fighting beside the player — townAllies.js runs their frame)
+    if (n.ally) { setTask(n, { type: 'ally', dur: Infinity }); return; }
     // (a claim's over: back to the host's town)
     if (T.netMode === 'client') { release(n); return; }
     if (def.outlaw) { T.decideBandit(n); return; }

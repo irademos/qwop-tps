@@ -273,7 +273,7 @@ export function installTownPirates(T, ctx) {
         }
       }
       if (!m.e) continue;
-      m.e._questFoe = true;
+      m.e._fightFoe = true;
       crew.push(m);
     }
     return crew.length;

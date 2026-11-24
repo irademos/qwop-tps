@@ -148,7 +148,11 @@ const WIZARD_JOBS = [
       },
       { do: 'bomb', from: 'son', at: 'cart' },
       { do: 'actorLeave', id: 'son', to: 'camp', shout: 'Lads! Get them!' },
-      { do: 'ambush', count: 5, from: 'camp', allies: ['wizard'], onAlly: 2, text: 'Fight off Rowan\'s friends' },
+      // (out along the nearest stretch of the walk, the wizard at the player's side — beats/wave.js)
+      {
+        do: 'wave', label: 'fight', count: 7, level: 2, allies: ['wizard'], pathLen: 110,
+        title: 'AMBUSH', sub: 'Rowan\'s friends are coming', text: 'Fight off Rowan\'s friends',
+      },
       { do: 'lockCart', on: false },
       { do: 'seek', who: 'wizard', anyTime: true },
       {
@@ -161,6 +165,8 @@ const WIZARD_JOBS = [
         ],
         choices: [{ label: 'Hop in' }],
       },
+      // (the fight walked them off down the trail: the cart brought round)
+      { do: 'cart', bring: true },
       { do: 'board', who: 'wizard', checkpoint: true },
       { do: 'drive', to: 'town', r: 9, text: 'Drive the wizard into town' },
       { do: 'alight', who: 'wizard' },
