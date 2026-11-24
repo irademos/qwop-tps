@@ -126,7 +126,8 @@ export function installTownCart(T, ctx) {
       getTilt: ctx.getRideTilt,
       getSteer: ctx.getSteer,
       // (held still with a gyro item out, and while someone's talking with the player)
-      isHolding: () => !!(ctx.isHoldingGyroItem?.() || T.jobTalk?.isOpen()),
+      // (a gyro item out, a talk, or a job holding it where it's brought them — townQuests.js)
+      isHolding: () => !!(ctx.isHoldingGyroItem?.() || T.jobTalk?.isOpen() || T.questHoldsVehicle?.('cart')),
       onHoldEnd: ctx.resetRideTilt,
       onBump: () => ctx.playSfx?.('thud', ctx.getPlayerPosition()),
     });

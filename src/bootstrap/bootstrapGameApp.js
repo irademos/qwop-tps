@@ -8024,7 +8024,7 @@ async function initCore(runtimeContext) {
       wandShieldHeld: _wandShieldHold,
       // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')
       highlight: showdownTutorial?.isActive() ? _tutorialPhoneHighlight
-        : town?.isActive() ? _townIntroHl?.phone ?? null : null
+        : town?.isActive() || story?.isActive?.() ? _townIntroHl?.phone ?? null : null
     };
   };
   let _tutorialPhoneHighlight = null;
@@ -8034,8 +8034,9 @@ async function initCore(runtimeContext) {
     const gear = hl?.gear ?? null;
     const phone = hl?.phone ?? null;
     if (playerControls) {
-      const ringed = gear ? playerControls.weaponButtonFor?.(gear) : null;
-      for (const b of [playerControls.psWeaponBtn1, playerControls.psBowBtn, playerControls.psShieldBtn]) {
+      // ('dive': the Dive button — a job wanting the player under water)
+      const ringed = gear === 'dive' ? playerControls.psDiveBtn : gear ? playerControls.weaponButtonFor?.(gear) : null;
+      for (const b of [playerControls.psWeaponBtn1, playerControls.psBowBtn, playerControls.psShieldBtn, playerControls.psDiveBtn]) {
         b?.classList.toggle('tutorial-highlight', !!ringed && b === ringed);
       }
     }
@@ -12227,6 +12228,8 @@ async function initCore(runtimeContext) {
       _refreshGearUI();
       _phoneSwordStatusNow?.();
     },
+    // The button the story's step needs, ringed (Town's ring: the weapon button / the phone's)
+    setHighlight: (hl) => _setTownIntroHighlight(hl),
     // Washed up: lying on the beach (the death clip, held on its last frame) / back up
     // (no stand-up clip yet — he just stands)
     // What's in hand: 'rod' | 'oar' | 'sword' | null (the game's weapon buttons / the phone change it too)

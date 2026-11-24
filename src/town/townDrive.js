@@ -15,7 +15,8 @@
 // the player is within its r (VIA_R) of it, or well past it (under half its distance from the goal);
 // T.updateDrive(dt) each frame; T.driveRoute() the route now (the town book could draw it).
 // `water: true` — out on the water in the canoe (the fisher's jobs — beats/sea.js): the route is
-// straight there (through any `via`), the arrows floating on the surface.
+// straight there (through any `via`), the arrows floating on the surface. `straight: true` — on foot
+// off the town's ground (Tree Island — beats/rescue.js' sneak): straight there, on the ground.
 
 import * as THREE from 'three';
 
@@ -34,7 +35,9 @@ const PATH_SPREAD = 1;      // cells either side of a painted path that count as
 
 const ARROWS = 16;          // arrows shown ahead
 const ARROW_GAP = 3;        // m between them
-const ARROW_LIFT = 0.18;    // m over the ground
+const ARROW_LIFT = 0.22;    // m over the ground
+const ARROW_GLOW = { day: 0.35, night: 1 };   // the soft glow round each arrow (× its opacity), by T.nightLevel
+const ARROW_NIGHT_SCALE = 1.35;   // × the arrows' size at night — easier to see in the dark
 const REPLAN_S = 1.5;       // s between route updates
 const OFF_ROUTE = 5;        // m off the route: re-planned at once
 const VIA_R = 6;            // m — a waypoint this close is reached
@@ -273,11 +276,23 @@ export function installTownDrive(T, ctx) {
     group.name = 'drive-arrows';
     const geo = makeArrowGeometry();
     for (let k = 0; k < ARROWS; k++) {
+      // (unlit, untouched by the fog / tone mapping: as bright at night as by day)
       const mat = new THREE.MeshBasicMaterial({
         color: 0xffd36b, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide,
+        fog: false, toneMapped: false,
       });
       const m = new THREE.Mesh(geo, mat);
       m.renderOrder = 6;
+      // (a soft glow round it — bigger, added light — that comes up at night)
+      const glow = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        color: 0xffa940, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending, fog: false, toneMapped: false,
+      }));
+      glow.scale.setScalar(1.75);
+      glow.position.y = -0.02;
+      glow.renderOrder = 5;
+      m.add(glow);
+      m.userData.glow = glow;
       m.rotation.order = 'YXZ';
       m.visible = false;
       group.add(m);
@@ -300,7 +315,7 @@ export function installTownDrive(T, ctx) {
       let start = { x: p.x, z: p.z };
       path = [start];
       for (const g of legs) {
-        const leg = (!target.water && drive?.route(start, { x: g.x, z: g.z, r: g.r ?? VIA_R })) || [start, { x: g.x, z: g.z }];
+        const leg = (!target.water && !target.straight && drive?.route(start, { x: g.x, z: g.z, r: g.r ?? VIA_R })) || [start, { x: g.x, z: g.z }];
         path.push(...leg.slice(1));
         start = path[path.length - 1];
       }
@@ -336,7 +351,7 @@ export function installTownDrive(T, ctx) {
   const driveTo = (t) => {
     if (!t) { target = null; path = null; hide(); return; }
     if (target && t.x === target.x && t.z === target.z) return;
-    target = { x: t.x, z: t.z, r: t.r ?? 4, via: t.via ?? [], water: !!t.water };
+    target = { x: t.x, z: t.z, r: t.r ?? 4, via: t.via ?? [], water: !!t.water, straight: !!t.straight };
     viaAt = 0;
     planAt = 0;
   };
@@ -361,6 +376,9 @@ export function installTownDrive(T, ctx) {
     const total = lens[lens.length - 1];
     // (arrows flow along the route — a slow march toward the goal)
     const phase = (T.simT * 2.2) % ARROW_GAP;
+    const night = Math.max(0, Math.min(1, T.nightLevel ?? 0));
+    const glowK = ARROW_GLOW.day + (ARROW_GLOW.night - ARROW_GLOW.day) * night;
+    const size = 1 + (ARROW_NIGHT_SCALE - 1) * night;
     for (let k = 0; k < ARROWS; k++) {
       const a = arrows[k];
       const d = pr.d + 2 + k * ARROW_GAP + phase;
@@ -376,6 +394,8 @@ export function installTownDrive(T, ctx) {
       // (fading in near the player, out far ahead)
       const u = k / (ARROWS - 1);
       a.material.opacity = 0.85 * Math.min(1, (d - pr.d) / 4) * (1 - u * 0.7);
+      a.userData.glow.material.opacity = a.material.opacity * glowK * (0.8 + 0.2 * Math.sin(T.simT * 4 - k * 0.6));
+      a.scale.setScalar(size);
       a.visible = true;
     }
   };

@@ -19,7 +19,7 @@ const HOME_STUCK_S = 14;      // s getting no nearer home: put there
 const BOMB_MISS = 3.2;        // m off the canoe the first bomb lands (on the ship's side)
 
 export const seaBeats = (W) => {
-  const { T, ctx, THREE, roleNpc, control, go, fill, placeOf, goalHighlight, firstName, pickOf, dist2, glbCharacterConfig, sayNow, sayLines } = W;
+  const { T, ctx, THREE, roleNpc, control, go, fill, placeOf, goalHighlight, firstName, pickOf, dist2, glbCharacterConfig, sayNow, sayLines, arrive } = W;
   // Something said out loud and in the feed (out on the water nothing else shows it)
   const shout = (n, text, q) => sayNow(n, fill(text, q), true);
   const pirateSay = (text) => {
@@ -123,6 +123,8 @@ export const seaBeats = (W) => {
           ctx.setCanoeWeapon?.('oar');
         }
         if (!(T.inCanoe() && canoeDist(to) < c.beat.r)) return false;
+        // (there: the canoe held still till the next step's done — townQuests.js)
+        arrive('canoe');
         if (c.beat.stop) {
           T.canoeStop?.();
           if (ctx.isRodAllowed?.()) ctx.setCanoeWeapon?.('rod');
@@ -131,6 +133,10 @@ export const seaBeats = (W) => {
       },
       end: () => T.driveTo(null),
       entry: (c) => fill(c.beat.text ?? 'Paddle there', c.q),
+      highlight: () => {
+        const cp = T.canoePose();
+        return cp && !T.inCanoe() && T.distToPlayer(cp) < 4 ? { act: 'canoein' } : null;
+      },
       marker: (c) => { const to = placeOf(c.beat.to); return to ? { icon: '📍', x: to.x, z: to.z, h: 1.4 } : null; },
       icon: '🛶',
     },

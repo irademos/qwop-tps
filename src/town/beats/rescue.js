@@ -170,6 +170,7 @@ export const rescueBeats = (W) => {
         if (shots > s.shots) { s.shots = shots; s.shotAt = T.simT; }
         const alert = (why) => {
           s.phase = 'fight';
+          T.driveTo(null);
           T.crewLoose(true);
           const at = look?.group.position;
           pirateSay(why === 'seen' ? 'Who goes there?! INTRUDERS! All hands!' : 'Arrrgh — we\'re under attack! All hands! ALL HANDS!', at);
@@ -200,8 +201,14 @@ export const rescueBeats = (W) => {
           }
           if (T.shipHullDist(p) < ALERT_DIST) { alert('seen'); return false; }
           if (s.shotAt != null && T.simT - s.shotAt > MISS_S) { alert('miss'); return false; }
+          // (glowing arrows along the shore to it while creeping up — townDrive.js, straight on the ground)
+          if (s.phase === 'approach') {
+            const to = placeOf('shipShore');
+            if (to) T.driveTo({ x: to.x, z: to.z, r: 3, straight: true });
+          }
           if (s.phase === 'approach' && shipAt && dist2(p.x, p.z, shipAt.x, shipAt.z) < SPOT_DIST) {
             s.phase = 'shoot';
+            T.driveTo(null);
             if (n) {
               control(n, 'stand');
               sayLines(n, [
@@ -217,6 +224,7 @@ export const rescueBeats = (W) => {
         payFoes();
         return !s.queue?.length && !liveFoes().length && !lookoutUp(c);
       },
+      end: () => T.driveTo(null),
       npc: (c, n, dt) => {
         // (hanging back once the ship's in sight: crouched where they are, watching)
         if (n !== c.s.n || c.s.phase === 'approach') return false;

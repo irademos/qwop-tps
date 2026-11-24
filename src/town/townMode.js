@@ -846,7 +846,11 @@ export function createTownMode(ctx) {
     lockpick.stop();
     T.questPick = false;
     ctx.cancelCarry();
-    for (const [, m] of markers) { m.parent?.remove(m); m.material.map?.dispose(); m.material.dispose(); }
+    for (const [, m] of markers) {
+      m.parent?.remove(m);
+      // (a goal's 📍 is a group — its halo / beam share their texture: townMissions.js)
+      m.traverse((o) => { if (!o.material) return; if (!o.userData.sharedMap) o.material.map?.dispose(); o.material.dispose(); });
+    }
     markers.clear();
     tracker.render([]);
     T.stalls.setActive(false);

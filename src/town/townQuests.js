@@ -697,12 +697,58 @@ export function installTownQuests(T, ctx) {
     }
     if (q) { q.cast = {}; q.failOnDown = false; }
   };
+  // ── A vehicle held where a job's brought it (the canoe / the cart) ──
+  // A paddle / drive beat that ends with the player in the vehicle there (W.arrive) holds it — no
+  // paddling / rolling off — through the beats after it, till one that moves it (MOVING_BEATS), the
+  // player getting out, the job ending / failing / another taking over, or one beat holding it past
+  // HOLD_MAX_S (so it's never stuck for good). A beat type's own `halt` hook wins: true holds the
+  // vehicle the player's in with no arrival before it (diveOut), false lets it go.
+  // T.questHoldsVehicle('canoe' | 'cart') — townCanoe.js / townCart.js.
+  const HOLD_MAX_S = 150;
+  const MOVING_BEATS = new Set(['paddle', 'drive', 'pilotHome', 'pirates', 'chaseShip', 'canoeLand', 'canoeCrew', 'cart', 'cartGoods', 'board']);
+  let hold = null;   // { kind, qid, bi (the beat it's counted from), since, spent }
+  let held = null;   // the kind held this frame
+  const vehicleIn = () => (T.inCanoe?.() ? 'canoe' : T.inCart?.() ? 'cart' : null);
+  const arrive = (kind) => {
+    const br = started ? focus() : null;
+    if (!br || vehicleIn() !== kind) return;
+    hold = { kind, qid: br.runner.quest()?.id ?? null, bi: br.runner.bi(), arrivedAt: br.runner.bi(), since: T.simT, spent: false };
+  };
+  const updateHold = () => {
+    held = null;
+    const br = started ? focus() : null;
+    const kind = vehicleIn();
+    if (!br || !kind) { hold = null; return; }
+    const qid = br.runner.quest()?.id ?? null;
+    const bi = br.runner.bi();
+    if (hold && (hold.qid !== qid || hold.kind !== kind)) hold = null;
+    const want = br.runner.halt();
+    if (want === false) { hold = null; return; }
+    if (want === true && !hold) hold = { kind, qid, bi, arrivedAt: -1, since: T.simT, spent: false };
+    if (!hold) return;
+    if (bi !== hold.bi) { hold.bi = bi; hold.since = T.simT; hold.spent = false; }
+    // (on to a beat that moves it — not the arrival's own, still finishing this frame)
+    if (want !== true && bi !== hold.arrivedAt && MOVING_BEATS.has(br.runner.beat()?.do)) { hold = null; return; }
+    if (T.simT - hold.since > HOLD_MAX_S) hold.spent = true;
+    if (!hold.spent) held = hold.kind;
+  };
+
+  // ── The button a job's step needs, when its beat doesn't say: ringed like the tutorial's ──
+  // (the job's own button — Climb aboard, Follow… —, else whoever's waiting with a job (❗) in reach)
+  const defaultHighlight = (br) => {
+    if (!br || T.jobTalk.isOpen() || T.sequence || T.jail || ctx.isPlayerDead()) return null;
+    const own = br.runner.acts() ?? [];
+    if (own.length) return { act: own[0].key };
+    const giver = (T.acts ?? []).find((a) => a.key.startsWith('talk:') && T.npcs.some((n) => `talk:${n.id}` === a.key && T.isQuestGiver(n)));
+    return giver ? { act: giver.key } : null;
+  };
+
   // ── Town's quest world for the beats (src/town/beats/) ──
   const W = {
     T, ctx, P, THREE, roleNpc, roleGone, canTake, control, release, go, stand, fill, calm, isNight, npcMark, placeOf, cartAt,
     actors, spawnActor, actorSay, sayNow, sayLines, foes, liveFoes, clearFoes, seat, unseat, joinAllies, leaveAllies, questWave, stopQuestWave, sendHome, open, talker, tipTalk,
     guideBuys, goalHighlight, cartState, newLead, glbCharacterConfig, BANDIT_NAMES, firstName, pickOf, dist2,
-    mayApproach, make: (what, on) => makers[what]?.(on), capture: (n) => capture(n), free: (id, o) => free(id, o), takenOf, flags: () => flags, hasItem, SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
+    mayApproach, arrive, make: (what, on) => makers[what]?.(on), capture: (n) => capture(n), free: (id, o) => free(id, o), takenOf, flags: () => flags, hasItem, SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
     BOMB_THROW_AT_S, BOMB_AFTER_S, FOE_HEARTS, FOE_SPAWN_DIST, FOE_GEAR, FOE_COINS,
   };
   const BEATS = townBeats(W);
@@ -868,6 +914,7 @@ export function installTownQuests(T, ctx) {
       }
       br.runner.update(dt);
     }
+    updateHold();
   };
   const BUSY_TEXT = { water: 'once you\'re back on land', away: 'once you\'re back in Brindlewick' };
   const questEntry = () => {
@@ -938,6 +985,8 @@ export function installTownQuests(T, ctx) {
     order.length = 0;
     turn = null;
     started = false;
+    hold = null;
+    held = null;
     homeBound.clear();
     for (const n of T.npcs) {
       if (n.captive) { n.captive = false; n.hidden = false; }
@@ -973,7 +1022,14 @@ export function installTownQuests(T, ctx) {
     // (❗ over every giver waiting to come up, the 📍 of the job under way)
     questMarkers: () => (started ? liveList().map((br) => br.runner.marker()).filter(Boolean) : []),
     questActs: () => (started ? focus()?.runner.acts() ?? [] : []),
-    questHighlight: () => (started ? focus()?.runner.highlight() ?? null : null),
+    // (the button the job's step needs: its beat's, else a default — defaultHighlight)
+    questHighlight: () => {
+      if (!started) return null;
+      const br = focus();
+      return br?.runner.highlight() ?? defaultHighlight(br);
+    },
+    // (a job holding the vehicle the player's in still — updateHold)
+    questHoldsVehicle: (kind) => started && held === kind,
     // (talking to someone: the job under way's; with none, any waiting giver's — the player picks)
     questTalk: (n) => {
       if (!started) return false;

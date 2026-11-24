@@ -242,14 +242,18 @@ export function installTownActs(T, ctx) {
     }
     return out.slice(0, 3);
   };
-  // The first day's goal: the button it needs rings like the tutorial's (townQuests.js — goalHighlight)
+  // The first day's goal / a job's step: the button it needs rings like the tutorial's (townQuests.js —
+  // goalHighlight, questHighlight)
+  const PHONE_FOR_GEAR = { pistol: 'gun', foamSword: 'sword', fishing_rod: 'rod', magic_wand: 'wand', shield: 'shield', dive: 'dive' };
   const hlMatch = (hl, a) => !!hl?.act && (hl.act.endsWith(':') ? a.key.startsWith(hl.act) : a.key === hl.act);
   const refreshActs = () => {
     T.acts = computeActs();
     const hl = T.questHighlight();
     const lit = T.acts.findIndex((a) => hlMatch(hl, a));
     // (the weapon buttons and the phone: its own button, or the interact bar for the first act)
-    ctx.setIntroHighlight?.(hl ? { gear: hl.gear ?? null, phone: hl.phone ?? (lit === 0 ? 'interact' : null) } : null);
+    // (a ringed gear button with no phone button named: the phone's matching one)
+    const phone = hl?.phone ?? PHONE_FOR_GEAR[hl?.gear] ?? (lit === 0 ? 'interact' : null);
+    ctx.setIntroHighlight?.(hl ? { gear: hl.gear ?? null, phone } : null);
     const key = `${lit}#${T.acts.map((a) => `${a.key}|${a.label}`).join(',')}`;
     if (key === T.actsKey) return;
     T.actsKey = key;
