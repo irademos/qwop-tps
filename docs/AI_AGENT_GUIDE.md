@@ -173,7 +173,7 @@ src/
 |---|---|
 | `VITE_FIREBASE_*` | `src/core/firebase-init.js` |
 | `VITE_NETWORK_TOPOLOGY_MODE` | `src/multiplayer/peerConnection.js` (`star`\|`mesh`) |
-| `VITE_METERED_API_KEY` | `api/turn-credentials.js`, `src/multiplayer/peerConnection.js` (TURN credentials) |
+| `METERED_API_KEY` | `api/turn-credentials.js` only (TURN credentials; old `VITE_METERED_API_KEY` still read there) — clients fetch `/api/turn-credentials` |
 
 ---
 

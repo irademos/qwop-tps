@@ -346,7 +346,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 |---|---|
 | `VITE_FIREBASE_*` | Firebase project config (apiKey, authDomain, databaseURL, etc.) |
 | `VITE_NETWORK_TOPOLOGY_MODE` | `star` (default) or `mesh` for multiplayer |
-| `VITE_METERED_API_KEY` | TURN credentials (Metered) — `api/turn-credentials.js` and `src/multiplayer/peerConnection.js` |
+| `METERED_API_KEY` | TURN credentials (Metered) — server only, read by `api/turn-credentials.js` (the old `VITE_METERED_API_KEY` name still works there); the browser fetches `/api/turn-credentials`, never the key — don't give it a `VITE_` name in client code (Vite bakes those into the bundle) |
 
 ---
 
