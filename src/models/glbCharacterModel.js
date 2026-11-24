@@ -607,15 +607,16 @@ export class GLBCharacter {
   /**
    * Plays the death clip once and holds its last frame. The clip drives the arms too
    * (IK is suspended) until revive(); setMoving() is ignored meanwhile.
+   * `atEnd`: straight to the clip's last frame (lying on the ground — no fall).
    */
-  playDeath() {
+  playDeath({ atEnd = false } = {}) {
     if (this._dead) return;
     this._dead = true;
     this._action = null;
     this._gaitClip = null;
     this._setArmIK(false);
     const cfg = glbCharacterConfig;
-    this.fluffy.play(cfg.deathClip, { inPlace: true, fade: 0.15, loop: false })
+    this.fluffy.play(cfg.deathClip, { inPlace: true, fade: atEnd ? 0 : 0.15, loop: false, atEnd })
       .catch((e) => console.warn('[GLBCharacter] death clip load failed:', e));
   }
 

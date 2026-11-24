@@ -4132,22 +4132,26 @@ async function initCore(runtimeContext) {
   _hurtVignette?.addEventListener('animationend', (e) => {
     if (e.animationName === 'hurt-vignette-flash') _hurtVignette.classList.remove('is-hit');
   });
+  let _playerHurtQuiet = false;
   const triggerPlayerHurtBlood = (previousHealth, nextHealth) => {
     if (!Number.isFinite(previousHealth) || !Number.isFinite(nextHealth)) return;
     if (nextHealth >= previousHealth || !playerModel?.parent) return;
     flashHurtVignette();
     comboMeter.end();
     window._phoneBuzz?.(nextHealth <= 0 ? 'kill' : 'hit');
-    playerModel.getWorldPosition(playerBloodOrigin);
-    const groundY = playerBloodOrigin.y;
-    playerBloodOrigin.y += 0.85;
-    const intensity = THREE.MathUtils.clamp((previousHealth - nextHealth) / 2, 0.6, 2);
-    spawnBloodBurst(scene, playerBloodOrigin, { groundY, intensity });
+    // (_playerHurtQuiet: hurt with no wound — washed ashore out of breath: no blood, no hit clip)
+    if (!_playerHurtQuiet) {
+      playerModel.getWorldPosition(playerBloodOrigin);
+      const groundY = playerBloodOrigin.y;
+      playerBloodOrigin.y += 0.85;
+      const intensity = THREE.MathUtils.clamp((previousHealth - nextHealth) / 2, 0.6, 2);
+      spawnBloodBurst(scene, playerBloodOrigin, { groundY, intensity });
+    }
     if (nextHealth <= 0) audioManager?.playOuch('playerDeath', 'ouch-player');
     else {
       audioManager?.playOuch('player', 'ouch-player');
       // A hit that doesn't knock them down (a blast's knock-down clip wins — see playReaction)
-      playHitReaction(playerModel);
+      if (!_playerHurtQuiet) playHitReaction(playerModel);
     }
   };
   // During a blocked stagger (startBlockedStagger) the player's block doesn't hold
@@ -11171,7 +11175,17 @@ async function initCore(runtimeContext) {
     playerControls.swimSinkExtra = 0;
     showPickupToast('swim', 1, '', { text: 'Out of breath' });
   };
+  // Washed ashore: lying on the beach (the death clip's last frame) a moment, then up
+  const SWIM_ASHORE_LIE_MS = 1300;
+  let _swimLieTimer = null;
+  const _swimGetUp = () => {
+    clearTimeout(_swimLieTimer);
+    _swimLieTimer = null;
+    if (playerControls) playerControls.swimLocked = false;
+    if (!playerDead) playerModel?.userData?.qwopRig?.glbCharacter?.revive?.();
+  };
   const _swimReset = () => {
+    if (_swimLieTimer) _swimGetUp();
     _swimDrown = null;
     if (playerControls) {
       playerControls.swimLocked = false;
@@ -11189,7 +11203,6 @@ async function initCore(runtimeContext) {
     _townDive?.end();   // (sunk under water: out of the dive before the shore)
     _swimEnergy = 1;
     _swimWas = false;
-    playerControls.swimLocked = false;
     playerControls.swimSinkExtra = 0;
     if (spot) {
       _psJumpVelY = 0;
@@ -11198,7 +11211,17 @@ async function initCore(runtimeContext) {
       _teleportPlayer(spot.x, spot.z, spot.yaw);   // (facing on up the beach)
     }
     showPickupToast('swim', 1, '', { text: 'Washed ashore' });
-    if (!story?.isActive()) window.localHealth = Math.max(0, statsState.health - SWIM_DROWN_DAMAGE);
+    if (!story?.isActive()) {
+      _playerHurtQuiet = true;
+      try { window.localHealth = Math.max(0, statsState.health - SWIM_DROWN_DAMAGE); }
+      finally { _playerHurtQuiet = false; }
+    }
+    // Lying on the sand (still held there — swimLocked), then standing up
+    if (playerDead || (!story?.isActive() && statsState.health <= 0)) { playerControls.swimLocked = false; return; }
+    playerControls.swimLocked = true;
+    playerModel.userData.qwopRig?.glbCharacter?.playDeath?.({ atEnd: true });
+    clearTimeout(_swimLieTimer);
+    _swimLieTimer = setTimeout(_swimGetUp, SWIM_ASHORE_LIE_MS);
   };
   const _updateSwim = (dt) => {
     const p = playerModel?.position;
@@ -11728,11 +11751,12 @@ async function initCore(runtimeContext) {
     // The bow under water: drawn (or just loosed) — the dive treads and aims it; the arrow on a
     // string (from the bow while it's held, else the hand); the catch on the fishing reel
     bowOut: () => !!(_bowDraw.active || _bowDraw.restoreAt),
-    lineStart: (out) => {
+    lineStart: (out, hand) => {
       const held = pistol?.holder === playerControls ? pistol.heldMesh : null;
       if (held) { bowArrowTipWorld(held, 0, out); return true; }
+      // (reeling in: the front of the two hands on the string)
       const glb = playerModel?.userData?.qwopRig?.glbCharacter;
-      if (glb?.getPalmWorldPosition) { glb.getPalmWorldPosition('right', out); return true; }
+      if (glb?.getPalmWorldPosition) { glb.getPalmWorldPosition(hand || 'right', out); return true; }
       return false;
     },
     createArrow: () => createArrowMesh(),
@@ -13306,7 +13330,7 @@ async function initCore(runtimeContext) {
       if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
-        if (!_classicMode && !_broomRide?.isRiding() && !town?.inCart() && !playerControls.isSwimming && !_townDive?.isUnder()
+        if (!_classicMode && !_broomRide?.isRiding() && !town?.inCart() && !playerControls.isSwimming && !_townDive?.isUnder() && !playerControls.swimLocked
           && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic (or on the broom, or swimming)
           _psJumpVelY = PS_JUMP_FORCE;
           window.phoneSwordAirborne = true;

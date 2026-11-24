@@ -56,6 +56,7 @@ export interface PlayOptions {
   fade?: number     // seconds to crossfade from the current pose (default 0 = snap)
   excludeBones?: string[] // bone names (any Mixamo prefix) the clip must not drive; their children are excluded too
   loop?: boolean    // default true; false plays the clip once and holds its last frame
+  atEnd?: boolean   // with loop: false — start on the last frame (just the end pose, held)
 }
 
 // ── Mixamo animation sources ──────────────────────────────────────────────
@@ -724,6 +725,7 @@ export class FluffyCharacter {
       action.clampWhenFinished = true
     }
     action.play()
+    if (opts.atEnd && opts.loop === false) action.time = Math.max(0, source.clip.duration - 1e-3)
     this.anim = {
       source, mixer, action,
       retarget: createRetargeter(this.rig, source, excluded),

@@ -39,6 +39,12 @@ const ACCEL = 3.5;              // 1/s the speed eases up to it
 const STOP_RATE = 3;            // 1/s it eases to a stop let go
 const START_PITCH = -0.55;      // rad (nose down) at the dive's start, the phone held as it was
 const PITCH_MAX = 1.3;          // rad either way (~75°)
+// Reeling in a speared fish: both hands on the string (× the character's height scale)
+const REEL_CHEST_Y = 0.68;      // m over the feet the hands pull toward
+const REEL_HAND_MID = 0.3;      // m out from the chest, on average
+const REEL_HAND_SWING = 0.1;    // m each hand reaches past / pulls back of that
+const REEL_HAND_GAP = 0.045;    // m the hands sit apart, side to side
+const REEL_HAND_SWAPS = 2;      // hand-over-hand swaps a turn of the reel
 const PIVOT = 0.5;              // m over the feet the body tips about (× the character's height scale)
 const BOTTOM_CLEAR = 0.45;      // m the body's middle keeps over the bottom
 const SURFACE_UNDER = 0.35;     // m under the surface the body's middle keeps while under
@@ -368,8 +374,50 @@ export function createTownDive(ctx) {
   const _prev = new THREE.Vector3();
   const _away = new THREE.Vector3();
   const _look = new THREE.Vector3();
-  // Where the string starts: the bow (or the hand) — else just in front of the head
-  const lineStart = (out) => (ctx.lineStart?.(out) ? out : out.copy(head));
+  // Where the string starts: the bow (or the hand — the front one while reeling in) — else
+  // just in front of the head
+  const lineStart = (out) => (ctx.lineStart?.(out, reelHands ? reelFront : null) ? out : out.copy(head));
+  // Reeling a speared fish in: both hands on the string, out toward the fish, pulling it in
+  // hand over hand as the reel turns (userData.handPose — playerModel.js; the 'treadAim' clip
+  // keeps the arms on the IK)
+  let reelPh = 0;
+  let reelHands = false;
+  let reelFront = 'left';
+  const _handL = new THREE.Vector3();
+  const _handR = new THREE.Vector3();
+  const _toFish = new THREE.Vector3();
+  const _side = new THREE.Vector3();
+  const setReelHands = (on) => {
+    const pm = ctx.getPlayerModel();
+    if (on) {
+      const f = shot?.fish;
+      if (!pm || !f) return false;
+      const h = ctx.heightScale?.() || 1;
+      // (toward the fish in the body's own frame, kept in front of the chest)
+      pm.updateMatrixWorld();
+      pm.worldToLocal(_toFish.copy(f.holder.position));
+      _toFish.y -= REEL_CHEST_Y * h;
+      _toFish.z = Math.max(_toFish.z, 0.2);
+      if (_toFish.lengthSq() < 1e-6) _toFish.set(0, 0, 1);
+      _toFish.normalize();
+      _side.set(_toFish.z, 0, -_toFish.x).normalize();
+      // (hand over hand: each turn of the reel the back hand reaches past the front one)
+      const u = Math.sin(reelPh * Math.PI);
+      const dl = (REEL_HAND_MID + REEL_HAND_SWING * u) * h;
+      const dr = (REEL_HAND_MID - REEL_HAND_SWING * u) * h;
+      _handL.copy(_toFish).multiplyScalar(dl).addScaledVector(_side, -REEL_HAND_GAP * h);
+      _handR.copy(_toFish).multiplyScalar(dr).addScaledVector(_side, REEL_HAND_GAP * h);
+      _handL.y += REEL_CHEST_Y * h + Math.max(0, Math.cos(reelPh * Math.PI)) * 0.03 * h;
+      _handR.y += REEL_CHEST_Y * h + Math.max(0, -Math.cos(reelPh * Math.PI)) * 0.03 * h;
+      reelFront = dl >= dr ? 'left' : 'right';
+      pm.userData.handPose = { left: _handL, right: _handR };
+      reelHands = true;
+      return true;
+    }
+    if (reelHands && pm && pm.userData.handPose?.left === _handL) pm.userData.handPose = null;
+    reelHands = false;
+    return false;
+  };
   const disposeArrow = (mesh) => {
     mesh.removeFromParent();
     mesh.traverse((o) => {
@@ -380,7 +428,7 @@ export function createTownDive(ctx) {
   };
   const setReel = (on) => {
     ctx.setReel?.(on ? {
-      onTurns: (turns) => { if (shot?.phase === 'hooked') { shot.reel += turns; shot.idle = 0; } },
+      onTurns: (turns) => { if (shot?.phase === 'hooked') { shot.reel += turns; shot.idle = 0; reelPh += turns * REEL_HAND_SWAPS; } },
       text: () => 'Reel it in!',
     } : null);
   };
@@ -483,6 +531,7 @@ export function createTownDive(ctx) {
   const end = () => {
     if (!under) return;
     cutLine();
+    setReelHands(false);
     under = false;
     held = false;
     const c = ctx.getControls();
@@ -581,8 +630,11 @@ export function createTownDive(ctx) {
       c.playerZ = center.z;
       c.playerY = ride.y;
       const swimming = speed > 0.35;
-      // (the bow: treading, the arms on the IK holding it)
-      c.diveAnim = swimming ? 'swim' : aiming ? 'treadAim' : 'tread';
+      // (a fish on the line, the bow put away: both hands on the string — setReelHands)
+      const reeling = !aiming && !drowning && shot?.phase === 'hooked' && setReelHands(true);
+      if (!reeling) setReelHands(false);
+      // (the bow: treading, the arms on the IK holding it — or holding the string)
+      c.diveAnim = swimming ? 'swim' : aiming || reeling ? 'treadAim' : 'tread';
       // (treading upright, the body isn't tipped all the way — eased between the two; aiming,
       // hardly at all: the arms point the bow)
       const shown = swimming ? aimPitch : aimPitch * (aiming ? AIM_PITCH_SHARE : TREAD_PITCH_SHARE);
