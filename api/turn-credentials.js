@@ -2,7 +2,8 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
 
-  const apiKey = process.env.VITE_METERED_API_KEY;
+  // METERED_API_KEY (server only); the old VITE_ name still works meanwhile.
+  const apiKey = process.env.METERED_API_KEY || process.env.VITE_METERED_API_KEY;
   if (!apiKey) {
     // Return STUN-only fallback when key is absent
     return res.status(200).json([{ urls: 'stun:stun.l.google.com:19302' }]);
