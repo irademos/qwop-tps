@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import RAPIER from '@dimforge/rapier3d-compat';
+import RAPIER from '../physics/rapier.js';
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../player/healthUtils.js";
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';

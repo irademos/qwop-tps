@@ -1,6 +1,6 @@
 import { appContext } from '../core/appContext.js';
 import * as THREE from "three";
-import RAPIER from "@dimforge/rapier3d-compat";
+import RAPIER from '../physics/rapier.js';
 import { WALK_UNDER_CLEARANCE, getTerrainHeight, getTerrainLayersAt, isMapWallBetween } from '../environment/terrainHeight.js';
 import { pushOutOfObstacles, slideStep } from '../environment/obstacles.js';
 

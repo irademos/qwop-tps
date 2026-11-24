@@ -29,6 +29,23 @@ const OFFLINE_SKIP = [
   /\.map$/,
   /(^|\/)\./,
 ];
+// Rapier's plain package imports its .wasm as an ES module (`./rapier_wasm3d.js` →
+// `import * as wasm from './rapier_wasm3d_bg.wasm'`). Swap that one file for its JS glue alone;
+// src/physics/rapier.js fetches the .wasm as an asset and hands it to the glue (initRapier).
+const RAPIER_SHIM_ID = '\0rapier-wasm-shim';
+const rapierWasmShim = () => ({
+  name: 'rapier-wasm-shim',
+  enforce: 'pre',
+  resolveId(source, importer) {
+    if (importer?.includes('@dimforge/rapier3d') && /^\.\/rapier_wasm3d(\.js)?$/.test(source)) return RAPIER_SHIM_ID;
+    return null;
+  },
+  load(id) {
+    if (id === RAPIER_SHIM_ID) return "export * from '@dimforge/rapier3d/rapier_wasm3d_bg.js';";
+    return null;
+  }
+});
+
 const listPublic = (dir, root = dir, out = []) => {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
@@ -59,7 +76,9 @@ export default defineConfig(({ command }) => ({
   define: {
     __BUILD_ID__: JSON.stringify(command === 'build' ? buildId : 'dev')
   },
-  plugins: [versionFile(), offlineManifest()],
+  plugins: [rapierWasmShim(), versionFile(), offlineManifest()],
+  // (the dev server's pre-bundler doesn't run plugins: leave Rapier to rapierWasmShim)
+  optimizeDeps: { exclude: ['@dimforge/rapier3d'] },
   server: {
     open: true,
     port: 3000

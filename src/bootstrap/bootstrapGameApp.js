@@ -31,7 +31,9 @@ import { createAudioManager } from '../features/audioFeature.js';
 import { installUiSounds, playUiSound } from '../audio/uiSounds.js';
 import { spawnProjectile, updateProjectiles, loadSpecialWeapons, arrowShotOptions, ARROW_SPEED_MAX, ARROW_GRAVITY_SCALE, BOT_ARROW_SPEED } from '../features/combatFeature.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import RAPIER from '@dimforge/rapier3d-compat';
+import RAPIER, { initRapier } from '../physics/rapier.js';
+// (the physics engine's .wasm starts downloading as soon as the game's code runs)
+const _rapierReady = initRapier();
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { getSpawnPosition, getSpawnY, setSpawnCenter } from '../map/spawnUtils.js';
 import {
@@ -2676,7 +2678,7 @@ async function initCore(runtimeContext) {
   applyDisplaySettings();
 
   // --- RAPIER INIT ---
-  await RAPIER.init({});
+  await _rapierReady;
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   runtimeContext.systems.rapierWorld = rapierWorld;
   window.rapierWorld = rapierWorld;
