@@ -1117,6 +1117,11 @@ export function createTownMode(ctx) {
     trySwordHit,
     // Fishing, the line out: the phone's Block bar is a reel ({ reel, cue, text, tension }) — or null
     fishingHud: () => (T.active && T.ready ? T.fishingHud() : null),
+    // Town's dive (townDive.js): an arrow on a string in a fish — the reel ({ onTurns, text } / null)
+    // and the catch landed (its length in m) → how many fish went in the bag
+    setDiveReel: (reel) => { if (T.ready) T.setExtReel(reel); },
+    landDiveFish: (len) => (T.active && T.ready ? T.landDiveFish(len) : 0),
+    feed: (text) => { if (T.active) T.feedLine(text); },
     getWeaponTargets: T.getWeaponTargets,
     getMagicTargets: T.getMagicTargets,
     onPlayerDown,

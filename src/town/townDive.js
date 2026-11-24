@@ -15,6 +15,16 @@
 // (`.underwater-tint`), a fish or two swimming by now and then (koi_fish.glb — fishModels.js)
 // and bubbles rising from the player.
 //
+// The bow under water: with a bow and an arrow, holding the Bow button while under stops the
+// swim — they tread water (the Treading Water clip with the arms on the IK, holding the bow) and
+// the gyro (or the stick) aims it as it steers the dive, the camera looking the way they aim. Let
+// go and the arrow flies on a string (`shoot`): slowed by the water, it's pulled back to them when
+// it misses (past STRING_LEN, too slow, the bottom or the surface) — the arrow comes back, none
+// used up. One that hits a fish sticks in it: the fish tries to swim off on the line, and the
+// fishing reel comes up (townFishing.js `setExtReel` — the on-screen reel, R, or the phone's) to
+// wind it in; brought within HOOK_LAND_DIST it's landed (+fish, `onCatch`); left unreeled for
+// HOOK_FREE_S it shakes free. The dive ending (the surface, out of breath…) cuts the line.
+//
 // The controls side: PlayerControls.ride { y, yaw, pitch, pivot, camPitch } + holdStill (like
 // the broom), `diveAnim` for the clip (src/controls/controls.js).
 
@@ -49,6 +59,7 @@ const CAM_PITCH_SHARE = 0.85;   // the camera's pitch × the body's (behind and 
 const CAM_GROUND_CLEAR = 0.4;   // m the camera keeps over the bottom
 const CAM_SURFACE_UNDER = 0.15; // m the camera keeps under the surface while the player's under
 const TREAD_PITCH_SHARE = 0.5;  // treading still the upright clip is tipped this × as far
+const AIM_PITCH_SHARE = 0.2;    // the bow drawn: the body this × (the arms do the rest)
 
 // ── Under water: the look ──
 const FOG_NEAR = 0.5;
@@ -65,6 +76,19 @@ const FISH_LEN = [0.5, 0.9];   // m
 const BUBBLE_MAX = 40;
 const BUBBLE_EVERY_S = 0.12;    // swimming (treading: 3× slower)
 const BUBBLE_RISE = 0.9;        // m/s
+
+// ── The bow under water: an arrow on a string ──
+const SHOT_SPEED = [6, 15];     // m/s, a quick tap … fully drawn
+const SHOT_DRAG = 1.1;          // 1/s the water slows it
+const SHOT_SLOW = 2;            // m/s: slower than this it's pulled back
+const STRING_LEN = 14;          // m of string
+const SHOT_RETURN_SPEED = 11;   // m/s it's pulled back on a miss
+const SHOT_STUCK_S = 0.35;      // s it sticks in the bottom before it's pulled out
+const HOOK_REEL_M = 1.4;        // m of string a turn of the reel winds in
+const HOOK_PULL_SPEED = 0.8;    // m/s a speared fish swims off on the line (up to STRING_LEN)
+const HOOK_LAND_DIST = 1.1;     // m: this close it's landed
+const HOOK_FREE_S = 14;         // s without reeling and it shakes free
+const HOOK_RADIUS = 0.4;        // × the fish's length: how near its middle the arrow has to pass
 
 const rand = (a, b) => a + Math.random() * (b - a);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -118,21 +142,24 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
       const len = rand(FISH_LEN[0], FISH_LEN[1]);
       const lo = bottom + 0.4, hi = level - 0.4;
       const y = THREE.MathUtils.clamp(center.y + rand(-1.5, 1.5), lo, hi);
-      const holder = new THREE.Group();
-      const mesh = createKoiFishMesh(len);
-      holder.add(mesh);
-      holder.position.set(x, y, z);
-      scene.add(holder);
-      // (heading roughly across the player's view — past them, not straight at them)
-      const toward = Math.atan2(center.x - x, center.z - z);
-      fish.push({
-        holder, mesh, len,
-        heading: toward + (Math.random() < 0.5 ? 1 : -1) * rand(0.5, 1.2),
-        speed: rand(FISH_SPEED[0], FISH_SPEED[1]),
-        turn: 0, turnT: 0, ph: Math.random() * 6, life: rand(FISH_LIFE_S[0], FISH_LIFE_S[1]),
-      });
+      addFish(x, y, z, len, center);
       return;
     }
+  };
+  const addFish = (x, y, z, len, center) => {
+    const holder = new THREE.Group();
+    const mesh = createKoiFishMesh(len);
+    holder.add(mesh);
+    holder.position.set(x, y, z);
+    scene.add(holder);
+    // (heading roughly across the player's view — past them, not straight at them)
+    const toward = Math.atan2(center.x - x, center.z - z);
+    fish.push({
+      holder, mesh, len,
+      heading: toward + (Math.random() < 0.5 ? 1 : -1) * rand(0.5, 1.2),
+      speed: rand(FISH_SPEED[0], FISH_SPEED[1]),
+      turn: 0, turnT: 0, ph: Math.random() * 6, life: rand(FISH_LIFE_S[0], FISH_LIFE_S[1]),
+    });
   };
   const removeFish = (f) => {
     f.holder.removeFromParent();
@@ -211,7 +238,29 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
     bubbleMesh.instanceMatrix.needsUpdate = true;
   };
 
+  // The first fish the segment a → b passes through (taken out of the wanderers — the caller
+  // owns it now: its holder / mesh / len), or null
+  const _seg = new THREE.Vector3();
+  const _toF = new THREE.Vector3();
+  const takeFishOn = (a, b) => {
+    _seg.subVectors(b, a);
+    const lenSq = _seg.lengthSq();
+    for (let i = 0; i < fish.length; i++) {
+      const f = fish[i];
+      _toF.subVectors(f.holder.position, a);
+      const t = lenSq > 1e-8 ? THREE.MathUtils.clamp(_toF.dot(_seg) / lenSq, 0, 1) : 0;
+      _toF.addScaledVector(_seg, -t);
+      const r = Math.max(0.2, f.len * HOOK_RADIUS);
+      if (_toF.lengthSq() <= r * r) { fish.splice(i, 1); return f; }
+    }
+    return null;
+  };
+
   return {
+    takeFishOn,
+    removeFish,
+    /** (dev) a fish at x, y, z — townDive.debug().fishAt(…) */
+    fishAt: (x, y, z, len = 0.7) => addFish(x, y, z, len, new THREE.Vector3(x, y, z - 1)),
     update(dt, { camera, under, center, head, moving, night }) {
       const cp = camera?.position;
       const lev = cp ? getWaterLevel(cp.x, cp.z) : null;
@@ -258,6 +307,7 @@ export function createTownDive(ctx) {
   let stickPitch = START_PITCH;
   let aimPitch = START_PITCH;   // the way they face (ride.pitch = how far the body's shown tipped)
   let canWas = false;
+  let shot = null;              // the arrow on its string (shoot) — { phase, pos, vel, mesh, fish, … }
 
   const pivot = () => PIVOT * (ctx.heightScale?.() || 1);
   const bottomAt = (x, z, level) => {
@@ -303,9 +353,133 @@ export function createTownDive(ctx) {
     return true;
   };
 
+  // ── The arrow on a string ──
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+  const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xf4f1e6, transparent: true, opacity: 0.85 }));
+  line.frustumCulled = false;
+  line.visible = false;
+  ctx.scene.add(line);
+  const _from = new THREE.Vector3();
+  const _to = new THREE.Vector3();
+  const _prev = new THREE.Vector3();
+  const _away = new THREE.Vector3();
+  const _look = new THREE.Vector3();
+  // Where the string starts: the bow (or the hand) — else just in front of the head
+  const lineStart = (out) => (ctx.lineStart?.(out) ? out : out.copy(head));
+  const disposeArrow = (mesh) => {
+    mesh.removeFromParent();
+    mesh.traverse((o) => {
+      if (!o.isMesh) return;
+      o.geometry?.dispose?.();
+      (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => m?.dispose?.());
+    });
+  };
+  const setReel = (on) => {
+    ctx.setReel?.(on ? {
+      onTurns: (turns) => { if (shot?.phase === 'hooked') { shot.reel += turns; shot.idle = 0; } },
+      text: () => 'Reel it in!',
+    } : null);
+  };
+  // The line gone: the arrow and a fish still on it with it (it swims free — out of sight)
+  function cutLine() {
+    if (!shot) return;
+    disposeArrow(shot.mesh);
+    if (shot.fish) { look.removeFish(shot.fish); setReel(false); }
+    shot = null;
+    line.visible = false;
+    ctx.onChange?.();
+  }
+  /** Looses an arrow on a string from `from` along `dir` (normalised), power 0 … 1. */
+  const shoot = (from, dir, power) => {
+    if (!under || shot || !ctx.createArrow) return false;
+    const mesh = ctx.createArrow();
+    mesh.position.copy(from);
+    mesh.lookAt(_look.copy(from).add(dir));
+    ctx.scene.add(mesh);
+    const speed = THREE.MathUtils.lerp(SHOT_SPEED[0], SHOT_SPEED[1], THREE.MathUtils.clamp(power, 0, 1));
+    shot = { phase: 'fly', pos: from.clone(), vel: dir.clone().multiplyScalar(speed), mesh, fish: null, t: 0, reel: 0, idle: 0 };
+    line.visible = true;
+    ctx.onChange?.();
+    return true;
+  };
+  const updateShot = (dt) => {
+    if (!shot) return;
+    const s = shot;
+    s.t += dt;
+    lineStart(_from);
+    if (s.phase === 'fly') {
+      _prev.copy(s.pos);
+      s.vel.multiplyScalar(Math.exp(-SHOT_DRAG * dt));
+      s.pos.addScaledVector(s.vel, dt);
+      const f = look.takeFishOn(_prev, s.pos);
+      if (f) {
+        // Speared: the arrow stays in it (moved with it from now on), the reel comes up
+        s.phase = 'hooked';
+        s.fish = f;
+        s.mesh.position.copy(s.pos).lerp(f.holder.position, 0.6);
+        f.holder.attach(s.mesh);
+        s.idle = 0;
+        setReel(true);
+        ctx.onSpear?.(f.holder.position);
+        ctx.onChange?.();
+      } else {
+        const level = ctx.getWaterLevel(s.pos.x, s.pos.z);
+        const bottom = Number.isFinite(level) ? bottomAt(s.pos.x, s.pos.z, level) : -Infinity;
+        if (!Number.isFinite(level) || s.pos.y > level - 0.05) { s.pos.y = Number.isFinite(level) ? level - 0.05 : s.pos.y; s.phase = 'back'; }
+        else if (s.pos.y < bottom) { s.pos.y = bottom; s.phase = 'stuck'; s.t = 0; }
+        else if (s.pos.distanceTo(_from) >= STRING_LEN || s.vel.length() < SHOT_SLOW) s.phase = 'back';
+        s.mesh.position.copy(s.pos);
+        if (s.phase === 'fly') s.mesh.lookAt(_look.copy(s.pos).add(s.vel));
+      }
+    } else if (s.phase === 'stuck') {
+      if (s.t >= SHOT_STUCK_S) s.phase = 'back';
+    } else if (s.phase === 'back') {
+      // Pulled back on the string, tail first
+      _away.subVectors(s.pos, _from);
+      const d = _away.length();
+      if (d < 0.5) { cutLine(); return; }
+      s.pos.addScaledVector(_away, -Math.min(d, SHOT_RETURN_SPEED * dt) / d);
+      s.mesh.position.copy(s.pos);
+      s.mesh.lookAt(_look.copy(s.pos).add(_away));
+    } else if (s.phase === 'hooked') {
+      const f = s.fish;
+      const p = f.holder.position;
+      _away.subVectors(p, center);
+      let d = _away.length();
+      if (d > 1e-4) _away.divideScalar(d); else _away.set(0, 0, 1);
+      s.idle += dt;
+      // (it swims off on the line; the reel winds it in)
+      const wound = s.reel * HOOK_REEL_M;
+      s.reel = 0;
+      const nd = THREE.MathUtils.clamp(d + HOOK_PULL_SPEED * dt - wound, 0, STRING_LEN);
+      f.ph += dt * 16;
+      const side = Math.sin(f.ph * 0.35) * 0.35 * dt;
+      p.set(center.x + _away.x * nd + _away.z * side, center.y + _away.y * nd, center.z + _away.z * nd - _away.x * side);
+      const level = ctx.getWaterLevel(p.x, p.z);
+      if (Number.isFinite(level)) p.y = THREE.MathUtils.clamp(p.y, bottomAt(p.x, p.z, level) + 0.3, level - 0.3);
+      // (head = +X, turned to swim away from the player, thrashing)
+      f.holder.rotation.y = Math.atan2(_away.x, _away.z) - Math.PI / 2 + Math.sin(f.ph) * 0.45;
+      if (nd <= HOOK_LAND_DIST) {
+        const len = f.len;
+        cutLine();
+        ctx.onCatch?.(len);
+        return;
+      }
+      if (s.idle >= HOOK_FREE_S) { cutLine(); ctx.onFree?.(); return; }
+    }
+    if (!shot) return;
+    (s.fish ? s.mesh.getWorldPosition(_to) : _to.copy(s.pos));
+    const a = lineGeo.attributes.position;
+    a.setXYZ(0, _from.x, _from.y, _from.z);
+    a.setXYZ(1, _to.x, _to.y, _to.z);
+    a.needsUpdate = true;
+  };
+
   // Back to the surface swim (or wherever the controls put them next)
   const end = () => {
     if (!under) return;
+    cutLine();
     under = false;
     held = false;
     const c = ctx.getControls();
@@ -365,10 +539,12 @@ export function createTownDive(ctx) {
       if (!under) return;
       dt = Math.min(Math.max(dt || 0, 0), 0.1);
       t += dt;
-      // (nothing comes out under water — the phone's buttons included)
-      ctx.putAway?.();
+      // (nothing comes out under water — the phone's buttons included — but the bow, drawn)
+      const aiming = !!ctx.bowOut?.();
+      if (!aiming) ctx.putAway?.();
       steer(dt, c);
-      const moving = held;
+      // (the bow drawn or the line out: treading water where they are)
+      const moving = held && !aiming && !shot;
       speed += ((moving ? SWIM_SPEED : 0) - speed) * (1 - Math.exp(-(moving ? ACCEL : STOP_RATE) * dt));
       vDown *= Math.exp(-2.5 * dt);
       const cp = Math.cos(aimPitch), sp = Math.sin(aimPitch);
@@ -397,11 +573,14 @@ export function createTownDive(ctx) {
       c.playerZ = center.z;
       c.playerY = ride.y;
       const swimming = speed > 0.35;
-      c.diveAnim = swimming ? 'swim' : 'tread';
-      // (treading upright, the body isn't tipped all the way — eased between the two)
-      const shown = swimming ? aimPitch : aimPitch * TREAD_PITCH_SHARE;
+      // (the bow: treading, the arms on the IK holding it)
+      c.diveAnim = swimming ? 'swim' : aiming ? 'treadAim' : 'tread';
+      // (treading upright, the body isn't tipped all the way — eased between the two; aiming,
+      // hardly at all: the arms point the bow)
+      const shown = swimming ? aimPitch : aimPitch * (aiming ? AIM_PITCH_SHARE : TREAD_PITCH_SHARE);
       ride.pitch += (shown - ride.pitch) * (1 - Math.exp(-6 * dt));
-      ride.camPitch = -aimPitch * CAM_PITCH_SHARE;
+      // (aiming, the camera looks right along the aim — the crosshair's where the arrow goes)
+      ride.camPitch = -aimPitch * (aiming ? 1 : CAM_PITCH_SHARE);
     },
     /** After the controls: the camera kept over the bottom; the look; fish and bubbles. */
     afterControls(dt, camera) {
@@ -418,6 +597,7 @@ export function createTownDive(ctx) {
       }
       head.set(center.x + Math.sin(ride.yaw) * Math.cos(aimPitch) * 0.45,
         center.y + Math.sin(aimPitch) * 0.45 + 0.1, center.z + Math.cos(ride.yaw) * Math.cos(aimPitch) * 0.45);
+      if (under) updateShot(Math.min(Math.max(dt || 0, 0), 0.1));
       look.update(dt, { camera, under, center: under ? center : null, head: under ? head : null, moving: speed > 0.35, night: ctx.getNight?.() ?? 0 });
     },
     setHeld(on) {
@@ -426,10 +606,14 @@ export function createTownDive(ctx) {
     },
     isHeld: () => held,
     isUnder: () => under,
+    shoot,
+    /** An arrow out on its string (no other shot till it's back / the fish is landed). */
+    lineOut: () => !!shot,
+    isHooked: () => shot?.phase === 'hooked',
     canDive,
     end,
     clear() { end(); held = false; look.clear(); },
-    debug: () => ({ under, held, speed, yaw: ride.yaw, pitch: aimPitch, shownPitch: ride.pitch, center: center.clone(), gyroOn,
-      cameraUnder: look.isCameraUnder(), fish: look.fishCount(), start, end }),
+    debug: () => ({ under, held, speed, shot: shot && { phase: shot.phase, pos: shot.pos.clone(), fish: !!shot.fish }, yaw: ride.yaw, pitch: aimPitch, shownPitch: ride.pitch, center: center.clone(), gyroOn,
+      cameraUnder: look.isCameraUnder(), fish: look.fishCount(), start, end, fishAt: look.fishAt }),
   };
 }
