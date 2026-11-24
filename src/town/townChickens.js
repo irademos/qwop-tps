@@ -62,6 +62,25 @@ const BODY_Y = 0.18;               // m: its middle over the ground
 const DRAW_DIST = 70;              // m: further off they're hidden and not animated
 const FADE_S = 0.25;               // s crossfading clips
 const CLIPS = { idle: 'idle', peck: 'pecking', walk: 'walking', sitDown: 'sitting-down', sitIdle: 'sitting-idle', standUp: 'standing-up' };
+// Clips that loop: their root bone's travel over the clip (the walk's ~1.9 units forward) is taken
+// out, so the hen doesn't snap back each loop — the game moves it; the bob / sway stay
+const LOOPED_CLIPS = ['idle', 'pecking', 'walking', 'sitting-idle'];
+const ROOT_BONE = 'spine_00';
+const stripRootMotion = (clip) => {
+  for (const tr of clip.tracks) {
+    if (tr.name !== `${ROOT_BONE}.position`) continue;
+    const t = tr.times;
+    const v = tr.values;
+    const n = t.length;
+    const dur = t[n - 1] - t[0];
+    if (n < 2 || dur <= 0) continue;
+    const d = [0, 1, 2].map((k) => v[3 * (n - 1) + k] - v[k]);
+    for (let i = 0; i < n; i++) {
+      const u = (t[i] - t[0]) / dur;
+      for (let k = 0; k < 3; k++) v[3 * i + k] -= d[k] * u;
+    }
+  }
+};
 const rand = (a, b) => a + Math.random() * (b - a);
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
@@ -74,6 +93,7 @@ export function installTownChickens(T, ctx) {
     loading ??= new GLTFLoader().loadAsync(CHICKEN_MODEL_URL).then((g) => {
       stylizeObject(g.scene);
       g.scene.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+      for (const clip of g.animations) if (LOOPED_CLIPS.some((n) => clip.name.endsWith(`|${n}`) || clip.name === n)) stripRootMotion(clip);
       gltf = g;
       fit = measure(g.scene);
     }).catch((err) => { console.warn('[townChickens] chicken.glb failed to load:', err); });
