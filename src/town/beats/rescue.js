@@ -276,7 +276,7 @@ export const rescueBeats = (W) => {
         const cage = T.shipCage();
         if (!cage) return true;
         const p = T.playerPos();
-        if (T.lockpick.isOpen() && s.picking && dist2(p.x, p.z, cage.at.x, cage.at.z) > CAGE_REACH + 1.2) { T.lockpick.stop(); s.picking = false; }
+        if (T.lockpick.isOpen() && s.picking && dist2(p.x, p.z, cage.at.x, cage.at.z) > CAGE_REACH + 1.2) { T.lockpick.stop(); s.picking = false; T.questPick = false; }
         if (!s.open) return false;
         if (s.n && !s.out) {
           s.out = true;
@@ -300,8 +300,10 @@ export const rescueBeats = (W) => {
               T.feedLine(`${s.n ? firstName(s.n.name) : 'Someone'} passes you a bent nail through the bars.`);
             }
             s.picking = true;
+            T.questPick = true; // (keeps townMode's update from closing a lockpick that isn't the jail's / a door's)
             T.lockpick.start((success) => {
               s.picking = false;
+              T.questPick = false;
               T.lockpicks = Math.max(0, T.lockpicks - 1);
               ctx.playSfx?.(success ? 'unlock' : 'locked');
               if (success) { s.open = true; T.openShipCage(); return; }
@@ -311,7 +313,7 @@ export const rescueBeats = (W) => {
           },
         }];
       },
-      end: (c) => { if (c.s.picking && T.lockpick.isOpen()) T.lockpick.stop(); },
+      end: (c) => { if (c.s.picking && T.lockpick.isOpen()) T.lockpick.stop(); T.questPick = false; },
       entry: (c) => (T.onShipDeck(T.playerPos()) ? `Pick the cage's lock — free ${c.s.n ? firstName(c.s.n.name) : 'them'}` : 'Climb back aboard the pirate ship'),
       marker: () => { const cg = T.shipCage?.(); return cg ? { icon: '📍', x: cg.at.x, z: cg.at.z, h: 2.4 } : null; },
       highlight: () => ({ act: 'cagepick' }),

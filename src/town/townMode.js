@@ -844,6 +844,7 @@ export function createTownMode(ctx) {
     T.resetRuins();
     jobTalk.close();
     lockpick.stop();
+    T.questPick = false;
     ctx.cancelCarry();
     for (const [, m] of markers) { m.parent?.remove(m); m.material.map?.dispose(); m.material.dispose(); }
     markers.clear();
@@ -926,7 +927,8 @@ export function createTownMode(ctx) {
       T.renderJail();
       if (T.jail.left <= 0) T.endJail('Time served. You\'re free to go.');
     }
-    if (!T.jail && !T.doorPick && lockpick.isOpen()) lockpick.stop();
+    if (!lockpick.isOpen()) T.questPick = false;
+    if (!T.jail && !T.doorPick && !T.questPick && lockpick.isOpen()) lockpick.stop();
     lockpick.update(dt);
     if (jobTalk.isOpen()) {
       const n = T.talking?.npc;
