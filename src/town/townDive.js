@@ -7,8 +7,10 @@
 // (from START_PITCH, nose down a little, at the dive's start) — or, without a gyro, the stick /
 // WASD (up = nose down, sideways = turn). The camera follows behind, looking the way they swim.
 // Coming back up to the surface (or into water too shallow to be under) ends the dive and the
-// normal surface swim takes over; so does running out of breath (bootstrapGameApp.js — the swim
-// energy bar drains under water too, DIVE_DRAIN×), a room, going down or leaving Town.
+// normal surface swim takes over; so does a room, going down or leaving Town. Running out of
+// breath under water (bootstrapGameApp.js — the swim energy bar drains under water too,
+// DIVE_DRAIN×, unless an air bubble's over the head) stops the swim and sinks them from where
+// they are (DROWN_SINK) until the fade washes them ashore.
 //
 // Under the surface the camera sees blue: fog + a blue background (scene.fog is set once, far
 // off, when this is made, so turning it on doesn't recompile every material), a CSS tint
@@ -43,6 +45,7 @@ const SURFACE_UNDER = 0.35;     // m under the surface the body's middle keeps w
 const SURFACE_EXIT_S = 0.6;     // s into a dive before coming back up can end it
 const MAX_DEPTH = 40;           // m (off the map's ground: the bottom's taken as this deep)
 const START_PUSH = 1.2;         // m/s down at the start (a duck under even before moving)
+const DROWN_SINK = 0.8;         // m/s out of breath under water: sinking from where they are
 // ── Gyro (as _updateWeaponGyroAim in bootstrapGameApp.js) ──
 const YAW_GAIN = 2.2;
 const YAW_OFFSET_MAX = THREE.MathUtils.degToRad(45);
@@ -533,16 +536,21 @@ export function createTownDive(ctx) {
     update(dt) {
       const c = ctx.getControls();
       const can = canDive();
-      if (under && (!c || !ctx.allowed() || c.swimLocked || c.ride !== ride)) end();
+      if (under && (!c || !ctx.allowed() || c.ride !== ride)) end();
       if (!under && held && can) start();
       if (can !== canWas) { canWas = can; ctx.onChange?.(); }
       if (!under) return;
       dt = Math.min(Math.max(dt || 0, 0), 0.1);
       t += dt;
       // (nothing comes out under water — the phone's buttons included — but the bow, drawn)
-      const aiming = !!ctx.bowOut?.();
+      // Out of breath (bootstrapGameApp.js — c.swimLocked): no more swimming, just sinking
+      // from where they are, down to the bottom (not back up to the surface first)
+      const drowning = !!c.swimLocked;
+      if (drowning) { held = false; if (shot) cutLine(); }
+      const aiming = !drowning && !!ctx.bowOut?.();
       if (!aiming) ctx.putAway?.();
-      steer(dt, c);
+      if (!drowning) steer(dt, c);
+      else { aimPitch += (0 - aimPitch) * (1 - Math.exp(-2 * dt)); c.yaw = ride.yaw; lastYaw = c.yaw; }
       // (the bow drawn or the line out: treading water where they are)
       const moving = held && !aiming && !shot;
       speed += ((moving ? SWIM_SPEED : 0) - speed) * (1 - Math.exp(-(moving ? ACCEL : STOP_RATE) * dt));
@@ -550,7 +558,7 @@ export function createTownDive(ctx) {
       const cp = Math.cos(aimPitch), sp = Math.sin(aimPitch);
       let nx = center.x + Math.sin(ride.yaw) * cp * speed * dt;
       let nz = center.z + Math.cos(ride.yaw) * cp * speed * dt;
-      let ny = center.y + sp * speed * dt - vDown * dt;
+      let ny = center.y + sp * speed * dt - vDown * dt - (drowning ? DROWN_SINK * dt : 0);
       const level = ctx.getWaterLevel(nx, nz);
       if (!Number.isFinite(level)) { end(); return; }
       // (the bottom slides them up along it; water too shallow to be under → up, out of the dive)
@@ -558,7 +566,7 @@ export function createTownDive(ctx) {
       const top = level - SURFACE_UNDER;
       if (ny < bottom + BOTTOM_CLEAR) ny = bottom + BOTTOM_CLEAR;
       if (ny > top) {
-        if (bottom + BOTTOM_CLEAR > top || (t > SURFACE_EXIT_S && aimPitch > 0.05)) {
+        if (bottom + BOTTOM_CLEAR > top || (!drowning && t > SURFACE_EXIT_S && aimPitch > 0.05)) {
           center.set(nx, Math.min(ny, level), nz);
           end();
           return;
@@ -606,6 +614,8 @@ export function createTownDive(ctx) {
     },
     isHeld: () => held,
     isUnder: () => under,
+    /** Where the head is (a spot just ahead of the body's middle, the way they face). */
+    headPos: (out) => out.copy(head),
     shoot,
     /** An arrow out on its string (no other shot till it's back / the fish is landed). */
     lineOut: () => !!shot,

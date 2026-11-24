@@ -1120,11 +1120,12 @@ export class PlayerControls {
     return !!appState?.ownsBow?.() && (!appState?.isInCanoe?.() || !!appState?.isCanoeArmed?.());
   }
 
-  // The shield part of Shield / Bubble: owned, not in Story or the canoe
+  // The shield part of Shield / Bubble: owned, not in Story, the canoe or under water (there the
+  // button is the dive's air bubble alone)
   _shieldShown() {
     const appState = appContext.uiState.appState ?? window.appState;
     const hasShield = ((appState?.getInventory?.() || {}).shield?.count ?? 0) > 0;
-    return hasShield && !appState?.isStoryMode?.() && !appState?.isInCanoe?.();
+    return hasShield && !appState?.isStoryMode?.() && !appState?.isInCanoe?.() && !appState?.isDiving?.();
   }
 
   /** The on-screen button that holds an item ('pistol' / 'bomb' / 'shield' / 'bubble' / a weapon id) */

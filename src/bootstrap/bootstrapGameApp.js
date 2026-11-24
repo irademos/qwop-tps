@@ -4261,6 +4261,8 @@ async function initCore(runtimeContext) {
     target.copy(playerModel.position).setY(playerModel.position.y + BUBBLE_CENTER_HEIGHT)
   );
   const activatePlayerBubble = () => {
+    // (under water in Town: an air bubble over the head instead — _toggleDiveAir)
+    if (_townDive?.isUnder()) return _toggleDiveAir();
     if (playerDead || isPlayerBubbleActive()) return false;
     if (duelMode?.isActive() && !(_matchLoadout && matchMode?.isFighting())) return false; // battles only in Multiplayer
     if (getBubbleCount() <= 0) return false;
@@ -4289,8 +4291,10 @@ async function initCore(runtimeContext) {
   const updatePsBubbleButton = () => {
     const button = playerControls?.psBubbleBtn;
     if (!button) return;
-    const active = isPlayerBubbleActive();
-    const label = active
+    const air = !!_townDive?.isUnder();
+    const active = air ? _diveAirOn() : isPlayerBubbleActive();
+    const label = air ? (active ? '🫧 Pop' : '🫧 Air')
+      : active
       ? `🫧 ${Math.ceil((bubbleActiveUntil - Date.now()) / 1000)}s`
       : _bubblesOnMana() ? '🫧' : `🫧 ${getBubbleCount()}`; // (no count when it runs on mana)
     if (label !== lastPsBubbleButtonLabel) {
@@ -4298,7 +4302,7 @@ async function initCore(runtimeContext) {
       lastPsBubbleButtonLabel = label;
     }
     button.classList.toggle('ps-bubble-active', active);
-    button.classList.toggle('ps-bubble-empty', !active && getBubbleCount() <= 0);
+    button.classList.toggle('ps-bubble-empty', !active && (air ? getMana() < DIVE_AIR_MANA_PER_S : getBubbleCount() <= 0));
   };
   const _bubbleMagicPalm = new THREE.Vector3();
   const _bubbleMagicCenter = new THREE.Vector3();
@@ -4337,6 +4341,59 @@ async function initCore(runtimeContext) {
     // Blink during the last 2 seconds as a warning that the bubble is about to pop
     bubbleMesh.material.opacity = remaining < 2000 && Math.floor(remaining / 150) % 2 === 0 ? 0.1 : 0.28;
     updatePsBubbleButton();
+  };
+  // ── Town, diving: an air bubble over the head (the Bubble button / the phone's while under
+  // water). DIVE_AIR_MANA_PER_S mana a second; while it's up the swim energy bar doesn't drain
+  // (_updateSwim). Tapped again it pops; it pops by itself when the mana runs out or the dive
+  // ends. Just air — it stops no hits. ──
+  const DIVE_AIR_MANA_PER_S = 1;
+  const DIVE_AIR_RADIUS = 0.42;
+  let _diveAir = null;            // { mesh, spent } while up
+  const _diveAirOn = () => !!_diveAir;
+  const _endDiveAir = (why) => {
+    if (!_diveAir) return;
+    _diveAir.mesh.visible = false;
+    _diveAir = null;
+    if (why === 'mana') showPickupToast('mana_potion', 1, '', { text: 'Out of mana — air bubble popped' });
+    audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.35, { cooldownKey: 'player-bubble', cooldownMs: 200 });
+    updatePsBubbleButton();
+    _phoneSwordStatusNow?.();
+  };
+  let _diveAirMesh = null;
+  const _toggleDiveAir = () => {
+    if (_diveAir) { _endDiveAir('tap'); return true; }
+    if (playerDead || getMana() < DIVE_AIR_MANA_PER_S) {
+      showPickupToast('mana_potion', 1, '', { text: 'No mana for an air bubble' });
+      return false;
+    }
+    if (!_diveAirMesh) {
+      _diveAirMesh = new THREE.Mesh(new THREE.SphereGeometry(DIVE_AIR_RADIUS, 24, 16), ensureBubbleMesh().material.clone());
+      _diveAirMesh.name = 'DiveAirBubble';
+      _diveAirMesh.renderOrder = 10;
+      scene.add(_diveAirMesh);
+    }
+    _diveAirMesh.visible = true;
+    _diveAir = { mesh: _diveAirMesh, spent: 0 };
+    audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'player-bubble', cooldownMs: 200 });
+    updatePsBubbleButton();
+    _phoneSwordStatusNow?.();
+    return true;
+  };
+  const _diveAirHead = new THREE.Vector3();
+  const _updateDiveAir = (dt) => {
+    if (!_diveAir) return;
+    if (playerDead || !_townDive?.isUnder()) { _endDiveAir('dive'); return; }
+    // (the mana taken a whole one at a time — the pill shows whole numbers)
+    _diveAir.spent += Math.max(0, dt || 0) * DIVE_AIR_MANA_PER_S;
+    while (_diveAir.spent >= 1) {
+      _diveAir.spent -= 1;
+      if (getMana() < 1) { _endDiveAir('mana'); return; }
+      setStat('mana', getMana() - 1, { skipSave: true });
+    }
+    if (getMana() <= 0 && _diveAir.spent > 0.95) { _endDiveAir('mana'); return; }
+    _townDive.headPos(_diveAirHead);
+    _diveAir.mesh.position.copy(_diveAirHead).y += 0.12;
+    _diveAir.mesh.scale.setScalar(1 + Math.sin(performance.now() * 0.006) * 0.04);
   };
   window.isPlayerBubbleActive = isPlayerBubbleActive;
   window.getPlayerBubbleRadius = () => (isPlayerBubbleActive() ? BUBBLE_RADIUS : 0);
@@ -7920,8 +7977,9 @@ async function initCore(runtimeContext) {
     }
     return {
       bombs: getPlayerBombCount(),
-      bubbles: getBubbleCount(),
-      bubbleActive: isPlayerBubbleActive(),
+      // (under water in Town the button is the air bubble: 1 mana a second)
+      bubbles: _townDive?.isUnder() ? (getMana() >= DIVE_AIR_MANA_PER_S ? 1 : 0) : getBubbleCount(),
+      bubbleActive: _townDive?.isUnder() ? _diveAirOn() : isPlayerBubbleActive(),
       // (Town: bubbles run on mana — no count on the button)
       bubbleMana: _bubblesOnMana(),
       hasGun: (inv.pistol?.count ?? 0) > 0,
@@ -11128,6 +11186,7 @@ async function initCore(runtimeContext) {
       const sp = getSpawnPosition();
       return sp ? { x: sp.x, z: sp.z, yaw: playerControls.yaw } : null;
     })();
+    _townDive?.end();   // (sunk under water: out of the dive before the shore)
     _swimEnergy = 1;
     _swimWas = false;
     playerControls.swimLocked = false;
@@ -11175,7 +11234,7 @@ async function initCore(runtimeContext) {
     if (swimming && !diving) _swimSplashes(dt, !_swimWas);
     _swimSplash.update(dt);
     _swimWas = swimming;
-    if (swimming && !_swimDrown) {
+    if (swimming && !_swimDrown && !(diving && _diveAirOn())) {
       _swimEnergy -= (dt / SWIM_ENERGY_S) * (diving ? SWIM_DIVE_DRAIN : playerControls.swimMoving ? 1 : SWIM_TREAD_DRAIN);
       if (_swimEnergy <= 0) _swimOutOfBreath();
     }
@@ -12217,6 +12276,7 @@ async function initCore(runtimeContext) {
     // (the camera moved along with where the body ended up this frame — no lag at speed)
     playerControls.followPlayerModel?.();
     _townDive?.afterControls(frameDelta, camera);
+    _updateDiveAir(frameDelta);
     // (under water with a bow: its button stays — the arrow on a string spears fish; styles.css)
     {
       const diveBow = !!_townDive?.isUnder() && _ownsBow();
