@@ -3,7 +3,7 @@
 Kept for reference only — **nothing here is imported or run.** This is the canoe paddling as it stood at
 commit `8cf5fa0` (branch `claude/admiring-clarke-jis16c`, PR irademos/qwop-tps#277), before it was replaced by
 tilt-to-steer (the phone's tilt acts as a joystick and the oar's strokes play by themselves to fit — see the
-Town canoe row in `CLAUDE.md`).
+Town canoe row in `docs/areas/town-activities.md`).
 
 ## What it did
 
