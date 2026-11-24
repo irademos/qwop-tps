@@ -77,7 +77,7 @@ const SPOT_ITEM_GAP = 0.3;           // m between the things on a spot / a marke
 const WIZARD_ITEMS = [{ id: 'life' }, { id: 'mana' }, { id: 'wand' }, { id: 'broom' }];
 export const STALL_ITEMS = { shop: SHOP_ITEMS, wizard: WIZARD_ITEMS };
 // What a selling spot's good looks like (townEconomy.js MARKET_WARES)
-const MARKET_BUILD = { wood: 'wood', fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'stew', chicken: 'chicken', egg: 'egg', roastChicken: 'chicken', friedEgg: 'egg', seeds: 'seeds', rod: 'rod' };
+const MARKET_BUILD = { wood: 'wood', fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'stew', chicken: 'chicken', egg: 'egg', roastChicken: 'chicken', friedEgg: 'egg', goldenFish: 'fish', seeds: 'seeds', rod: 'rod' };
 const CHEST_AT = { x: -2.45, z: 3.85, yaw: Math.PI / 2 - 0.25 };
 
 const SHOP_FOV = 55;

@@ -45,45 +45,52 @@ export const seaBeats = (W) => {
     'Ha! Paddling\'s the easy part!',
   ];
   return {
-    // `who` climbs into the canoe's bow, and the player gets in too
+    // `who` climbs into the canoe's bow, and the player gets in too (also: a second one in the stern)
     canoeCrew: {
-      start: (c) => { c.s.t = 0; },
+      start: (c) => { c.s.t = 0; c.s.t2 = 0; },
       update: (c, dt) => {
         const { beat: b, s } = c;
         const n = roleNpc(c.q, b.who);
+        const n2 = b.also ? roleNpc(c.q, b.also) : null;
         s.n = n;
+        s.n2 = n2;
         if (!n || !T.canoeBuilt?.()) return false;
         c.q.failOnDown = true;
-        if (n.qmode?.kind !== 'canoe') {
-          s.t += dt;
-          const cp = T.canoePose();
-          if (!cp) return false;
-          if (n.qmode?.kind !== 'toCanoe') control(n, 'toCanoe');
-          if (dist2(n.x, n.z, cp.x, cp.z) < CREW_BOARD_DIST || s.t > CREW_BOARD_S) {
-            T.canoePassenger(n);
-            control(n, 'canoe');
-            ctx.playSfx?.('splash', { x: cp.x, y: T.groundY(n), z: cp.z });
-          }
-          return false;
-        }
-        return T.inCanoe();
-      },
-      npc: (c, n, dt) => {
-        if (n !== c.s.n || n.qmode?.kind !== 'toCanoe') return false;
         const cp = T.canoePose();
         if (!cp) return false;
-        // (to the bank by it — the walkable ground nearest it)
+        const climbIn = (who, slot, key) => {
+          if (!who || who.qmode?.kind === 'canoe') return true;
+          s[key] += dt;
+          if (who.qmode?.kind !== 'toCanoe') control(who, 'toCanoe');
+          if (dist2(who.x, who.z, cp.x, cp.z) < CREW_BOARD_DIST || s[key] > CREW_BOARD_S) {
+            T.canoePassenger(who, slot);
+            control(who, 'canoe');
+            ctx.playSfx?.('splash', { x: cp.x, y: T.groundY(who), z: cp.z });
+          }
+          return false;
+        };
+        const in1 = climbIn(n, 0, 't');
+        const in2 = !n2 || (in1 && climbIn(n2, 1, 't2'));
+        return in1 && in2 && T.inCanoe();
+      },
+      npc: (c, n, dt) => {
+        if ((n !== c.s.n && n !== c.s.n2) || n.qmode?.kind !== 'toCanoe') return false;
+        const cp = T.canoePose();
+        if (!cp) return false;
+        // (to the bank by it — the walkable ground nearest it; off the town's ground — another
+        // island, a ship's deck — straight to it)
         const nav = T.layout.nav;
-        const i = nav.nearestWalkable(cp.x, cp.z);
-        const to = i >= 0 ? { x: nav.cellX(i), z: nav.cellZ(i) } : cp;
+        const i = nav.indexAt(cp.x, cp.z) >= 0 ? nav.nearestWalkable(cp.x, cp.z) : -1;
+        const to = i >= 0 && dist2(nav.cellX(i), nav.cellZ(i), cp.x, cp.z) < 15 ? { x: nav.cellX(i), z: nav.cellZ(i) } : cp;
         go(n, to.x, to.z, dt, dist2(n.x, n.z, to.x, to.z) > 10);
         return true;
       },
       entry: (c) => {
         const n = c.s.n;
         if (!n) return null;
-        if (n.qmode?.kind !== 'canoe') return `${firstName(n.name)} is heading down to the canoe`;
-        return T.inCanoe() ? null : `Get in the canoe with ${firstName(n.name)}`;
+        const away = [n, c.s.n2].filter((x) => x && x.qmode?.kind !== 'canoe');
+        if (away.length) return `${away.map((x) => firstName(x.name)).join(' and ')} ${away.length > 1 ? 'are' : 'is'} heading down to the canoe`;
+        return T.inCanoe() ? null : `Get in the canoe with ${[n, c.s.n2].filter(Boolean).map((x) => firstName(x.name)).join(' and ')}`;
       },
       marker: () => {
         const cp = T.canoePose();
@@ -275,32 +282,45 @@ export const seaBeats = (W) => {
       entry: (c) => fill(c.beat.text ?? 'Back to shore', c.q),
       icon: '🛶',
     },
-    // Ashore: the player stepped out onto the bank, `who` too, the canoe back at its mooring
-    canoeLand: {
-      start: (c) => {
-        const n = roleNpc(c.q, c.beat.who);
-        c.q.failOnDown = false;
-        T.canoeLand(true);
+    // Ashore: the player stepped out onto the bank, `who` (and `also`) too, the canoe back at its
+    // mooring — or, stay: left where it is (landed on another island)
+    canoeLand: (() => {
+      const land = (c) => {
+        const { beat: b } = c;
+        c.q.failOnDown = !!b.stay;
+        if (!T.canoeLand(!b.stay) && b.stay) return false; // (no shore in reach: try again)
         T.canoePassenger(null);
-        T.moorCanoe();
-        if (n) {
-          // (beside the player where there's walkable ground — else the nearest, else the fishing spot)
-          const fs = T.layout.places.fishSpot;
-          const p = T.playerPos();
-          const nav = T.layout.nav;
+        if (b.stay) T.canoeStop?.(); else T.moorCanoe();
+        const p = T.playerPos();
+        const nav = T.layout.nav;
+        const fs = T.layout.places.fishSpot;
+        // (beside the player where there's ground — the town's walkable grid, else dry ground
+        // off it — else the nearest walkable, else the fishing spot)
+        const dry = (x, z) => T.walkable(x, z) || (b.stay && (ctx.waterDepth?.(x, z) ?? 0) <= 0 && Number.isFinite(ctx.getGroundY?.(x, z)));
+        const used = [];
+        for (const who of [b.who, b.also].filter(Boolean)) {
+          const n = roleNpc(c.q, who);
+          if (!n) continue;
           let at = null;
-          for (const [ox, oz] of [[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2], [1, 1], [-1, -1]]) {
-            if (T.walkable(p.x + ox, p.z + oz)) { at = { x: p.x + ox, z: p.z + oz }; break; }
+          for (const [ox, oz] of [[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2], [1, 1], [-1, -1], [1.8, -1], [-1.8, 1]]) {
+            const x = p.x + ox;
+            const z = p.z + oz;
+            if (used.some((u) => dist2(u.x, u.z, x, z) < 0.8)) continue;
+            if (dry(x, z)) { at = { x, z }; break; }
           }
-          const i = at ? -1 : nav.nearestWalkable(p.x, p.z);
-          if (!at) at = i >= 0 && dist2(nav.cellX(i), nav.cellZ(i), p.x, p.z) < 6 ? { x: nav.cellX(i), z: nav.cellZ(i) } : fs;
+          const i = at || nav.indexAt(p.x, p.z) < 0 ? -1 : nav.nearestWalkable(p.x, p.z);
+          if (!at) at = i >= 0 && dist2(nav.cellX(i), nav.cellZ(i), p.x, p.z) < 6 ? { x: nav.cellX(i), z: nav.cellZ(i) } : b.stay ? { x: p.x, z: p.z } : fs;
+          used.push(at);
+          n.seat = null;
           n.x = at.x;
           n.z = at.z;
           n.path = null;
-          control(n, 'stand');
+          control(n, b.stay ? 'follow' : 'stand');
         }
         return true;
-      },
-    },
+      };
+      // (no shore in reach yet — stay: tried again each frame)
+      return { start: land, update: land, entry: (c) => (c.beat.stay ? 'Get out onto the beach' : null), icon: '🛶' };
+    })(),
   };
 };

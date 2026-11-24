@@ -40,6 +40,15 @@ const SHERIFF_ALLY = {
   shouts: ['Hold the line, {name}!', 'Behind you!', 'Not in my town!', 'Keep at \'em!', 'That\'s one less!'],
 };
 
+// Townsfolk a job's won over (the fisher, rescued from the pirates — T.questDefenders) fight
+// beside the player and the sheriff too: a bow, and badly hurt they run home to hide
+const DEFENDER_ALLY = {
+  hp: 8, attack: 'bow',
+  lowHp: { at: 3, then: 'flee', line: 'That\'s me done — I\'ll bar my door! Show \'em, {name}!' },
+  shouts: ['For Brindlewick!', 'Like spearing fish!', 'Watch your left, {name}!', 'Ha — got one!', 'You came for me — I\'ll stand with you!'],
+};
+const DEFENDER_JOIN_DIST = 30; // m: further off (or indoors) they're there beside the player at once
+
 export function installTownDefense(T, ctx) {
   T.defense = null; // { night, phase: seek | lead | fight | won | lost | missed | none, level, total, left, start, lead, sheriffId }
   // (the night an hour belongs to: the evening's day — as townBandits.js')
@@ -187,6 +196,31 @@ export function installTownDefense(T, ctx) {
         },
       });
     }
+    // (and whoever else a job's won over — the fisher: there beside the player, bow in hand)
+    D.allyIds = [];
+    for (const n of T.questDefenders?.() ?? []) {
+      if (n.role === 'sheriff' || T.isAlly?.(n) || !T.mine(n) || !T.take(n)) continue;
+      if (T.talking?.npc === n && T.jobTalk.isOpen()) T.jobTalk.close();
+      T.clearTalk?.(n);
+      n.following = false;
+      if (n.inside || T.distToPlayer(n) > DEFENDER_JOIN_DIST) {
+        const p = T.playerPos();
+        const a = Math.random() * Math.PI * 2;
+        n.x = p.x + Math.sin(a) * 2.5;
+        n.z = p.z + Math.cos(a) * 2.5;
+        n.path = null;
+      }
+      n.inside = false;
+      T.allyJoin(n, {
+        ...DEFENDER_ALLY,
+        onFlee: (who) => {
+          T.feedLine(`${firstName(who.name)} is badly hurt — off home to hide.`);
+          if (!hideFromWave(who)) T.decide(who);
+        },
+      });
+      D.allyIds.push(n.id);
+      T.say(n, `I'm with you, ${ctx.getPlayerName?.() ?? 'friend'}!`, { big: true });
+    }
     hideEveryone();
     T.feedLine('The townsfolk bar their doors.');
     T.actsAt = 0;
@@ -213,8 +247,9 @@ export function installTownDefense(T, ctx) {
         ? `${D.left} bandit${D.left > 1 ? 's' : ''} got past you — they're heading into town!`
         : 'You went down, but none of them got past you.');
     }
-    // (the fight's over: the sheriff back to his rounds)
+    // (the fight's over: the sheriff back to his rounds, the others home)
     if (ally) T.allyLeave(ally);
+    for (const id of D.allyIds ?? []) { const n = T.npcById?.(id); if (n) T.allyLeave(n); }
     T.save();
   };
 
@@ -227,6 +262,7 @@ export function installTownDefense(T, ctx) {
     if (T.defense?.phase === 'fight') ctx.stopWave({ silent: true });
     const s = T.defense?.sheriffId != null ? T.npcById?.(T.defense.sheriffId) : null;
     if (s) T.allyLeave(s, { decide: false });
+    for (const id of T.defense?.allyIds ?? []) { const n = T.npcById?.(id); if (n) T.allyLeave(n, { decide: false }); }
     T.defense = null;
   };
 

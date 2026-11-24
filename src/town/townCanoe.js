@@ -22,7 +22,7 @@
 // beat → T.setCanoeBuilt(true), kept with the quests' save as a flag): hidden, no Get in.
 //
 // A job can take a townsperson out in it (T.canoePassenger(n) — the fisher, after the golden fish:
-// beats/sea.js): kneeling in the bow (n.seat → T.canoeSeat, crouched like the cart's passenger),
+// beats/sea.js; a second in the stern — T.canoePassenger(n, 1)): kneeling in the bow (n.seat → T.canoeSeat, crouched like the cart's passenger),
 // and while the job says so (T.canoePilot({ target: () => { x, z }, speed }) — null: the player
 // paddles again) it's them paddling: their own oar stroking on alternate sides, the canoe steered
 // toward the target, whatever the player holds (T.setCanoeArmed(true): the sword, to knock the
@@ -39,7 +39,8 @@ import { CANOE_BOARD_DIST, CANOE_SHORE_DIST, dist2 } from './townConfig.js';
 
 const NO_STEER = { fwd: 0, turn: 0 };
 const ARMED_HELD = ['foamSword', 'magic_wand', 'pistol']; // (what may be in hand while armed)
-const SEAT_Z = 1.15;          // m along it (bow +): where a passenger kneels
+const SEAT_Z = 1.15;          // m along it (bow +): where a passenger kneels…
+const SEAT_Z2 = -1.3;         // …and a second one, behind the player (the fisher's rescue: both cousins home)
 const PILOT_GRIP = { y: 0.62, z: 0.1, out: 0.3 }; // m: the passenger's top hand — over the floor, ahead of their knees, out over the side
 const PILOT_TURN_GAIN = 1.5;  // the steer: per rad off the heading…
 const PILOT_TURN_DAMP = 0.6;  // …less per rad/s already turning
@@ -142,7 +143,7 @@ export function installTownCanoe(T, ctx) {
     searching = true;
     try {
       const nav = T.layout.nav;
-      const i = nav.nearestWalkable(s.x, s.z);
+      const i = nav.indexAt(s.x, s.z) >= 0 ? nav.nearestWalkable(s.x, s.z) : -1;
       if (i >= 0 && dist2(nav.cellX(i), nav.cellZ(i), s.x, s.z) < CANOE_SHORE_DIST) return { x: nav.cellX(i), z: nav.cellZ(i) };
       for (let r = 1; r <= CANOE_SHORE_DIST; r += 0.5) {
         for (let k = 0; k < 16; k++) {
@@ -266,25 +267,39 @@ export function installTownCanoe(T, ctx) {
   // Fishing (townFishing.js): from the canoe, anywhere; a cast lands on water, not in the canoe
   // ── A passenger (a job's: the fisher), and them paddling ──
   let passenger = null;  // the townsperson kneeling in the bow
+  let passenger2 = null; // a second, kneeling in the stern (behind the player)
   let pilot = null;      // { target: () => { x, z }, speed (m/s) } — the passenger paddles
   let armed = false;     // a job's fight from it: the sword in hand
   let faceSide = 0;      // the player turned to face over its left (+1) / right (−1) side; 0: as usual
   let pOar = null;       // their oar (canoe-local, posed per stroke)
   let pStroke = null;    // { side, dir, strength, u, dur }
-  const _seat = { pos: new THREE.Vector3(), quat: new THREE.Quaternion() };
-  const canoeSeat = () => {
-    if (!canoe || !passenger) return null;
+  const _seats = [0, 1].map(() => ({ pos: new THREE.Vector3(), quat: new THREE.Quaternion() }));
+  const canoeSeat = (slot = 0) => {
+    if (!canoe || !(slot ? passenger2 : passenger)) return null;
+    const seat = _seats[slot ? 1 : 0];
     canoe.group.updateWorldMatrix(true, false);
-    _seat.pos.set(0, CANOE_FLOOR_Y, SEAT_Z);
-    canoe.group.localToWorld(_seat.pos);
-    canoe.group.getWorldQuaternion(_seat.quat);
-    return _seat;
+    seat.pos.set(0, CANOE_FLOOR_Y, slot ? SEAT_Z2 : SEAT_Z);
+    canoe.group.localToWorld(seat.pos);
+    canoe.group.getWorldQuaternion(seat.quat);
+    return seat;
   };
-  const canoePassenger = (n) => {
+  const seat2 = () => canoeSeat(1);
+  // (slot 1: the stern; null in the bow clears both)
+  const canoePassenger = (n, slot = 0) => {
+    if (slot) {
+      if (passenger2 && passenger2 !== n) passenger2.seat = null;
+      passenger2 = n ?? null;
+      if (passenger2) passenger2.seat = seat2;
+      T.actsAt = 0;
+      return;
+    }
     if (passenger && passenger !== n) passenger.seat = null;
     passenger = n ?? null;
     if (passenger) passenger.seat = canoeSeat;
-    if (!passenger) canoePilot(null);
+    if (!passenger) {
+      canoePilot(null);
+      if (passenger2) { passenger2.seat = null; passenger2 = null; }
+    }
     T.actsAt = 0;
   };
   const canoePilot = (p) => {
