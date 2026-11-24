@@ -13,7 +13,7 @@
 // gyro like the sword (no gyro: where the player faces); Water — the Block bar's place on the
 // game's screen and the phone (bootstrapGameApp.js: isHoseHeld / setWatering) — or holding F
 // sprays it, and the dirt piles the water lands on soak (WATER_SOAK_S of spray) and stay wet
-// SOIL_DRY_S. The built planter boxes are solid (T.planterObstacles → T.refreshObstacles).
+// SOIL_DRY_S. The built planter boxes and the fields' boxes are solid (T.planterObstacles → T.refreshObstacles).
 //
 // Who owns which field / plot (and how many boxes a plot has) is the town's (T.fieldOwners: field
 // index → { k: member key, n: name }; T.plotOwners: plot index → { k, n, b: boxes built }; a
@@ -230,10 +230,17 @@ export function installTownFarming(T, ctx) {
     const sig = builtBoxes().map((o) => `${o.i}.${o.b}`).join(',');
     if (sig !== farm.boxSig) { farm.boxSig = sig; T.refreshObstacles?.(); }
   };
-  const planterObstacles = () => (farm ? builtBoxes().map((o) => ({
-    box: true, owner: 'planter', x: o.x, z: o.z, hx: PLOT_BOX_LEN / 2, hz: PLOT_BOX_W / 2, yaw: 0,
-    y0: o.gy - 1, y1: o.gy + PLOT_BOX_H,
-  })) : []);
+  // (+ the farmers' fields: each one block over its three rows of boxes — townLayout.js f.solid)
+  const planterObstacles = () => (farm ? [
+    ...builtBoxes().map((o) => ({
+      box: true, owner: 'planter', x: o.x, z: o.z, hx: PLOT_BOX_LEN / 2, hz: PLOT_BOX_W / 2, yaw: 0,
+      y0: o.gy - 1, y1: o.gy + PLOT_BOX_H,
+    })),
+    ...fields().filter((f) => f.solid && Number.isFinite(f.solid.top)).map((f) => ({
+      box: true, owner: 'field', x: f.x, z: f.z, hx: f.solid.hx, hz: f.solid.hz, yaw: 0,
+      y0: f.solid.top - f.solid.h - 1, y1: f.solid.top,
+    })),
+  ] : []);
 
   // ── Buying a field (at the field: paid to the farmer who works it) ──
   const fieldNear = () => {

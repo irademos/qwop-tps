@@ -120,6 +120,18 @@ export function installTownMarket(T, ctx) {
     const g = sellerGood(n);
     return !g || n.carry[g] <= 0 || T.stand?.key === t.stall || !!T.remoteStands[t.stall];
   };
+  // A seller of ours headed to (or at) a spot a player has taken for their stand since: off to
+  // another free spot instead (freeStallFor skips the players' stands), or something else
+  const playerStandAt = (key) => T.stand?.key === key || !!T.remoteStands[key];
+  const rerouteSellers = () => {
+    for (const n of T.npcs) {
+      const t = n.task;
+      if (t?.type !== 'sell' || !n.alive || !T.mine(n) || !playerStandAt(t.stall)) continue;
+      const st = freeStallFor(n);
+      if (st && wantsToSell(n)) T.setTask(n, { type: 'sell', to: st.keeper, dur: t.dur, face: st.customer, stall: st.key });
+      else T.decide(n);
+    }
+  };
   // A stint of work made goods: kept to sell (up to CARRY_MAX)
   const addMade = (n, g, k) => { n.carry[g] = Math.min(CARRY_MAX, (n.carry[g] || 0) + k); };
 
@@ -443,6 +455,7 @@ export function installTownMarket(T, ctx) {
       else if (dist2(p.x, p.z, sp.keeper.x, sp.keeper.z) > STAND_LEAVE_DIST) closeStand('You walked off — packed up.');
       else if (T.mp() && JSON.stringify(standGoods()) !== lastStandGoods) tellStand();
     }
+    rerouteSellers();
     // A customer's question: walked off / closed → no; the customer gone → it's dropped
     if (offerOpen) {
       if (!T.jobTalk.isOpen()) answer(offerOpen, false);

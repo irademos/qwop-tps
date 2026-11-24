@@ -675,7 +675,13 @@ export function installTownPirates(T, ctx) {
   };
   // A cage of iron bars (like the jail's) on the deck, its door facing the deck's middle line
   let cage = null;   // { group, door, at: { x, y, z }, open }
-  const removeCage = () => { if (cage) { cage.group.removeFromParent(); cage = null; } };
+  const removeCage = () => { if (cage) { cage.group.removeFromParent(); cage = null; T.refreshObstacles?.(); } };
+  // The cage is solid (obstacles.js via T.refreshObstacles — townRuins.js): the player walks
+  // round its bars, open or shut (the one inside is a townsperson: not stopped by it)
+  const cageObstacles = () => (cage ? [{
+    box: true, owner: 'shipCage', x: cage.at.x, z: cage.at.z, hx: CAGE_SIZE / 2, hz: CAGE_SIZE / 2, yaw: cage.yaw,
+    y0: cage.at.y - 1, y1: cage.at.y + CAGE_HEIGHT,
+  }] : []);
   const shipCage = () => {
     if (cage) return cage;
     const s = ship();
@@ -733,6 +739,7 @@ export function installTownPirates(T, ctx) {
     g.rotation.y = yaw;
     T.root.add(g);
     cage = { group: g, door, at: { x: best.x, y: best.y, z: best.z }, open: false, yaw };
+    T.refreshObstacles?.();
     return cage;
   };
   const openShipCage = () => { if (cage) cage.open = true; };
@@ -768,7 +775,7 @@ export function installTownPirates(T, ctx) {
   Object.assign(T, {
     seaPlan, seaPlace, divePlan, shipSail, shipArrived: () => !!sail?.arrived, shipPose, shipMode: () => sail?.mode ?? null,
     spawnCrew, crewLoose, liveCrew, crewCount: () => crew.length, pirateThreats, updatePirates, resetPirates,
-    islandPlan, islandPlace, onShipDeck, shipBoardSpot, shipHullDist, shipDeckSpots, shipCage, openShipCage, shipCageDoor, shipLantern,
+    islandPlan, islandPlace, onShipDeck, shipBoardSpot, shipHullDist, shipDeckSpots, shipCage, cageObstacles, openShipCage, shipCageDoor, shipLantern,
     // (dev console: town.debug().T.pirateDebug())
     pirateDebug: () => ({ plan: seaPlan(), sail, moved, turns: turnLog.slice(-20), crew: crew.map((m) => ({ kind: m.kind, lx: m.lx, lz: m.lz, dead: m.e.isDead, want: !!m.e.wantsRangedTurn, turn: loose?.turn === m })) }),
   });
