@@ -5,6 +5,7 @@ import { setRemoteRolling } from '../models/playerModel.js';
 import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
 import { createMatchPickups, PICKUP_TYPES } from './matchPickups.js';
 import { createBossFighter } from '../characters/pembertonBoss.js';
+import { MATCH_CHARACTERS, ARENA_LOCATION } from './matchConfig.js';
 
 // Multiplayer battles: Team Battle (two teams of 5, each team one character model) and
 // Free For All (10 fighters, everyone picks their own character), each played with one of
@@ -63,6 +64,8 @@ import { createBossFighter } from '../characters/pembertonBoss.js';
 //           · end {winnerTeam, winnerId, winnerName, sc} (host) · leave (the sender left;
 //           the host leaving ends the battle). Humans' bullets go out as 'projectile' messages.
 
+export { MATCH_CHARACTERS, ARENA_LOCATION };
+
 export const MATCH_MODES = { team: 'Team Battle', ffa: 'Free For All' };
 export const MATCH_RULES = {
   survival: { label: 'Survival', icon: '🛡️', blurb: 'No respawns · last one standing wins' },
@@ -76,30 +79,9 @@ const formatKd = (c) => kdRatio(c).toFixed(2).replace(/\.?0+$/, '');
 const DEFAULT_RULE = 'survival';
 const cleanRule = (rule) => (MATCH_RULES[rule] ? rule : DEFAULT_RULE);
 const isFreeForAll = (mode) => mode !== 'team';
-export const MATCH_CHARACTERS = {
-  villageBoy: { label: 'Village Boy', team: 'Village Boys', emoji: '👦', url: glbCharacterConfig.villageBoyUrl },
-  // starter: unlocked from the start in Showdown (PS_START_CHARACTERS) and never a stage boss
-  villageGirl: { label: 'Village Girl', team: 'Village Girls', emoji: '👧', url: glbCharacterConfig.villageGirlUrl, starter: true },
-  antler: { label: 'Antler Guy', team: 'Antlers', emoji: '🦌', url: glbCharacterConfig.antlerGuyUrl },
-  frog: { label: 'Frog Man', team: 'Frogs', emoji: '🐸', url: glbCharacterConfig.frogManUrl },
-  gemhorn: { label: 'Gemhorn', team: 'Gemhorns', emoji: '💎', url: glbCharacterConfig.url },
-  pumpkin: { label: 'Pumpkin', team: 'Pumpkins', emoji: '🎃', url: glbCharacterConfig.pumpkinUrl },
-  wizard: { label: 'Wizard', team: 'Wizards', emoji: '🧙', url: glbCharacterConfig.wizardUrl },
-  tree: { label: 'Tree Creature', team: 'Trees', emoji: '🌳', url: glbCharacterConfig.treeCreatureUrl },
-  frogMom: { label: 'Frog Mom', team: 'Frog Moms', emoji: '🐸', url: glbCharacterConfig.frogMomUrl },
-  oldGuy: { label: 'Old Guy', team: 'Old Guys', emoji: '👴', url: glbCharacterConfig.oldGuyUrl },
-  panda: { label: 'Panda', team: 'Pandas', emoji: '🐼', url: glbCharacterConfig.pandaUrl },
-  // story: not won from a Showdown boss — unlocked by the (future) story mode; locked
-  // everywhere (Team Battle included) until then, and never given to bots
-  villager: { label: 'Villager', team: 'Villagers', emoji: '🧑‍🌾', url: glbCharacterConfig.villagerUrl, story: true }
-};
 const CHAR_KEYS = Object.keys(MATCH_CHARACTERS);
 const BOT_CHAR_KEYS = CHAR_KEYS.filter((k) => !MATCH_CHARACTERS[k].story);
 
-// Where battles happen (island town mappack; the same spot as duels — DUEL_LOCATION in
-// duelMode.js). Fighters start around it; pickups and respawns spread wider (never in the
-// sea). Paste Settings → Dev → Free Roam → "Copy location" here to move it.
-export const ARENA_LOCATION = { x: -39.53, y: 0, z: -44.59, yaw: 0.84 };
 
 const MATCH_SIZE = 10;                 // fighters per battle (humans + bots)
 const TEAM_SIZE = MATCH_SIZE / 2;

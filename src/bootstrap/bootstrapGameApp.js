@@ -24,8 +24,7 @@ import { createEyeFish } from '../environment/eyeFish.js';
 import { createGiant } from '../characters/giant.js';
 import { showFeatureLoading } from '../features/loadingState.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
-import { createDuelMode } from '../multiplayer/duelMode.js';
-import { createMatchMode, MATCH_CHARACTERS, ARENA_LOCATION } from '../multiplayer/matchMode.js';
+import { MATCH_CHARACTERS, ARENA_LOCATION } from '../multiplayer/matchConfig.js';
 import { PlayerControls } from '../controls/controls.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
@@ -71,20 +70,14 @@ import { setWandGlow, createWandModel } from '../items/magicWand.js';
 import { createFishingRodModel, ROD_HOLD_PITCH } from '../items/fishingRod.js';
 import { createLantern } from '../items/lantern.js';
 import { loadBowAssets, createBowMesh, createArrowMesh, bowArrowTipWorld } from '../items/bowModel.js';
-import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk, makeTextSprite } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createCharacterChooser } from '../endless/characterChooser.js';
 import { createGyroHint } from '../controls/gyroHint.js';
-import { createTownMode } from '../town/townMode.js';
-import { createTownNet } from '../town/townNet.js';
-import { createSeaStart } from '../town/seaStart.js';
-import { createStoryMode } from '../story/storyMode.js';
 import { OAR_REST_SWING, OAR_REST_TILT, OAR_TIP_AT, oarGripPoint, oarStrokeDuration, oarStrokePose } from '../items/oar.js';
 import { CANOE_HALF_LENGTH, CANOE_HALF_WIDTH } from '../items/canoe.js';
 import { createBroomRide } from '../items/broom.js';
-import { createTownDive } from '../town/townDive.js';
 import { CANOE_STAND_Z, WALLET_MAX as TOWN_WALLET_MAX } from '../town/townConfig.js';
 import { setBowDrawn } from '../combat/shieldThreats.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE, STAGE_BOSS_SCALE } from '../characters/pembertonBoss.js';
@@ -9471,7 +9464,8 @@ async function initCore(runtimeContext) {
       arcadeOverlay.showStartScreen({ tutorialDone: true });
     }
   };
-  showdownTutorial = createShowdownTutorial(tutorialCtx);
+  // (made on first use — _loadModeModules)
+  const _makeTutorial = ({ createShowdownTutorial }) => { showdownTutorial = createShowdownTutorial(tutorialCtx); };
 
   // Clear the field (enemies, bombs, stage) and put the player back on their feet
   // Birds flying past now and then (src/environment/birds.js): Showdown and Town only
@@ -10652,7 +10646,8 @@ async function initCore(runtimeContext) {
       arcadeOverlay.showStartScreen();
     }
   };
-  duelMode = createDuelMode(duelCtx);
+  // (made on first use — _loadModeModules)
+  const _makeDuel = ({ createDuelMode }) => { duelMode = createDuelMode(duelCtx); };
 
   // ── Multiplayer mode: Team Battle / Free For All (src/multiplayer/matchMode.js) ──
   // Same sword rules and health as duels (but no auto-walk: players move themselves, bots
@@ -10986,7 +10981,8 @@ async function initCore(runtimeContext) {
       return bot;
     }
   };
-  matchMode = createMatchMode(matchCtx);
+  // (made on first use — _loadModeModules)
+  const _makeMatch = ({ createMatchMode }) => { matchMode = createMatchMode(matchCtx); };
 
   const startMultiplayerMode = () => {
     _resetForMenu();
@@ -11183,6 +11179,8 @@ async function initCore(runtimeContext) {
   };
   // Town's shared room: assignment, the connection, the other players (src/town/townNet.js)
   const TOWN_PVP_BOMB_DAMAGE = 2; // (a battle's BOMB_DAMAGE)
+  // (made on first use: the town modules are loaded when Town / Story / the sea start is picked — _loadModeModules)
+  const _makeTownNet = ({ createTownNet }) => {
   townNet = createTownNet({
     scene,
     getMultiplayer: () => multiplayer,
@@ -11242,6 +11240,7 @@ async function initCore(runtimeContext) {
     onBounty: (name, coins) => town?.onBounty(name, coins),
     onWorldMessage: (from, data) => town?.handleNet(from, data),
   });
+  };
   // (Town's canoe and the sea start's) m of water over the map's ground (0: dry land; out past the map's ground: deep)
   const _waterDepthAt = (x, z) => {
     const level = _activeMap?.water?.(x, z);
@@ -11577,6 +11576,8 @@ async function initCore(runtimeContext) {
     _cartLoop ??= audioManager.createLoop('SFX/Foley/cart_rolling.ogg');
     _cartLoop.set(0.55 * Math.sqrt(level), 0.8 + 0.35 * level, at);
   };
+  // (made on first use: the town modules are loaded when Town / Story / the sea start is picked — _loadModeModules)
+  const _makeTown = ({ createTownMode }) => {
   town = createTownMode({
     net: townNet,
     cartRolling: _cartRolling,
@@ -11943,6 +11944,7 @@ async function initCore(runtimeContext) {
     heal: (n) => setStat('health', Math.min(effectiveMaxHealthSegments(), statsState.health + n)),
   });
   window.town = town; // (dev console: town.debug())
+  };
   // Town's flying broom (bought from the wizard): sat on, floating, steered by the phone's lean
   // (the joystick / WASD without a gyro); the camera swings round behind it (src/items/broom.js)
   _broomRide = createBroomRide({
@@ -11972,6 +11974,8 @@ async function initCore(runtimeContext) {
   });
   // Town, swimming: hold Dive to swim under water — the gyro (or the stick) turns / tips the
   // player, Dive held swims them the way they face (src/town/townDive.js)
+  // (made on first use: the town modules are loaded when Town / Story / the sea start is picked — _loadModeModules)
+  const _makeTownDive = ({ createTownDive }) => {
   _townDive = createTownDive({
     scene,
     getControls: () => playerControls,
@@ -12021,6 +12025,7 @@ async function initCore(runtimeContext) {
     },
   });
   window.townDive = _townDive; // (dev console: townDive.debug())
+  };
   // Boost on the broom while held (climbing, faster, BOOST_MANA_PER_S mana a second — src/items/broom.js)
   const _setBroomBoost = (on) => {
     if (!_broomRide.isRiding() || on === _broomRide.isBoosting()) return;
@@ -12127,6 +12132,8 @@ async function initCore(runtimeContext) {
 
   // The guest's sea start (src/town/seaStart.js): out on the sea in a canoe, the rod in hand,
   // before the map's in. Its numbers for the island: MAPS.islandTown.seaStart
+  // (made on first use: the town modules are loaded when Town / Story / the sea start is picked — _loadModeModules)
+  const _makeSeaStart = ({ createSeaStart }) => {
   seaStart = createSeaStart({
     scene,
     getMapWater: () => (_activeMapKey === DEFAULT_MAP ? _activeMap?.water ?? null : null),
@@ -12170,6 +12177,7 @@ async function initCore(runtimeContext) {
     onSignIn: () => arcadeOverlay.signIn(),
   }, MAPS[DEFAULT_MAP].seaStart);
   window.seaStart = seaStart; // (dev console: seaStart.debug())
+  };
   const startSeaMode = () => {
     _resetForMenu();
     _putWeaponsAway();
@@ -12194,6 +12202,8 @@ async function initCore(runtimeContext) {
   const _storyLsKey = () => (profileNameKey ? `story_${profileNameKey}` : null);
   let _storyCloudAt = 0;
   let _storyCloudStep = null;
+  // (made on first use: the town modules are loaded when Town / Story / the sea start is picked — _loadModeModules)
+  const _makeStory = ({ createStoryMode }) => {
   story = createStoryMode({
     scene,
     camera,
@@ -12296,6 +12306,7 @@ async function initCore(runtimeContext) {
     },
   });
   window.story = story; // (dev console: story.debug())
+  };
   const startStoryMode = () => {
     _resetForMenu();
     setPlayerCharacterUrl(playerModel, glbCharacterConfig.villageBoyUrl);
@@ -12347,6 +12358,65 @@ async function initCore(runtimeContext) {
   };
 
   let _modeStartToken = 0;
+  // ── Modes loaded on first use (code splitting) ──
+  // Town (+ its shared room, diving, the sea start and Story — they share Town's modules),
+  // Multiplayer and the tutorial are separate chunks: fetched in the background after boot
+  // (_prefetchModeModules) and made (their create… call) the first time their mode is picked,
+  // before it starts. Until then town / story / seaStart / townNet / _townDive / duelMode /
+  // matchMode / showdownTutorial are null — guard every use (`?.`).
+  const MODE_MODULES = {
+    town: {
+      load: () => import('../town/townModules.js'),
+      make: (m) => { _makeTownNet(m); _makeTown(m); _makeTownDive(m); _makeSeaStart(m); _makeStory(m); },
+    },
+    multiplayer: {
+      load: () => Promise.all([import('../multiplayer/duelMode.js'), import('../multiplayer/matchMode.js')])
+        .then(([d, m]) => ({ ...d, ...m })),
+      make: (m) => { _makeDuel(m); _makeMatch(m); },
+    },
+    tutorial: {
+      load: () => import('../tutorial/showdownTutorial.js'),
+      make: (m) => _makeTutorial(m),
+    },
+  };
+  // Which group a mode needs (none: Showdown, Classic, Endless, Free Roam; anything else is the tutorial)
+  const _modeGroup = (gameMode) => {
+    if (gameMode === 'town' || gameMode === 'story' || gameMode === 'sea') return 'town';
+    if (gameMode === 'multiplayer') return 'multiplayer';
+    if (['showdown', 'classic', 'endless', 'roam'].includes(gameMode)) return null;
+    return 'tutorial';
+  };
+  const _modeLoads = {};   // group → its promise (made once loaded)
+  const _modeFetches = {}; // group → the import alone (the background prefetch)
+  const _fetchModeGroup = (key) => (_modeFetches[key] ??= MODE_MODULES[key].load()
+    .catch((err) => { delete _modeFetches[key]; throw err; }));
+  const _loadModeModules = (gameMode) => {
+    const key = _modeGroup(gameMode);
+    if (!key) return Promise.resolve();
+    return (_modeLoads[key] ??= _fetchModeGroup(key)
+      .then((m) => { MODE_MODULES[key].make(m); })
+      .catch((err) => { delete _modeLoads[key]; throw err; }));
+  };
+  const _modeLoadFailed = (gameMode, err) => {
+    console.error(`[modes] couldn't load ${gameMode}:`, err);
+    _resetForMenu();
+    arcadeOverlay.showStartScreen();
+    window.alert?.("Couldn't load that mode — check the connection and try again.");
+  };
+  // Fetch the mode chunks once the game is up and the page is idle, so picking a mode is quick
+  // (the ones the player is likeliest to pick first go first)
+  const _prefetchModeModules = () => {
+    const order = ['town', 'tutorial', 'multiplayer'];
+    const next = () => {
+      const key = order.shift();
+      if (!key) return;
+      _fetchModeGroup(key).catch(() => {}).finally(() => idle(next));
+    };
+    const idle = (fn) => (window.requestIdleCallback ? window.requestIdleCallback(fn, { timeout: 4000 }) : setTimeout(fn, 500));
+    setTimeout(() => idle(next), 3000);
+  };
+  _prefetchModeModules();
+
   const _startMode = (gameMode) => {
     _birdsMode = false;
     birds.clear();
@@ -12381,23 +12451,28 @@ async function initCore(runtimeContext) {
       if (!window.phoneSwordGyro?.connected) void showPhoneSwordQr(_phoneSwordPeerId);
     }
     if (gameMode !== 'multiplayer') {
-      matchMode.exit();
-      duelMode.exit();
+      matchMode?.exit();
+      duelMode?.exit();
     }
     if (gameMode !== 'classic') _setClassicMode(false);
     devRoam.exit();
-    town.exit();
-    // The guest's sea start: right away, the map or not (it waits on nothing)
+    town?.exit();
+    // The guest's sea start: right away, the map or not (it waits on nothing but its code)
     if (gameMode === 'sea') {
-      ++_modeStartToken;
-      startSeaMode();
+      const token = ++_modeStartToken;
+      _loadModeModules('sea')
+        .then(() => { if (token === _modeStartToken) startSeaMode(); })
+        .catch((err) => _modeLoadFailed('sea', err));
       return;
     }
     // Each mode's map first (Classic: map.glb, the rest: the island town); a new map puts
     // the player at its spawn. A newer pick made while a map loads wins.
     const token = ++_modeStartToken;
+    // (the mode's code, if it's loaded on first use, alongside the map)
+    const modules = _loadModeModules(gameMode);
     _setActiveMap(mapForMode(gameMode))
       .catch((err) => { console.error('[map] load failed, staying on the current map:', err); return false; })
+      .then((changed) => modules.then(() => changed))
       .then((changed) => {
         if (token !== _modeStartToken) return;
         if (changed) {
@@ -12406,50 +12481,14 @@ async function initCore(runtimeContext) {
           devRoam.refresh(); // routes drawn for the new map
         }
         _startMode(gameMode);
-      });
+      }, (err) => { if (token === _modeStartToken) _modeLoadFailed(gameMode, err); });
   });
 
-  function animate() {
-    requestAnimationFrame(animate);
-    const frameStartMs = performance.now();
-
-    // --- RAPIER FIXED-STEP & SYNC ---
-    // Accumulate variable rAF time into fixed physics steps
-    const frameDelta = clock.getDelta();
-    // Paused (settings open in a single-player stage): draw the frozen world, simulate nothing
-    if (_isSettingsPauseWanted()) {
-      if (!_gamePaused) { _gamePaused = true; _pausedAtMs = Date.now(); }
-      _syncSkyGlow();
-      renderer.render(scene, camera);
-      gyroHint.hide();
-      return;
-    }
-    if (_gamePaused) {
-      _gamePaused = false;
-      _pauseGraceUntil = performance.now() + PAUSE_RESUME_GRACE_MS;
-      // Bomb fuses run on the wall clock: don't let bombs in flight go off the moment play resumes
-      const pausedMs = Date.now() - _pausedAtMs;
-      playerBombs.delay(pausedMs);
-      for (const _he of hordeEnemies) _he._bombs?.forEach((b) => { b.spawnTime += pausedMs; });
-    }
-    // Hit-stop: a sword impact freezes the world for a few frames (the time is dropped, not
-    // caught up — clock.getDelta above already took it); the camera still shakes
-    if (hitFeel.frozen()) {
-      _syncSkyGlow();
-      hitFeel.applyShake(camera, frameDelta);
-      renderer.render(scene, camera);
-      hitFeel.restoreShake(camera);
-      return;
-    }
-    frameIndex += 1;
-    accumulateBucketDeltas(frameDelta);
-    physicsAccumulator += frameDelta;
-    while (physicsAccumulator >= FIXED_DT) {
-      // applyGlobalGravity(rapierWorld, window.moon);
-      rapierWorld.step();
-      physicsAccumulator -= FIXED_DT;
-    }
-
+  // ── The game loop's parts (called from animate(), in order) — kept out of it so the loop
+  // stays small enough for V8 to optimise (it stops optimising a function past ~60 KB of
+  // bytecode) and each part can be read on its own ──
+  // (animate) Rapier bodies → their meshes
+  function _framePhysicsSync() {
     // Sync Rapier bodies -> Three meshes
     const resolveGroundY = playerControls?.resolveGroundY?.bind(playerControls);
     for (const [rb, mesh] of rbToMesh.entries()) {
@@ -12522,60 +12561,10 @@ async function initCore(runtimeContext) {
         removeRigidBodySafely(rapierWorld, rb);
       }
     }
+  }
 
-    updateRoadLightsNearPlayer();
-    // A voyage on the pirate ship: it sails, carrying everyone aboard (before the player moves)
-    _voyageUpdate(frameDelta);
-    _endlessUpdate();
-    _townWaveUpdate();
-    // Town's flying broom: it moves the player (before the controls place them), then sits
-    // under them (after)
-    _updateBroom(frameDelta);
-    // The giant of Tree Island walks (and carries whoever's climbing it — before the controls place them)
-    giant.update(frameDelta, playerModel?.position);
-    // (Town's cart the same way — townCart.js)
-    town?.cartBeforeControls(frameDelta);
-    // (Town: diving under water — townDive.js; it places the player before the controls too)
-    _townDive?.update(frameDelta);
-    playerControls.update();
-    _updateSwim(frameDelta);
-    _broomRide?.afterControls();
-    town?.cartAfterControls();
-    // (the camera moved along with where the body ended up this frame — no lag at speed)
-    playerControls.followPlayerModel?.();
-    _townDive?.afterControls(frameDelta, camera);
-    _updateDiveAir(frameDelta);
-    // (under water with a bow: its button stays — the arrow on a string spears fish; styles.css)
-    {
-      const diveBow = !!_townDive?.isUnder() && _ownsBow();
-      if (diveBow !== _diveBowShown) { _diveBowShown = diveBow; document.body.classList.toggle('dive-bow', diveBow); playerControls.layoutMobileActionButtons?.(); }
-    }
-    updateBloodEffects(frameDelta);
-    updateBulletImpacts(frameDelta);
-    updateExplosionEffects(frameDelta);
-    updatePlayerBubble();
-    updatePlayerBombs(frameDelta);
-    updatePlayerRoll();
-    _updateMagic(frameDelta);
-    showdownTutorial?.update(frameDelta);
-    const now = performance.now();
-    processIncomingPeerDataQueue();
-    if (now - lastPerfUpdateMs >= 1000) {
-      debugPerf.coinPickups = coinPickups.length;
-      debugPerf.incomingBacklog = lastIncomingBacklog;
-      debugPerf.incomingProcessedPerFrame = lastIncomingProcessCount;
-      debugPerf.adaptiveDegradeLevel = adaptiveDegradeLevel;
-      Object.entries(subsystemPerf).forEach(([name, tracker]) => {
-        const avgMs = tracker.calls > 0 ? tracker.totalMs / tracker.calls : 0;
-        debugPerf[`${name}AvgMs`] = Number(avgMs.toFixed(3));
-        debugPerf[`${name}MaxMs`] = Number(tracker.maxMs.toFixed(3));
-        debugPerf[`${name}LastMs`] = Number(tracker.lastMs.toFixed(3));
-        tracker.totalMs = 0;
-        tracker.calls = 0;
-        tracker.maxMs = 0;
-      });
-      lastPerfUpdateMs = now;
-    }
+  // (animate) Coin / item pickups
+  function _framePickups(frameDelta, now) {
     if (shouldRunBucket('pickups')) {
       withSubsystemTiming('pickups', () => {
         const pickupDeltaSeconds = consumeBucketDelta('pickups', frameDelta);
@@ -12616,7 +12605,10 @@ async function initCore(runtimeContext) {
         }
       });
     }
+  }
 
+  // (animate) The phone sword: the gyro's pose onto the held item
+  function _frameSwordGyro() {
     // Phone Sword: read gyro quaternion and apply directly (no swing exaggeration).
     // Hit detection is now sweep-based with sword-vs-sword collision (see below).
     if (window.phoneSwordGyro?.connected) {
@@ -12783,6 +12775,26 @@ async function initCore(runtimeContext) {
       if (_oarActive) _oarPose(foamSword._holdQuaternion);
     }
     foamSword?.update();
+  }
+
+  // Sword blade sample points (guard / mid / tip, blade-local) and the vectors they're written
+  // into each frame — the player's, and one enemy's at a time (_frameSwordHits)
+  const _PSW_SAMPLE_OFFSETS = [
+    new THREE.Vector3(0, 0, -0.1),
+    new THREE.Vector3(0, 0, 0.3),
+    new THREE.Vector3(0, 0, 0.65),
+  ];
+  const _pswBladePoints = _PSW_SAMPLE_OFFSETS.map(() => new THREE.Vector3());
+  const _pswEnemyBladePoints = _PSW_SAMPLE_OFFSETS.map(() => new THREE.Vector3());
+  const _pswEnemyCenter = new THREE.Vector3();
+  const _bladePointsOf = (obj, out) => {
+    for (let i = 0; i < _PSW_SAMPLE_OFFSETS.length; i++) {
+      out[i].copy(_PSW_SAMPLE_OFFSETS[i]).applyQuaternion(obj.quaternion).add(obj.position);
+    }
+    return out;
+  };
+  // (animate) The phone sword's hit detection: blocks, enemies, PvP, Town, Story, chests
+  function _frameSwordHits() {
     // Phone Sword: override mesh quaternion, then run sword-vs-sword collision + sweep hit detection.
     if (window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
@@ -12797,14 +12809,8 @@ async function initCore(runtimeContext) {
       for (const l of _psw.trailLines) l.visible = false;
 
       // ── Compute player sword blade sample points (guard / mid / tip) ────────
-      const _pswSampleOffsets = [
-        new THREE.Vector3(0, 0, -0.1),
-        new THREE.Vector3(0, 0,  0.3),
-        new THREE.Vector3(0, 0,  0.65),
-      ];
-      const _playerBladePoints = _pswSampleOffsets.map(p =>
-        p.clone().applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position)
-      );
+      // (the same vectors every frame — readers of window.phoneSwordBladePoints copy them)
+      const _playerBladePoints = _bladePointsOf(foamSword.mesh, _pswBladePoints);
       window.phoneSwordBladePoints = _playerBladePoints;
 
       const _tipWorld = _playerBladePoints[2]; // tip
@@ -12888,9 +12894,7 @@ async function initCore(runtimeContext) {
         // (bombers carry no sword, so they can only be hit)
         let _swordCollision = false;
         if (_he._swordGroup) {
-          const _enemyBladePoints = _pswSampleOffsets.map(p =>
-            p.clone().applyQuaternion(_he._swordGroup.quaternion).add(_he._swordGroup.position)
-          );
+          const _enemyBladePoints = _bladePointsOf(_he._swordGroup, _pswEnemyBladePoints);
           outer: for (const pp of _playerBladePoints) {
             for (const ep of _enemyBladePoints) {
               if (pp.distanceTo(ep) < 0.15) { _swordCollision = true; break outer; }
@@ -12903,7 +12907,7 @@ async function initCore(runtimeContext) {
         // blocking blade (see swingCrossesBlade). Otherwise blade contact is ignored and the
         // swing can land. The player can't hit while holding their own block button.
         if (!_blockingNow && !_blockToggleSettling) {
-          const _enemyCenter = _he.group.position.clone();
+          const _enemyCenter = _pswEnemyCenter.copy(_he.group.position);
           _enemyCenter.y += _he.bodyHitCenterY ?? 0.8;
           const _reachesBody = _tipWorld.distanceTo(_enemyCenter) < (_he.bodyHitRadius ?? 0.65);
           const _nowMsPS = Date.now();
@@ -13083,29 +13087,16 @@ async function initCore(runtimeContext) {
       }
 
       // Store previous-frame state for next frame
+      // (a copy: the tip's vector is reused next frame; tipHistory keeps these)
       _psw.prevTipWorld = _tipWorld.clone();
       _psw.prevSwordQ.copy(_activeQ);
       _psw.tipHistory.push({ pos: _psw.prevTipWorld, t: _nowSecPS });
       while (_psw.tipHistory.length && _nowSecPS - _psw.tipHistory[0].t > 0.12) _psw.tipHistory.shift();
     }
-    // (no blade fed this frame — put away, no gyro — the trail just fades out)
-    if (!_swordTrailFed) swordTrail.update(null);
-    _swordTrailFed = false;
-    swordCombo.update(frameDelta);
-    // Heart bubbles: drift to the player and pop on touching them (+1 health)
-    _popHeartBubbles(heartBubbles.update(frameDelta, {
-      playerModel: playerDead ? null : playerModel,
-    }));
-    stageChests.update(frameDelta);
-    // Phone Sword: apply fixed position/rotation config to shield and pistol
-    if (shield?.holder === playerControls) _applyWeaponHoldCfg(shield, 'shield');
-    if (pistol?.holder === playerControls) _applyWeaponHoldCfg(pistol, 'gun');
-    // Gun / shield: the phone gyro turns and pitches the aim
-    _updateWeaponGyroAim(frameDelta);
-    _updateBowDraw();
-    pistol?.update();
-    shield?.update();
+  }
 
+  // (animate) Showdown stages / the tutorial / Endless: spawning, the auto-walk, ranged turns, the camera
+  function _frameStage(frameDelta) {
     // ── Phone Sword: auto-walk + queue spawn (runs even when hordeEnemies is empty) ──
     const _tutorialActive = !!showdownTutorial?.isActive();
     // (no stage running: the bow / wand hop's forced run is off)
@@ -13416,10 +13407,10 @@ async function initCore(runtimeContext) {
         }
       }
     }
+  }
 
-    // ── Bow pressed: the camera turns once to the nearest archer / wand caster (else the closest enemy) ──
-    _updateBowSnap(frameDelta);
-
+  // (animate) Town's cameras: the talk, the fishing cast, the sword / wand auto-aim
+  function _frameTownCamera(frameDelta) {
     // ── Town: in a talk, the camera turns to whoever's talking to the player ──
     const _townTalker = town?.isActive() && playerControls && !playerDead ? town.talkFocus() : null;
     if (_townTalker) {
@@ -13474,7 +13465,10 @@ async function initCore(runtimeContext) {
       _townCamLastYaw = null;
       _townCamTarget = null;
     }
+  }
 
+  // (animate) Duel / battle camera auto-aim
+  function _framePvpCamera(frameDelta) {
     // ── Duel / battle: camera turns toward the (closest) opponent (keyboard / touch
     // turning pauses it) ──
     const _pvpFighting = !!(duelMode?.isFighting() || matchMode?.isFighting());
@@ -13546,7 +13540,10 @@ async function initCore(runtimeContext) {
         }
       }
     }
+  }
 
+  // (animate) The player's jump / fall / landing
+  function _frameJump(frameDelta) {
     // ── Phone sword jump (runs regardless of enemy count) ─────────────────
     if (playerModel) {
       // Ground under the player's current XZ (the stage isn't flat, and a blast carries
@@ -13608,7 +13605,11 @@ async function initCore(runtimeContext) {
         }
       }
     }
+  }
 
+  const _hordeSwordTip = new THREE.Vector3(); // (_frameHorde's sword tip, reused)
+  // (animate) The enemies (also in duels / battles: the player's body sync, knockback)
+  function _frameHorde(frameDelta) {
     // ── Horde enemy update (also runs in duels: player knockback + body sync) ──
     if (hordeEnemies.length > 0 || duelMode?.isInDuel() || matchMode?.isInMatch()) {
       // Sync kinematic player body to visual position each frame
@@ -13635,8 +13636,8 @@ async function initCore(runtimeContext) {
       const swordMesh = foamSword?.holder === playerControls && foamSword?.useHeldMeshWhenHeld && foamSword?.heldMesh
         ? foamSword.heldMesh
         : (foamSword?.holder === playerControls ? foamSword?.mesh : null);
-      const _tipOffset = swordMesh ? new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion) : null;
-      const _tipWorld  = swordMesh ? swordMesh.position.clone().add(_tipOffset) : null;
+      const _tipWorld = swordMesh
+        ? _hordeSwordTip.set(0, 0, 0.69).applyQuaternion(swordMesh.quaternion).add(swordMesh.position) : null;
 
       // Determine which swordsmen get an attack slot (closest alive ones, count by stage;
       // bombers don't use slots)
@@ -13789,41 +13790,10 @@ async function initCore(runtimeContext) {
         }
       }
     }
-    syncRemoteHeldWeaponMesh(shield);
+  }
 
-    if (window.localHealth <= 0 && !playerDead) {
-      playerDead = true;
-      deactivatePlayerBubble();
-      thawPlayer();
-      window.onPlayerDeath?.();
-      updateControlAvailability();
-      const actions = playerModel.userData.actions;
-      const current = playerModel.userData.currentAction;
-      const die = actions?.die;
-      if (die) {
-        actions[current]?.fadeOut(0.2);
-        die.reset().fadeIn(0.2).play();
-        playerModel.userData.currentAction = 'die';
-      }
-      // GLB character: play the flying-back death clip once (held until respawn)
-      playerModel.userData.qwopRig?.glbCharacter?.playDeath();
-      // Losing a duel shows the winner and goes back to the lobby instead of Game Over;
-      // in a battle the player watches until it ends
-      if (duelMode?.isInDuel()) duelMode.onLocalDeath();
-      else if (matchMode?.isInMatch()) matchMode.onLocalDeath();
-      else showGameOver();
-    }
-
-    const mixerDelta = mixerClock.getDelta();
-
-    // (The local player's GLB character is animated in updateProceduralPlayerRig, via playerControls.update.)
-
-    // 1) Always advance animation mixers (every frame)
-    Object.values(otherPlayers).forEach(p => {
-      p.model?.userData?.mixer?.update(mixerDelta);
-      updateRemotePlayerRig(p.model, mixerDelta);
-    });
-
+  // (animate) Presence sweep / send, the network profile and its queues
+  function _frameNetwork(now, frameDelta) {
     if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
       lastPresenceSweep = now;
       const localFix = playerModel?.position;
@@ -13917,6 +13887,174 @@ async function initCore(runtimeContext) {
     });
     flushNetSendQueue();
     tickNetStats(now);
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const frameStartMs = performance.now();
+
+    // --- RAPIER FIXED-STEP & SYNC ---
+    // Accumulate variable rAF time into fixed physics steps
+    const frameDelta = clock.getDelta();
+    // Paused (settings open in a single-player stage): draw the frozen world, simulate nothing
+    if (_isSettingsPauseWanted()) {
+      if (!_gamePaused) { _gamePaused = true; _pausedAtMs = Date.now(); }
+      _syncSkyGlow();
+      renderer.render(scene, camera);
+      gyroHint.hide();
+      return;
+    }
+    if (_gamePaused) {
+      _gamePaused = false;
+      _pauseGraceUntil = performance.now() + PAUSE_RESUME_GRACE_MS;
+      // Bomb fuses run on the wall clock: don't let bombs in flight go off the moment play resumes
+      const pausedMs = Date.now() - _pausedAtMs;
+      playerBombs.delay(pausedMs);
+      for (const _he of hordeEnemies) _he._bombs?.forEach((b) => { b.spawnTime += pausedMs; });
+    }
+    // Hit-stop: a sword impact freezes the world for a few frames (the time is dropped, not
+    // caught up — clock.getDelta above already took it); the camera still shakes
+    if (hitFeel.frozen()) {
+      _syncSkyGlow();
+      hitFeel.applyShake(camera, frameDelta);
+      renderer.render(scene, camera);
+      hitFeel.restoreShake(camera);
+      return;
+    }
+    frameIndex += 1;
+    accumulateBucketDeltas(frameDelta);
+    physicsAccumulator += frameDelta;
+    while (physicsAccumulator >= FIXED_DT) {
+      // applyGlobalGravity(rapierWorld, window.moon);
+      rapierWorld.step();
+      physicsAccumulator -= FIXED_DT;
+    }
+
+    _framePhysicsSync();
+
+    updateRoadLightsNearPlayer();
+    // A voyage on the pirate ship: it sails, carrying everyone aboard (before the player moves)
+    _voyageUpdate(frameDelta);
+    _endlessUpdate();
+    _townWaveUpdate();
+    // Town's flying broom: it moves the player (before the controls place them), then sits
+    // under them (after)
+    _updateBroom(frameDelta);
+    // The giant of Tree Island walks (and carries whoever's climbing it — before the controls place them)
+    giant.update(frameDelta, playerModel?.position);
+    // (Town's cart the same way — townCart.js)
+    town?.cartBeforeControls(frameDelta);
+    // (Town: diving under water — townDive.js; it places the player before the controls too)
+    _townDive?.update(frameDelta);
+    playerControls.update();
+    _updateSwim(frameDelta);
+    _broomRide?.afterControls();
+    town?.cartAfterControls();
+    // (the camera moved along with where the body ended up this frame — no lag at speed)
+    playerControls.followPlayerModel?.();
+    _townDive?.afterControls(frameDelta, camera);
+    _updateDiveAir(frameDelta);
+    // (under water with a bow: its button stays — the arrow on a string spears fish; styles.css)
+    {
+      const diveBow = !!_townDive?.isUnder() && _ownsBow();
+      if (diveBow !== _diveBowShown) { _diveBowShown = diveBow; document.body.classList.toggle('dive-bow', diveBow); playerControls.layoutMobileActionButtons?.(); }
+    }
+    updateBloodEffects(frameDelta);
+    updateBulletImpacts(frameDelta);
+    updateExplosionEffects(frameDelta);
+    updatePlayerBubble();
+    updatePlayerBombs(frameDelta);
+    updatePlayerRoll();
+    _updateMagic(frameDelta);
+    showdownTutorial?.update(frameDelta);
+    const now = performance.now();
+    processIncomingPeerDataQueue();
+    if (now - lastPerfUpdateMs >= 1000) {
+      debugPerf.coinPickups = coinPickups.length;
+      debugPerf.incomingBacklog = lastIncomingBacklog;
+      debugPerf.incomingProcessedPerFrame = lastIncomingProcessCount;
+      debugPerf.adaptiveDegradeLevel = adaptiveDegradeLevel;
+      Object.entries(subsystemPerf).forEach(([name, tracker]) => {
+        const avgMs = tracker.calls > 0 ? tracker.totalMs / tracker.calls : 0;
+        debugPerf[`${name}AvgMs`] = Number(avgMs.toFixed(3));
+        debugPerf[`${name}MaxMs`] = Number(tracker.maxMs.toFixed(3));
+        debugPerf[`${name}LastMs`] = Number(tracker.lastMs.toFixed(3));
+        tracker.totalMs = 0;
+        tracker.calls = 0;
+        tracker.maxMs = 0;
+      });
+      lastPerfUpdateMs = now;
+    }
+    _framePickups(frameDelta, now);
+
+    _frameSwordGyro();
+    _frameSwordHits();
+    // (no blade fed this frame — put away, no gyro — the trail just fades out)
+    if (!_swordTrailFed) swordTrail.update(null);
+    _swordTrailFed = false;
+    swordCombo.update(frameDelta);
+    // Heart bubbles: drift to the player and pop on touching them (+1 health)
+    _popHeartBubbles(heartBubbles.update(frameDelta, {
+      playerModel: playerDead ? null : playerModel,
+    }));
+    stageChests.update(frameDelta);
+    // Phone Sword: apply fixed position/rotation config to shield and pistol
+    if (shield?.holder === playerControls) _applyWeaponHoldCfg(shield, 'shield');
+    if (pistol?.holder === playerControls) _applyWeaponHoldCfg(pistol, 'gun');
+    // Gun / shield: the phone gyro turns and pitches the aim
+    _updateWeaponGyroAim(frameDelta);
+    _updateBowDraw();
+    pistol?.update();
+    shield?.update();
+
+    _frameStage(frameDelta);
+
+    // ── Bow pressed: the camera turns once to the nearest archer / wand caster (else the closest enemy) ──
+    _updateBowSnap(frameDelta);
+
+    _frameTownCamera(frameDelta);
+
+    _framePvpCamera(frameDelta);
+
+    _frameJump(frameDelta);
+
+    _frameHorde(frameDelta);
+    syncRemoteHeldWeaponMesh(shield);
+
+    if (window.localHealth <= 0 && !playerDead) {
+      playerDead = true;
+      deactivatePlayerBubble();
+      thawPlayer();
+      window.onPlayerDeath?.();
+      updateControlAvailability();
+      const actions = playerModel.userData.actions;
+      const current = playerModel.userData.currentAction;
+      const die = actions?.die;
+      if (die) {
+        actions[current]?.fadeOut(0.2);
+        die.reset().fadeIn(0.2).play();
+        playerModel.userData.currentAction = 'die';
+      }
+      // GLB character: play the flying-back death clip once (held until respawn)
+      playerModel.userData.qwopRig?.glbCharacter?.playDeath();
+      // Losing a duel shows the winner and goes back to the lobby instead of Game Over;
+      // in a battle the player watches until it ends
+      if (duelMode?.isInDuel()) duelMode.onLocalDeath();
+      else if (matchMode?.isInMatch()) matchMode.onLocalDeath();
+      else showGameOver();
+    }
+
+    const mixerDelta = mixerClock.getDelta();
+
+    // (The local player's GLB character is animated in updateProceduralPlayerRig, via playerControls.update.)
+
+    // 1) Always advance animation mixers (every frame)
+    Object.values(otherPlayers).forEach(p => {
+      p.model?.userData?.mixer?.update(mixerDelta);
+      updateRemotePlayerRig(p.model, mixerDelta);
+    });
+
+    _frameNetwork(now, frameDelta);
 
     if (shouldRunBucket('remoteLabels')) {
       withSubsystemTiming('remoteLabels', () => {

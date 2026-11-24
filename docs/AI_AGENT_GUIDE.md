@@ -13,7 +13,7 @@
 | What | Where |
 |---|---|
 | All source code | `src/` |
-| Game orchestrator / main loop / stages | `src/bootstrap/bootstrapGameApp.js` (~5.5k lines) |
+| Game orchestrator / main loop / stages | `src/bootstrap/bootstrapGameApp.js` (~14k lines; the game loop `animate()` calls its `_frame*` parts). Town / Story / the sea start, Multiplayer and the tutorial load on first use (`_loadModeModules`) — their objects are `null` until then, guard with `?.` |
 | Phone controller page | `public/phone-sword.html` (reconnect: `connectToGame`; game side `_createGyroPeer` / `_attachPhoneSwordConn` in `bootstrapGameApp.js`) |
 | Pause while settings open (Showdown / Classic / tutorial / Town / Story) | `_isSettingsPauseWanted` / `_attacksHeld` + top of `animate` in `bootstrapGameApp.js` |
 | "Install the app" popup on phones not running it installed (once; Install = `beforeinstallprompt`, else how-to text; Dismiss remembered in `sq:installPromptDismissed`) | `src/core/installPrompt.js`; `.install-prompt*` in `styles.css` |

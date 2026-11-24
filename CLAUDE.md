@@ -30,7 +30,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │
 ├── src/                        # ALL source code lives here
 │   ├── bootstrap/
-│   │   └── bootstrapGameApp.js # THE game orchestrator — init, maps (`MAPS` / `_setActiveMap`), stages (`_ps*`), phone-sword link, shop/stats, networking, main loop (~5.5k lines)
+│   │   └── bootstrapGameApp.js # THE game orchestrator — init, maps (`MAPS` / `_setActiveMap`), stages (`_ps*`), phone-sword link, shop/stats, networking, main loop (~14k lines; `animate()` calls the loop's parts — `_framePhysicsSync` / `_framePickups` / `_frameSwordGyro` / `_frameSwordHits` / `_frameStage` / `_frameTownCamera` / `_framePvpCamera` / `_frameJump` / `_frameHorde` / `_frameNetwork`, defined just before it — keep new per-frame work in a part, not inline in `animate()`)
 │   │
 │   ├── core/                   # Shared infrastructure (no game logic)
 │   │   ├── appContext.js       # Dependency injection container (entities/systems/uiState/settings/debugFlags)
@@ -84,6 +84,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │   ├── multiplayer/
 │   │   ├── peerConnection.js   # Multiplayer class — PeerJS WebRTC, Firebase signaling, rooms (lobby / duel-<id> / mm-<mode>-<rule> / party-<id> / match-<id>, joinRoom, destroy); messages: presence, projectile, duel, match
 │   │   ├── duelMode.js         # Multiplayer mode: lobby screen (+ Team Battle / Free For All cards, each with Survival / Most Kills), challenges, duel lifecycle (countdown/winner) — game access via a ctx from bootstrapGameApp.js
+│   │   ├── matchConfig.js      # `MATCH_CHARACTERS` (the roster — also Showdown / Endless / Town) + `ARENA_LOCATION`: kept out of matchMode.js so the rest of the game doesn't load it (re-exported there)
 │   │   ├── matchMode.js        # Team Battle / Free For All × Survival / Most Kills: party setup (rule picker) + invites, matchmaking queue, bots (host-simulated EnemyPlayers + boss fighter logic, using what they pick up), battle lifecycle, kill credit + respawns, bullet/bomb/magic hits, pickups sync, scoreboard HUD / kill feed / results — game access via matchCtx
 │   │   └── matchPickups.js     # Battle pickups: seeded layout around ARENA_LOCATION, item models (village `buildItemMesh`) on glowing rings, taken / respawn state (PICKUP_TYPES)
 │   │
@@ -209,6 +210,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. A visitor who isn't 
 │   │   ├── townBook.js         # The town book (📖 / M): a live map of the town (everyone, ❗ / ❓ / 📍, bandits, enemies, players; drag / pinch / zoom) + the Town page (bag, jobs, everyone by coins — was Settings → Town)
 │   │   ├── townLights.js       # Town's lights: the map's road lamps glow at night, a few pooled point lights go to the lamps / campfires nearest the player (fires dimmer by day), the campfire's ground glow spreads at night
 │   │   ├── townNet.js          # Shared Town (Multiplayer): Firebase room assignment (12 a room, 3 weeks away = place freed), room state, the PeerJS connection (room `town-<roomId>`), other players' swords / stars / PvP / bounties
+│   │   ├── townModules.js      # One entry for Town + townNet + townDive + the sea start + Story (createTownMode / createTownNet / createTownDive / createSeaStart / createStoryMode) — the lazily loaded `town` chunk (see Key Patterns §2)
 │   │   └── townPeople.js       # Town roles (hours, hp, bravery, law, bandits / bandit chief, the wizard — `hermit`; `livesOut`), founding roster (in the order the town needs them — one to a house), names, characters (`characterForRole(role, others)`: the law / merchant / wizard / bandits by role, everyone else the least used model among the residents — one of each model first, then evenly — `leastUsed`), talk / chat / shout / follow lines — shared lines plus each kind's own (`speciesOf(n)` by body: pumpkin / tree / frog / antler / gem / wizard / folk → `SPECIES_LINES`, `SPECIES_SHOUTS`; `shout(list, n)`, `chatLines(…, speaker)`)
 │   │
 │   ├── village/
@@ -289,6 +291,8 @@ appContext.debugFlags // PERF, DEBUG_CONSOLE
 
 ### 2. Feature Facade Pattern (`src/features/`)
 Files in `features/` are **thin re-export + lazy-load wrappers** to enable Vite code splitting. `combatFeature.js` re-exports `projectiles.js` and lazy-loads the weapon modules (shield, pistol, foam sword); `uiPanelsFeature.js` lazy-loads the shop. When adding new heavy features, add a facade here.
+
+**Modes loaded on first use:** Town (+ townNet, diving, the sea start and Story — `src/town/townModules.js`), Multiplayer (`duelMode.js` + `matchMode.js`) and the tutorial (`showdownTutorial.js`) are separate chunks, not in the startup bundle. `MODE_MODULES` / `_modeGroup` / `_loadModeModules` (before `_startMode` in `bootstrapGameApp.js`): the mode handler loads a mode's group alongside its map, then calls that group's `_make*` (the old `x = createX(ctx)` lines, now `const _makeX = ({ createX }) => { … }` where they were), then `_startMode`; a failed load → `_modeLoadFailed` (back to the start screen). `_prefetchModeModules` fetches the chunks at idle a few seconds after boot. Until made, `town` / `story` / `seaStart` / `townNet` / `_townDive` / `duelMode` / `matchMode` / `showdownTutorial` are `null` — **guard every use with `?.`**, and don't import those modules statically from the main chunk (put shared constants in a small module, like `matchConfig.js`).
 
 ### 3. Multiplayer: lobby + duel rooms (Multiplayer mode only)
 - Peer multiplayer only exists in Multiplayer mode and a shared Town: `startMultiplayer(roomId)` / `stopMultiplayer` in `bootstrapGameApp.js` create/destroy the `Multiplayer` instance (Showdown and the tutorial are single player; `multiplayer` is `null` there — guard every use). Town: `townNet` (`src/town/townNet.js`) starts it in room `town-<roomId>` and stops it on leaving Town (duelMode's delayed stop skips while `townNet.isOn()`); `_netRecipients` / presence / `_getPvpTargets` include the town's players; message type `town`
