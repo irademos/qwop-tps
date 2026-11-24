@@ -197,6 +197,8 @@ export const diveBeats = (W) => {
         const n = roleNpc(q, b.who);
         s.t += dt;
         if (s.phase === 'see') {
+          // (the camera turned to the ship once it's spotted)
+          if (!s.looked && s.t > 0.3) { s.looked = true; const sp = T.shipPose?.(); if (sp) ctx.turnCameraTo?.(sp.x, sp.z); }
           if (!s.said1 && s.t > 0.4) { s.said1 = true; if (n) shout(n, 'What\'s… that ship! Where did that come from?!', q); }
           if (!s.said2 && s.t > 2.6) { s.said2 = true; pirateSay('Thank ye kindly for fetchin\' our fish, landlubbers! Now — hand it over!'); }
           if (s.t > 4.6) { s.phase = 'throw'; s.t = BOMB_GAP_S; }
@@ -259,6 +261,8 @@ export const diveBeats = (W) => {
         if (s.phase === 'lie') {
           if (s.t < LIE_S) return false;
           ctx.lieDown?.(false);
+          const sp = T.shipPose?.();
+          if (sp) ctx.turnCameraTo?.(sp.x, sp.z);
           return true;
         }
         return true;
@@ -277,6 +281,7 @@ export const diveBeats = (W) => {
         const ship = T.shipPose?.();
         const gone = T.shipMode?.() !== 'flee' || !ship;
         if (!gone) T.driveTo({ x: ship.x, z: ship.z, r: 3, water: true });
+        if (!gone && !s.looked) { s.looked = true; ctx.turnCameraTo?.(ship.x, ship.z); }
         if (T.inCanoe() && ctx.heldWeapon?.() !== 'canoe_oar' && T.simT > s.oarAt && !ctx.weaponBusy?.()) {
           s.oarAt = T.simT + 1.5;
           ctx.setCanoeWeapon?.('oar');
