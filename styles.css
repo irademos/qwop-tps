@@ -634,6 +634,8 @@ body.has-mana.match-loadout #shield-health-display { top: 106px; }
   transition: width 0.2s linear;
 }
 #swim-bar.swim-low { animation: swim-low 0.8s ease-in-out infinite; }
+/* Town's golden elixir: the bar stays full, in gold */
+body.player-elixir #swim-bar-fill { background: linear-gradient(90deg, var(--accent-hi), var(--accent-lo)); }
 #swim-bar.swim-low #swim-bar-fill { background: linear-gradient(90deg, #fca5a5, #dc2626); }
 @keyframes swim-low {
   0%, 100% { border-color: rgba(248, 113, 113, 0.4); }
@@ -4964,6 +4966,25 @@ body.mobile-block-bar .classic-combo {
   background: var(--surface-hud);
   backdrop-filter: none;
 }
+/* The golden elixir's countdown (townTrade.js) — under the jail / camp chip's spot */
+.town-elixir {
+  position: absolute;
+  top: calc(136px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface-hud);
+  backdrop-filter: none;
+  pointer-events: none;
+}
+.town-elixir.hidden { display: none; }
+.town-elixir.is-low { animation: swim-low 0.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .town-elixir.is-low { animation: none; } }
 /* The bandit camp's countdown (same spot as the jail chip — never both) */
 .town-camp { color: var(--danger); border-color: var(--danger); }
 /* What's happening in town: newest on top, under the health bar */

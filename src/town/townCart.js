@@ -39,7 +39,7 @@ const CART_SOUND_FULL_SPEED = 7; // m/s — the rolling sound at full volume (it
 const CART_SOLID_H = 1.1;   // m — how high the parked cart's box stands over the ground (a collider: the player bumps into it)
 const BRING_RINGS = [1.75, 2.3, 3, 4, 5.5]; // m from the player the cart's brought round to (bringCart — Get in within CART_ACT_DIST)
 // (the item model a crate of a good shows — villageMode.js buildItemMesh)
-const CRATE_ITEM = { fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'veg', chicken: 'chicken', egg: 'egg', roastChicken: 'chicken', friedEgg: 'egg', goldenFish: 'fish' };
+const CRATE_ITEM = { fish: 'fish', crops: 'veg', grilledFish: 'fish', stew: 'veg', chicken: 'chicken', egg: 'egg', roastChicken: 'chicken', friedEgg: 'egg', goldenFish: 'fish', goldenElixir: 'elixir' };
 export const CART_MAX = 30;  // goods the cart's bed holds
 const STORE_REACH = CART_ACT_DIST + 1.2; // m from the cart its store panel stays open
 // The logs stacked in the bed (cart-local, across it): a stack at each end, 3 / 2 / 3 a layer

@@ -597,6 +597,19 @@ export function buildItemMesh(kind) {
     holder.rotation.y = -Math.PI / 2 - 0.5;
     holder.scale.setScalar(0.42); // (~0.33 m: the counter is ~1.3 m wide)
     g.add(holder);
+  } else if (kind === 'elixir') {
+    // Town's golden elixir (the golden fish cooked): a little round flask of glowing gold
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0xffe08a, transparent: true, opacity: 0.45, roughness: 0.05, clearcoat: 1 });
+    const gold = std(0xffc21a, { emissive: 0xffa800, emissiveIntensity: 0.9, roughness: 0.3, metalness: 0.4 });
+    const body = new THREE.Mesh(new THREE.SphereGeometry(0.075, 18, 12), glass);
+    body.position.y = 0.075;
+    const fill = new THREE.Mesh(new THREE.SphereGeometry(0.062, 16, 10), gold);
+    fill.position.y = 0.07;
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.06, 10), glass);
+    neck.position.y = 0.165;
+    const cork = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.02, 0.03, 8), std(0x8a5a2b, { roughness: 0.9 }));
+    cork.position.y = 0.205;
+    g.add(fill, body, neck, cork);
   } else if (kind === 'heart') {
     const s = new THREE.Shape();
     s.moveTo(0, -0.1);

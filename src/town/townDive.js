@@ -633,7 +633,8 @@ export function createTownDive(ctx) {
       else { aimPitch += (0 - aimPitch) * (1 - Math.exp(-2 * dt)); c.yaw = ride.yaw; lastYaw = c.yaw; }
       // (the bow drawn or the line out: treading water where they are)
       const moving = held && !aiming && !shot;
-      speed += ((moving ? SWIM_SPEED : 0) - speed) * (1 - Math.exp(-(moving ? ACCEL : STOP_RATE) * dt));
+      const boost = ctx.speedScale?.() ?? 1;   // (Town's golden elixir)
+      speed += ((moving ? SWIM_SPEED * boost : 0) - speed) * (1 - Math.exp(-(moving ? ACCEL * boost : STOP_RATE) * dt));
       vDown *= Math.exp(-2.5 * dt);
       const cp = Math.cos(aimPitch), sp = Math.sin(aimPitch);
       let nx = center.x + Math.sin(ride.yaw) * cp * speed * dt;

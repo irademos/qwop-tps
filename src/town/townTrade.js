@@ -4,7 +4,8 @@
 // buying food and selling — are townMarket.js), and the stand-ins bullets / bombs / spells hit
 // townsfolk through.
 
-import { GOODS, RAW_IDS, SHOP_GEAR, WIZARD_WARES } from './townEconomy.js';
+import { ELIXIR_S, GOODS, RAW_IDS, SHOP_GEAR, WIZARD_WARES } from './townEconomy.js';
+import { el } from './townConfig.js';
 import { firstName } from './townPeople.js';
 import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
@@ -26,9 +27,43 @@ export function installTownTrade(T, ctx) {
     T.renderGoods();
     return got;
   };
+  // ── The golden elixir (the golden fish cooked — townCooking.js): drunk, full health, and for
+  // ELIXIR_S the player glows gold and swims / dives fast and never tires (town.elixirActive() —
+  // bootstrapGameApp.js: the swim bar, the dive's speed, the glow). A chip counts it down. ──
+  T.elixirLeft = 0;
+  const elixirChip = el('div', 'town-elixir ui-panel hidden');
+  T.hud.append(elixirChip);
+  let elixirShown = '';
+  const renderElixir = () => {
+    const left = Math.ceil(T.elixirLeft);
+    const txt = left > 0 ? `🌟 ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : '';
+    if (txt === elixirShown) return;
+    elixirShown = txt;
+    elixirChip.textContent = txt;
+    elixirChip.classList.toggle('hidden', !txt);
+    elixirChip.classList.toggle('is-low', left > 0 && left <= 20);
+  };
+  const drinkElixir = (g) => {
+    T.goods[g] -= 1;
+    const { health, max } = ctx.getHealth();
+    if (health < max) ctx.heal(max - health);
+    T.elixirLeft = ELIXIR_S;
+    ctx.playSfx?.('eat');
+    T.renderGoods();
+    renderElixir();
+    T.feedLine(`Drank the ${GOODS[g].label.toLowerCase()}! Full health — swim and dive like a fish for ${Math.round(ELIXIR_S / 60)} minutes.`);
+  };
+  const updateElixir = (dt) => {
+    if (T.elixirLeft <= 0) return;
+    T.elixirLeft = ctx.isPlayerDead() ? 0 : Math.max(0, T.elixirLeft - dt);
+    if (T.elixirLeft <= 0) T.feedLine('The golden glow fades.');
+    renderElixir();
+  };
+  const endElixir = () => { T.elixirLeft = 0; renderElixir(); };
   // Food for health (the goods pill / the town book)
   const eat = (g) => {
     if (!GOODS[g]?.food || T.goods[g] <= 0 || T.sequence || ctx.isPlayerDead()) return;
+    if (GOODS[g].elixir) { drinkElixir(g); return; }
     const { health, max } = ctx.getHealth();
     if (health >= max) { T.feedLine('You\'re not hungry.'); return; }
     T.goods[g] -= 1;
@@ -425,9 +460,9 @@ export function installTownTrade(T, ctx) {
     && T.isWorking(m)) ?? null;
 
   Object.assign(T, {
-    buyGear, calmNow, dropItem, eat, enterRoom, focusStall, gain, gearState, getMagicTargets,
+    buyGear, calmNow, dropItem, eat, endElixir, enterRoom, focusStall, gain, gearState, getMagicTargets,
     getWeaponTargets, leaveRoom, shopOpen, nearDoor, nearStall, nearestStall,
     mayPick, pickCrop, playerRoom, ripeCropNear, rooms, stallItemState, stalls, stallOpen,
-    updateRegrowth, updateRooms, workingMerchant, workingWizard,
+    updateElixir, updateRegrowth, updateRooms, workingMerchant, workingWizard,
   });
 }
