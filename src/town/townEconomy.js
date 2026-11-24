@@ -22,6 +22,9 @@ export const GOODS = {
   // (cooked from them at the campfire — townCooking.js)
   roastChicken: { label: 'Roast Chicken', emoji: '🍖', price: 13, target: 4, food: true, heal: 5, cooked: true },
   friedEgg: { label: 'Fried Egg', emoji: '🍳', price: 6, target: 4, food: true, heal: 2, cooked: true },
+  // (the fisher's golden fish — given to the player after his rescue, quests/jobs.js; one of a
+  // kind: shown once held, never food, worth a fortune)
+  goldenFish: { label: 'Golden Fish', emoji: '🐠', price: 150, target: 1, wild: true },
 };
 export const GOOD_IDS = Object.keys(GOODS);
 export const RAW_IDS = GOOD_IDS.filter((g) => !GOODS[g].cooked && !GOODS[g].wild);

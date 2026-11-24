@@ -7797,6 +7797,8 @@ async function initCore(runtimeContext) {
     playerControls.refreshActionButtons?.();
     return true;
   };
+  // (arrows loosed so far — a Town job watching for a shot: the fisher's rescue, beats/rescue.js)
+  let _playerArrowsShot = 0;
   const releaseBowDraw = (cancel = false) => {
     if (!_bowDraw.active) return;
     const draw = _bowDrawAmount();
@@ -7811,6 +7813,7 @@ async function initCore(runtimeContext) {
       // (under water — Town's dive: an arrow on a string, for spearing fish; none used up)
       const diving = !!_townDive?.isUnder();
       if (dir && dir.lengthSq() > 1e-4 && (diving ? _townDive.shoot(tip, dir.normalize(), power) : playerControls.fireArrow(power, tip, dir.normalize()))) {
+        if (!diving) _playerArrowsShot += 1;
         pistol.nocked = false;
         audioManager?.playSynth?.('bowRelease', 0.6 + 0.4 * power);
         audioManager?.playSound('twang', { volume: 0.6 + 0.4 * power });
@@ -11847,6 +11850,13 @@ async function initCore(runtimeContext) {
     // The map's pirate ship (the floating prop with a deck — MAPS.islandTown.floating): { holder
     // (moved to sail it; its bow is local −X), anchor { position, yaw }, deck, model, box } or null
     getShip: () => (_voyage ? null : _activeMap?.ship ?? null),
+    // Another island of the map out at sea (Tree Island): loaded (a promise of it, null if it
+    // can't be), and its { at, radius… } once it's in (the fisher's rescue — townPirates.js'
+    // island plan)
+    ensureIsland: (key) => _ensureIsland(key),
+    islandInfo: (key) => _activeMap?.islands?.find((i) => i.def.key === key)?.def ?? null,
+    // Arrows the player has loosed so far (a job watching for a shot — beats/rescue.js)
+    arrowsShot: () => _playerArrowsShot,
     // Diving (townDive.js): under water now, up out of it (climbing back into the canoe), and a
     // job's fish down there (the fisher's dive — beats/dive.js)
     isDiving: () => !!_townDive?.isUnder(),

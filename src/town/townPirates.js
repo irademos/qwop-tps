@@ -18,6 +18,16 @@
 //                side, broadside on (the fisher's dive — moved while the player's under water)
 //   'flee'     — away out to sea, faster and faster — faster than the canoe can follow (the
 //                fisher taken); back at its anchor once it's well away
+//   'moor'     — anchored off another island's coast ({ key } — T.islandPlan(key)), broadside on
+//                to the shore, close in (the fisher's rescue — beats/rescue.js)
+//
+// The island plan (T.islandPlan(key), once the island's loaded — ctx.ensureIsland): `landing`
+// (a beach on its side facing the fishing spot, dry) and `landSea` (open water just off it,
+// where the canoe stops), `ship` ({ x, z, yaw } — where it moors, a stretch along the coast)
+// and `shipShore` (the dry shore beside it). On the ship moored there: a cage on its deck
+// (T.shipCage — bars like the jail's, its door opened by T.openShipCage), a lookout on watch at
+// the rail on the shore side (spawnCrew's `toward`), a lantern by him, and spots on the deck —
+// T.shipBoardSpot (climbing aboard), T.shipDeckSpots (boarders over the rail), T.onShipDeck.
 //
 // The dive plan (T.divePlan(), for the fisher's dive — beats/dive.js): `dive` (where the canoe
 // stops, over the seabed past the first fishing spot), `diveA` / `diveB` (spots under water on out
@@ -72,6 +82,15 @@ const CREW_BOMB_HEIGHT = 1.05;  // …this high over their feet: where the sword
 const CREW_DEFLECT_R = 0.95;    // m from the sword's tip a bomb is knocked back (0.5 usually)
 const ARCHER_TURN_MAX_S = 5;    // s an archer's turn lasts at most
 const ARROW_SPEED = 9;          // m/s (an enemy's arrow — PEMBERTON_BULLET_SPEED)
+const LAND_SEA_DEPTH = 1.2;     // m of water where the canoe stops off an island's beach…
+const LAND_SEA_MAX = 14;        // …at most this far out from it
+const BEACH_RISE = 1.6;         // m the beach may rise over the sea at the shore (no cliffs)…
+const BEACH_RISE_IN = 3.2;      // …and a few metres in
+const MOOR_OFFSETS = [0.45, -0.45, 0.55, -0.55, 0.35, -0.35, 0.7, -0.7, 0.9, -0.9]; // rad along the coast from the landing
+const MOOR_GAP = [2.5, 24];     // m between the hull and the shore (closest that's deep enough)
+const MOOR_DEPTH = 2.0;         // m of water all round the hull
+const CAGE_SIZE = 1.25;         // m square
+const CAGE_HEIGHT = 2.0;        // m
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -216,7 +235,14 @@ export function installTownPirates(T, ctx) {
   };
 
   // A job sets it sailing: 'park' | 'approach' | 'chase' | 'leave' (dir: the way round the ring)
-  const shipSail = (mode, { dir = 1 } = {}) => {
+  const shipSail = (mode, { dir = 1, key = null } = {}) => {
+    if (mode === 'moor') {
+      const ip = key ? islandPlan(key) : null;
+      if (!ip || !ship()) return false;
+      setShipPose(ip.ship.x, ip.ship.z, ip.ship.yaw);
+      sail = { mode, t: 0, dir, to: { ...ip.ship }, arrived: true, key };
+      return true;
+    }
     const p = seaPlan();
     const pose = shipPose();
     if (!p || !pose) { sail = null; return false; }
@@ -330,7 +356,9 @@ export function installTownPirates(T, ctx) {
   const crewWorld = (m) => ship()?.holder.localToWorld(_v.set(m.lx, 0, m.lz)) ?? null;
   // Along the rail on the side the canoe will be (sail.to for an approach, else where it is now):
   // the archers among the bomb throwers
-  const spawnCrew = ({ bombers = 3, archers = 0 } = {}) => {
+  // (toward { x, z }: the rail on that side, and nobody's on watch for it otherwise — the
+  // lookout of the moored ship)
+  const spawnCrew = ({ bombers = 3, archers = 0, toward = null } = {}) => {
     const n = bombers + archers;
     // (the archers spread out along the rail among the bomb throwers)
     const kinds = Array(n).fill('bomber');
@@ -338,10 +366,10 @@ export function installTownPirates(T, ctx) {
     clearCrew();
     const s = ship();
     const p = seaPlan();
-    if (!s || !p) return 0;
+    if (!s || (!p && !toward)) return 0;
     const yaw = sail?.to?.yaw ?? s.holder.rotation.y;
     const at = sail?.to ?? shipPose();
-    const c = T.canoePose?.() ?? p.sea2;
+    const c = toward ?? T.canoePose?.() ?? p.sea2;
     // (holder-local +Z → world (sin yaw, cos yaw): the canoe's side)
     const side = Math.sign((c.x - at.x) * Math.sin(yaw) + (c.z - at.z) * Math.cos(yaw)) || 1;
     const { minX, maxX, halfWidth } = s.deck;
@@ -470,17 +498,277 @@ export function installTownPirates(T, ctx) {
 
   const updatePirates = (dt) => {
     updateShip(dt);
+    updateCage(dt);
     carryCrew();
     updateLoose();
   };
   const resetPirates = () => {
     clearCrew();
+    removeCage();
+    removeLantern();
     resetShip();
+  };
+
+  // ── Another island's coast: where to land, where the ship moors ──
+  const islandPlans = new Map();   // key → plan | null (none found)
+  // The shore along a ray out from the island's middle at angle a: the first dry ground coming in
+  const shoreAt = (C, R, a) => {
+    const ox = Math.sin(a);
+    const oz = Math.cos(a);
+    for (let d = R + 70; d > 8; d -= 1.5) {
+      const x = C.x + ox * d;
+      const z = C.z + oz * d;
+      if ((ctx.waterDepth?.(x, z) ?? 0) <= 0.05) return { x, z, out: { x: ox, z: oz }, d };
+    }
+    return null;
+  };
+  const seaLevelNear = (S) => ctx.getWaterY?.(S.x + S.out.x * 3, S.z + S.out.z * 3) ?? ctx.getWaterY?.(S.x + S.out.x * 8, S.z + S.out.z * 8) ?? 0;
+  const inland = (S, m) => ({ x: S.x - S.out.x * m, z: S.z - S.out.z * m });
+  // The ship's hull in its holder's frame at yaw 0 (bow −X): its middle's offset and half sizes, world m
+  let hull = null;
+  const measureHull = () => {
+    const s = ship();
+    if (!s) return null;
+    if (hull) return hull;
+    const yaw = s.holder.rotation.y;
+    s.holder.rotation.y = 0;
+    s.holder.updateMatrixWorld(true);
+    const b = new THREE.Box3().setFromObject(s.model);
+    s.holder.getWorldPosition(_v);
+    hull = { ox: (b.min.x + b.max.x) / 2 - _v.x, oz: (b.min.z + b.max.z) / 2 - _v.z, hx: (b.max.x - b.min.x) / 2, hz: (b.max.z - b.min.z) / 2 };
+    s.holder.rotation.y = yaw;
+    s.holder.updateMatrixWorld(true);
+    return hull;
+  };
+  // holder-local (at yaw) → world offsets: local +X → (cos yaw, −sin yaw), +Z → (sin yaw, cos yaw)
+  const rot = (lx, lz, yaw) => ({ x: lx * Math.cos(yaw) + lz * Math.sin(yaw), z: -lx * Math.sin(yaw) + lz * Math.cos(yaw) });
+  const buildIslandPlan = (key) => {
+    const def = ctx.islandInfo?.(key);
+    const fs = T.layout?.places.fishSpot;
+    const h = measureHull();
+    if (!def || !fs || !h) return null;
+    const C = def.at;
+    const R = def.radius;
+    const a0 = Math.atan2(fs.x - C.x, fs.z - C.z);
+    // The landing: a beach facing home, with open water just off it
+    let land = null;
+    for (const off of [0, 0.12, -0.12, 0.25, -0.25, 0.4, -0.4, 0.55, -0.55, 0.7, -0.7, 0.9, -0.9]) {
+      const S = shoreAt(C, R, a0 + off);
+      if (!S) continue;
+      const sea = seaLevelNear(S);
+      const g0 = ctx.getGroundY(S.x, S.z);
+      const in3 = inland(S, 3);
+      const g3 = ctx.getGroundY(in3.x, in3.z);
+      if (!(g0 - sea < BEACH_RISE) || !(g3 - sea < BEACH_RISE_IN) || (ctx.waterDepth?.(in3.x, in3.z) ?? 0) > 0) continue;
+      let landSea = null;
+      for (let t = 3; t <= LAND_SEA_MAX; t += 1) {
+        const x = S.x + S.out.x * t;
+        const z = S.z + S.out.z * t;
+        if (deep(x, z, LAND_SEA_DEPTH) && deep(x + S.out.x * 4, z + S.out.z * 4, LAND_SEA_DEPTH)) { landSea = { x, z }; break; }
+      }
+      if (!landSea) continue;
+      land = { S, a: a0 + off, landSea, landing: inland(S, 1.5) };
+      break;
+    }
+    if (!land) return null;
+    // The ship: a stretch along the coast, broadside on, as close in as the water lets it
+    for (const off of MOOR_OFFSETS) {
+      const S = shoreAt(C, R, land.a + off);
+      if (!S) continue;
+      const t = { x: S.out.z, z: -S.out.x };                // along the shore
+      const yaw = yawFor(t.x, t.z);
+      for (let gap = MOOR_GAP[0]; gap <= MOOR_GAP[1]; gap += 1.5) {
+        const mid = { x: S.x + S.out.x * (gap + h.hz), z: S.z + S.out.z * (gap + h.hz) };
+        let ok = true;
+        for (let i = -2; i <= 2 && ok; i++) {
+          for (const j of [-1, 0, 1]) {
+            const o = rot((i / 2) * (h.hx + 1), j * (h.hz + 1), yaw);
+            if (!deep(mid.x + o.x, mid.z + o.z, MOOR_DEPTH)) { ok = false; break; }
+          }
+        }
+        if (!ok) continue;
+        const o = rot(h.ox, h.oz, yaw);
+        // (the shore side in the holder's frame: +Z or −Z)
+        const side = Math.sign(Math.sin(yaw) * -S.out.x + Math.cos(yaw) * -S.out.z) || 1;
+        return {
+          key, landing: land.landing, landSea: land.landSea,
+          ship: { x: mid.x - o.x, z: mid.z - o.z, yaw }, shipMid: mid, shipShore: inland(S, 1.5), out: S.out, side,
+        };
+      }
+    }
+    return null;
+  };
+  const islandPlan = (key) => {
+    if (!islandPlans.has(key)) {
+      const p = buildIslandPlan(key);
+      if (!p && !ctx.islandInfo?.(key)) return null; // (not there yet: look again later)
+      islandPlans.set(key, p);
+    }
+    return islandPlans.get(key);
+  };
+  const islandPlace = (name) => {
+    const ip = sail?.key ? islandPlans.get(sail.key) : [...islandPlans.values()].find(Boolean);
+    if (!ip) return null;
+    if (name === 'islandSea') return ip.landSea;
+    if (name === 'islandLanding') return ip.landing;
+    if (name === 'shipShore') return ip.shipShore;
+    if (name === 'ship') return ip.shipMid;
+    return null;
+  };
+
+  // ── On the moored ship: the deck, a cage, the lookout's lantern ──
+  const deckLocal = (x, z) => {
+    const s = ship();
+    if (!s) return null;
+    return s.holder.worldToLocal(_v.set(x, 0, z)).clone();
+  };
+  const deckWorld = (lx, lz) => {
+    const s = ship();
+    if (!s) return null;
+    const w = s.holder.localToWorld(_v.set(lx, 0, lz));
+    return { x: w.x, z: w.z, y: ctx.getGroundY(w.x, w.z) };
+  };
+  // The side of the deck facing the island's shore (holder-local z sign)
+  const shoreSide = () => islandPlans.get(sail?.key)?.side ?? 1;
+  // Standing on its deck (its rect, up over the water)
+  const onShipDeck = (p) => {
+    const s = ship();
+    if (!s || !p) return false;
+    const l = deckLocal(p.x, p.z);
+    const { minX, maxX, halfWidth } = s.deck;
+    if (l.x < minX - 0.4 || l.x > maxX + 0.4 || Math.abs(l.z) > halfWidth + 0.4) return false;
+    const w = ctx.getWaterY?.(p.x, p.z);
+    return (p.y ?? 0) > (w ?? -Infinity) + 0.8;
+  };
+  // The player's way aboard: on the deck by the shore-side rail, the middle of it
+  const shipBoardSpot = () => {
+    const s = ship();
+    if (!s) return null;
+    const { minX, maxX, halfWidth } = s.deck;
+    const w = deckWorld((minX + maxX) / 2, shoreSide() * (halfWidth - 0.55));
+    return w && { ...w, yaw: Math.atan2(-shoreSide() * Math.sin(s.holder.rotation.y), -shoreSide() * Math.cos(s.holder.rotation.y)) };
+  };
+  // How far the player is from its hull (m, across the water — 0: over it)
+  const shipHullDist = (p) => {
+    const s = ship();
+    const h = measureHull();
+    if (!s || !h || !p) return Infinity;
+    const l = deckLocal(p.x, p.z);
+    const sc = s.holder.getWorldScale(new THREE.Vector3()).x || 1;
+    const dx = Math.max(0, Math.abs(l.x * sc - h.ox) - h.hx);
+    const dz = Math.max(0, Math.abs(l.z * sc - h.oz) - h.hz);
+    return Math.hypot(dx, dz);
+  };
+  // n spots along both rails (boarders coming over the side)
+  const shipDeckSpots = (n) => {
+    const s = ship();
+    if (!s) return [];
+    const { minX, maxX, halfWidth } = s.deck;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 ? -1 : 1;
+      const k = Math.floor(i / 2) / Math.max(1, Math.ceil(n / 2) - 1);
+      const w = deckWorld(minX + 0.5 + (maxX - minX - 1) * k, side * (halfWidth - 0.35));
+      if (w) out.push({ ...w, side });
+    }
+    return out;
+  };
+  // A cage of iron bars (like the jail's) on the deck, its door facing the deck's middle line
+  let cage = null;   // { group, door, at: { x, y, z }, open }
+  const removeCage = () => { if (cage) { cage.group.removeFromParent(); cage = null; } };
+  const shipCage = () => {
+    if (cage) return cage;
+    const s = ship();
+    if (!s) return null;
+    const { minX, maxX, halfWidth } = s.deck;
+    // (on the sea side, the flattest of a few spots along it — not on a hatch or a cabin roof)
+    const lz = -shoreSide() * halfWidth * 0.45;
+    let best = null;
+    for (const k of [0.3, 0.5, 0.7, 0.2, 0.8]) {
+      const lx = minX + (maxX - minX) * k;
+      const c = deckWorld(lx, lz);
+      if (!c || !Number.isFinite(c.y)) continue;
+      const ys = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([a, b]) => {
+        const o = rot(a * CAGE_SIZE * 0.5, b * CAGE_SIZE * 0.5, s.holder.rotation.y);
+        return ctx.getGroundY(c.x + o.x, c.z + o.z);
+      });
+      const spread = Math.max(...ys) - Math.min(...ys);
+      const score = spread + Math.abs(c.y - (best?.y ?? c.y)) * 0.2;
+      if (!best || score < best.score) best = { ...c, score };
+    }
+    if (!best) return null;
+    const g = new THREE.Group();
+    const iron = new THREE.MeshStandardMaterial({ color: 0x2f2f35, roughness: 0.6, metalness: 0.3 });
+    const barGeo = new THREE.CylinderGeometry(0.025, 0.025, CAGE_HEIGHT, 6).translate(0, CAGE_HEIGHT / 2, 0);
+    const railGeo = new THREE.BoxGeometry(1, 0.06, 0.06);
+    const h = CAGE_SIZE / 2;
+    const bars = (parent, x0, z0, x1, z1, n) => {
+      for (let k = 0; k <= n; k++) {
+        const bar = new THREE.Mesh(barGeo, iron);
+        bar.position.set(x0 + (x1 - x0) * (k / n), 0, z0 + (z1 - z0) * (k / n));
+        bar.castShadow = true;
+        parent.add(bar);
+      }
+      for (const y of [0.06, CAGE_HEIGHT - 0.05]) {
+        const rail = new THREE.Mesh(railGeo, iron);
+        rail.scale.x = Math.hypot(x1 - x0, z1 - z0);
+        rail.position.set((x0 + x1) / 2, y, (z0 + z1) / 2);
+        rail.rotation.y = -Math.atan2(z1 - z0, x1 - x0);
+        parent.add(rail);
+      }
+    };
+    // (the door on the side toward the deck's middle — local +Z here is the holder's shore side)
+    bars(g, -h, -h, h, -h, 8);
+    bars(g, -h, -h, -h, h, 8);
+    bars(g, h, -h, h, h, 8);
+    const top = new THREE.Mesh(new THREE.BoxGeometry(CAGE_SIZE, 0.05, CAGE_SIZE), iron);
+    top.position.y = CAGE_HEIGHT;
+    g.add(top);
+    const door = new THREE.Group();
+    door.position.set(-h, 0, h);
+    bars(door, 0, 0, CAGE_SIZE, 0, 8);
+    g.add(door);
+    const yaw = s.holder.rotation.y + (shoreSide() > 0 ? 0 : Math.PI);
+    g.position.set(best.x, best.y, best.z);
+    g.rotation.y = yaw;
+    T.root.add(g);
+    cage = { group: g, door, at: { x: best.x, y: best.y, z: best.z }, open: false, yaw };
+    return cage;
+  };
+  const openShipCage = () => { if (cage) cage.open = true; };
+  const updateCage = (dt) => {
+    if (!cage) return;
+    const want = cage.open ? -1.9 : 0;
+    cage.door.rotation.y += THREE.MathUtils.clamp(want - cage.door.rotation.y, -2.5 * dt, 2.5 * dt);
+  };
+  // Just outside the cage's door (where the one let out steps to)
+  const shipCageDoor = () => {
+    if (!cage) return null;
+    const o = rot(0, CAGE_SIZE * 0.5 + 0.7, cage.yaw);
+    return { x: cage.at.x + o.x, z: cage.at.z + o.z };
+  };
+  // The lookout's lantern: a warm glow on the rail beside him (no light — none added at night
+  // mid-game, that would recompile every material)
+  let lantern = null;
+  const removeLantern = () => { if (lantern) { lantern.removeFromParent(); lantern = null; } };
+  const shipLantern = (at) => {
+    removeLantern();
+    if (!at) return;
+    const g = new THREE.Group();
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffd98a }));
+    glass.position.y = 0.95;
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 10), new THREE.MeshBasicMaterial({ color: 0xffb648, transparent: true, opacity: 0.18, depthWrite: false, blending: THREE.AdditiveBlending }));
+    halo.position.y = 0.95;
+    g.add(glass, halo);
+    g.position.set(at.x, at.y, at.z);
+    T.root.add(g);
+    lantern = g;
   };
 
   Object.assign(T, {
     seaPlan, seaPlace, divePlan, shipSail, shipArrived: () => !!sail?.arrived, shipPose, shipMode: () => sail?.mode ?? null,
     spawnCrew, crewLoose, liveCrew, crewCount: () => crew.length, pirateThreats, updatePirates, resetPirates,
+    islandPlan, islandPlace, onShipDeck, shipBoardSpot, shipHullDist, shipDeckSpots, shipCage, openShipCage, shipCageDoor, shipLantern,
     // (dev console: town.debug().T.pirateDebug())
     pirateDebug: () => ({ plan: seaPlan(), sail, moved, turns: turnLog.slice(-20), crew: crew.map((m) => ({ kind: m.kind, lx: m.lx, lz: m.lz, dead: m.e.isDead, want: !!m.e.wantsRangedTurn, turn: loose?.turn === m })) }),
   });

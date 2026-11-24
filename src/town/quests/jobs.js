@@ -76,6 +76,24 @@
 //   chaseShip { s?, text }    — arrows on the water after the ship as it gets away; done once it's
 //           gone or s seconds are up
 //   feed    { lines, banner? } — lines in the feed (and a banner: [title, sub])
+//   islandPlan { key, failText } — another island (Tree Island: 'treeIsland') loaded and looked
+//           over: its beach, where the pirates moor — none → the job fails (failText)
+//   giveItem { who, item, say? } — handed over unless the player has one ('lockpick', a town item)
+//   night   { ifDay }         — on after dark; by day, goto the `ifDay` label
+//   pirateMoor { key, who }   — the pirate ship moored off that island, `who` (the one taken) in a
+//           cage on its deck, one pirate on watch at the rail with a lantern
+//   sneak   { key, who, count } — along the shore to the ship, `who` beside the player; one arrow
+//           kills the lookout and nobody wakes; a miss (or seen — too near) and `count` pirates
+//           jump down and come at them. Done once they're all down
+//   boardShip { text }        — Climb aboard by its hull; done once on its deck
+//   pickCage { who }          — the cage's lock picked (the lockpick minigame); `who` steps out
+//   boarders { count, text }  — `count` pirates over the rails; done once they're all down
+//   freeCaptive { who }       — the pirates' prisoner no more (kept in the job)
+//   giveGoods { who, good, count, text, popup? } — goods into the bag (the chest if it's full)
+//   defender { who }          — fights beside the player in the night defense from now on
+//   canoeCrew's `also`: a second passenger (the stern); canoeLand's `stay`: the canoe left where
+//           it is (landed on another island), `who` (and `also`) following the player
+//   seek's `nightOnly` (+ dayText): they only come after dark
 //   seek's `needs: '<item>'` (+ needsText): the giver won't come till the player has it
 //   wait    { until? } — the runner's own: nothing happens till a talk / action moves on
 // Any beat: talks: { <role>: talk } — what that townsperson says if talked to while it's the beat
@@ -89,7 +107,11 @@
 // 'fishSpot' (the fishing spot, where the canoe's moored), 'sea1' / 'sea2' (out on the water past
 // it — townPirates.js' sea plan: part way out, and the far side of a ring of open water), 'dive'
 // (where it gets deep past them), 'diveA' / 'diveB' (spots under water on out from there — the
-// dive plan), 'mooring' (the canoe's mooring).
+// dive plan), 'mooring' (the canoe's mooring), 'islandLanding' / 'islandSea' (another island's
+// beach facing home, the water just off it), 'ship' / 'shipShore' (the ship moored off it, the
+// shore beside it — townPirates.js' island plan).
+// Cast: a role, or 'cousin' — another of the role of someone the pirates took (another fisher,
+// else a townsperson); someone taken (flags.taken) is who a job means by their role.
 // Text: {name} = the player's name, {<role>} = that townsperson's first name, {<role>.dad} /
 // .father / .he / .him / .his / .man / .sir = the word for them (Dad or Mum…; capitalised as written).
 
@@ -410,6 +432,91 @@ const FISHER_JOBS = [
       { do: 'paddle', to: 'mooring', r: 6, text: 'Paddle back to shore' },
       { do: 'canoeLand' },
       { do: 'feed', lines: ['{fisher} is gone. Somewhere out there, the pirates have {fisher.him}.'] },
+    ],
+  },
+  // ── After the pirates took him: his cousin, a night crossing to Tree Island, and the pirates'
+  // ship moored off it (beats/rescue.js) ──
+  {
+    id: 'fisherRescue', title: 'Rescue the fisher', waitS: 60, failWaitS: 40, restartAt: 'retry', quiet: true,
+    downText: 'You went down — {cousin} got you both back across somehow. {cousin.He}\'ll come for you again after dark.',
+    beats: [
+      { do: 'seek', who: 'cousin', anyTime: true },
+      {
+        do: 'talk', who: 'cousin', reward: 'Rescue {fisher}',
+        lines: [
+          ['cousin', '{name}… you went out on the water with my cousin {fisher}, didn\'t you? {fisher.He} never came home. Have you seen {fisher.him}?'],
+          ['you', 'The pirates took {fisher.him}. They bombed us out on the water — when I came to, {fisher.he} was gone, and their ship was making off.'],
+          ['cousin', 'Pirates?! …That ship. I saw a ship last night, lights low, anchored off the coast of Tree Island. It has to be them.'],
+          ['cousin', 'We\'re going to get {fisher.him} back, you and me.'],
+        ],
+        choices: [{ label: 'We\'ll get {fisher.him} back' }, { label: 'Later', then: ['later'] }],
+      },
+      { do: 'needItem', item: 'gun', who: 'cousin', ifMissing: 'nobow' },
+      { do: 'giveItem', item: 'lockpick', who: 'cousin', say: 'Here — a lock-pick. They\'ll have {fisher.him} locked up.' },
+      { do: 'night', ifDay: 'tonight' },
+      {
+        do: 'talk', who: 'cousin',
+        lines: [['cousin', 'It\'s dark already — good. Let\'s go now, while they sleep. The canoe\'s down by the fishing spot.']],
+        choices: [{ label: 'Let\'s go', then: ['goto:go'] }, { label: 'Later', then: ['later'] }],
+      },
+      {
+        do: 'talk', label: 'tonight', who: 'cousin',
+        lines: [['cousin', 'Not in broad daylight, though — they\'d see us coming a mile off. I\'ll come and find you tonight, once it\'s dark.']],
+        choices: [{ label: 'Tonight, then', then: ['goto:retry'] }],
+      },
+      // (no bow: back once there is one — after dark)
+      {
+        do: 'talk', label: 'nobow', who: 'cousin',
+        lines: [['cousin', 'No bow? You\'ll need one — they\'ll have someone on watch. The weaponsmith in the shop sells them. Come find me once you\'ve bought one.']],
+        choices: [{ label: 'I will', then: ['later'] }],
+      },
+      // (after dark — and back for another go after a fail / 'Later': restartAt)
+      { do: 'seek', label: 'retry', who: 'cousin', nightOnly: true, queue: true, needs: 'gun', needsText: 'Buy a bow at the shop — {cousin} wants to rescue {fisher} after dark', dayText: '{cousin} will come and find you tonight, once it\'s dark' },
+      {
+        do: 'talk', who: 'cousin', reward: 'Rescue {fisher}',
+        lines: [['cousin', 'It\'s dark, {name}. Ready to go after {fisher}? The pirates\' ship is off Tree Island — we\'ll take the canoe.']],
+        choices: [{ label: 'Let\'s go' }, { label: 'Later', then: ['later'] }],
+      },
+      { do: 'needItem', item: 'gun', who: 'cousin', ifMissing: 'nobow' },
+      { do: 'giveItem', item: 'lockpick', who: 'cousin', say: 'Take this lock-pick — they\'ll have {fisher.him} locked up.' },
+      { do: 'islandPlan', label: 'go', key: 'treeIsland', failText: 'The sea\'s too rough to cross tonight — {cousin} will try again tomorrow night.' },
+      { do: 'canoeCrew', who: 'cousin' },
+      // (the pirates' ship moored off the island's coast, {fisher} in a cage on its deck, one on watch)
+      { do: 'pirateMoor', key: 'treeIsland', who: 'fisher' },
+      { do: 'say', who: 'cousin', lines: ['Follow the arrows across to Tree Island. Quiet as you can.', 'We\'ll land on the beach and walk the rest — a canoe\'s easy to spot on open water.'] },
+      { do: 'paddle', to: 'islandLanding', r: 9, text: 'Paddle across to Tree Island' },
+      { do: 'canoeLand', who: 'cousin', stay: true },
+      { do: 'say', who: 'cousin', lines: ['The ship\'s round the point. Follow the shore — and keep low.'] },
+      { do: 'sneak', key: 'treeIsland', who: 'cousin', count: 7 },
+      { do: 'boardShip', text: 'Climb aboard the pirate ship — find {fisher}' },
+      { do: 'pickCage', who: 'fisher' },
+      { do: 'boarders', count: 7, text: 'Fight off the pirates coming over the rails' },
+      { do: 'say', who: 'fisher', lines: ['That\'s the lot of them! Back to the canoe — before more wake up!'] },
+      { do: 'canoeCrew', who: 'fisher', also: 'cousin' },
+      { do: 'say', who: 'cousin', lines: ['Home we go. Follow the arrows back to Brindlewick.'] },
+      { do: 'paddle', to: 'mooring', r: 6, text: 'Paddle home to Brindlewick' },
+      { do: 'canoeLand', who: 'fisher', also: 'cousin' },
+      { do: 'freeCaptive', who: 'fisher' },
+      {
+        do: 'talk', who: 'fisher', reach: 8, reward: 'The golden fish',
+        lines: [
+          ['fisher', 'Home. Solid ground under my feet. I never thought I\'d see Brindlewick again.'],
+          ['cousin', 'You owe {name} for this, cousin. We both do.'],
+          ['fisher', 'I know it. {name} — here. The golden fish. I grabbed her back off their captain\'s table on the way out.'],
+          ['fisher', 'She\'s yours. Grandad would\'ve wanted her to go to whoever earned her.'],
+          ['fisher', 'And when those bandits come for the town at night — I\'ll be out there with you and the sheriff, bow in hand. Count on it.'],
+        ],
+        choices: [{ label: 'Thank you' }],
+      },
+      {
+        do: 'giveGoods', who: 'fisher', good: 'goldenFish', count: 1,
+        text: '{fisher} gave you the golden fish.',
+        popup: { icon: '🐠', title: 'The golden fish', sub: 'Golden as the sun' },
+      },
+      { do: 'defender', who: 'fisher' },
+      { do: 'pay', from: 'fisher', coins: 0, memory: 'The rescue from the pirates', say: 'I\'ll be ready when the bandits come.' },
+      { do: 'release', who: 'cousin' },
+      { do: 'release', who: 'fisher' },
     ],
   },
 ];

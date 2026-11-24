@@ -12,7 +12,9 @@
 //   - the BEATS (src/town/beats/ — people: seek, talk; goal: goal, unless, banner; cart: cart,
 //     unload, lockCart, board, alight, drive; scene: actor, bomb, actorLeave; ambush; rewards: pay,
 //     release; craft: bring, build; sea: canoeCrew, paddle, fishHere, ship, pirates, pilotHome,
-//     canoeLand) — each a small piece any job can use, given this file's world W (a guide leading
+//     canoeLand; dive: needItem, potion, diveOut, diveLead, diveFish, surface, pirateBombs,
+//     chaseShip, feed; rescue: islandPlan, giveItem, night, pirateMoor, sneak, boardShip, pickCage,
+//     boarders, freeCaptive, giveGoods, defender) — each a small piece any job can use, given this file's world W (a guide leading
 //     the way to a goal, the player walked along: townGuide.js); plus the runner's own `wait` and,
 //     on any beat, `talks` (talk to someone whenever — openTalk) and `entry`
 //   - the hooks Town calls: tracker line (questEntry), markers (questMarkers), acts, the button to
@@ -74,6 +76,8 @@ const WORDS = {
 const SEEK_NEAR = 40;         // m — a waiting giver this close goes before the queue's first
 const SEEK_FAR = 200;         // m — no further off than this (another island, far out at sea)
 const HOME_RADIUS = 165;      // m from the island town's middle: past it the player's off the island
+const OFF_GRID_DIST = 6;      // m from the nearest walkable cell: off the town's ground (straight there)
+const AWAY_CANOE_DIST = 60;   // m from its mooring a canoe left at a job's end is put back there
 const ATTACK_DIST = 25;       // m — a fighter after the player this close: nobody comes up meanwhile
 // The first day is a branch of its own, before all the others (quests/firstDay.js)
 const FIRST_BRANCH = { id: 'firstDay', title: 'First day', jobs: FIRST_DAY };
@@ -89,15 +93,37 @@ export function installTownQuests(T, ctx) {
   // the same fisher shows the player fishing then cooking — else the nearest)
   const lastCast = {};
   const usable = (x) => x?.alive && !x.fighter && !x.def.outlaw && x.jailedUntil <= T.simT && !x.captive;
+  // Someone the pirates took (flags.taken — capture) of that role, still alive
+  const takenOf = (role) => (flags.taken ?? []).map((id) => T.npcById(id)).find((x) => x?.alive && x.role === role) ?? null;
   const roleNpc = (q, role) => {
     const keep = q?.cast?.[role] != null ? T.npcById(q.cast[role]) : null;
     if (keep?.alive) return keep;
+    // (one of the role taken by the pirates: they're the one a job means — the fisher's rescue)
+    const taken = q ? takenOf(role) : null;
+    if (taken) { (q.cast ??= {})[role] = taken.id; return taken; }
+    // (a cousin: another of the role of someone taken — another fisher — else a townsperson)
+    if (role === 'cousin') return cousinFor(q);
     const p = T.playerPos();
     const last = lastCast[role] != null ? T.npcById(lastCast[role]) : null;
     const n = usable(last) && last.role === role ? last
       : T.npcs.filter((x) => usable(x) && x.role === role)
         .sort((a, b) => dist2(a.x, a.z, p.x, p.z) - dist2(b.x, b.z, p.x, p.z))[0] ?? null;
     if (n && q) { (q.cast ??= {})[role] = n.id; lastCast[role] = n.id; }
+    return n;
+  };
+  const COUSIN_ROLES = ['fisher', 'townsfolk', 'drifter', 'farmer', 'woodcutter'];
+  const cousinFor = (q) => {
+    const p = T.playerPos();
+    const taken = new Set(flags.taken ?? []);
+    const not = new Set([...taken, ...Object.entries(q?.cast ?? {}).filter(([k]) => k !== 'cousin').map(([, id]) => id)]);
+    const last = lastCast.cousin != null ? T.npcById(lastCast.cousin) : null;
+    let n = usable(last) && !not.has(last.id) ? last : null;
+    for (const role of COUSIN_ROLES) {
+      if (n) break;
+      n = T.npcs.filter((x) => usable(x) && x.role === role && !not.has(x.id) && !x.def.hermit)
+        .sort((a, b) => dist2(a.x, a.z, p.x, p.z) - dist2(b.x, b.z, p.x, p.z))[0] ?? null;
+    }
+    if (n && q) { (q.cast ??= {}).cousin = n.id; lastCast.cousin = n.id; }
     return n;
   };
   const roleGone = (role) => !T.npcs.some((x) => x.alive && x.role === role);
@@ -147,13 +173,23 @@ export function installTownQuests(T, ctx) {
     }
   };
 
+  // (a spot well off the town's walkable grid: no nav path to or from it — rooms are on it)
+  const offGrid = (x, z) => {
+    if (T.rooms?.roomAt(x, z)) return false;
+    const nav = T.layout.nav;
+    if (nav.indexAt(x, z) < 0) return true; // (outside the grid altogether — Tree Island)
+    const i = nav.nearestWalkable(x, z);
+    return i < 0 || dist2(nav.cellX(i), nav.cellZ(i), x, z) > OFF_GRID_DIST;
+  };
   // Walking a cast member somewhere: the nav path, else (no walk joins it — the wizard's place)
   // straight there
   const go = (n, x, z, dt, run = false) => {
     const speed = (run ? RUN_SPEED : WALK_SPEED * 1.4) * (n.speedScale ?? 1);
     const t = n.qmode;
     if (!n.path || n.pathI >= n.path.length || T.simT > (t.replanAt ?? 0) || dist2(x, z, t.tx ?? 1e9, t.tz ?? 1e9) > 1.5) {
-      T.planPath(n, x, z);
+      // (off the town's ground — another island, a ship's deck, the water: straight there)
+      if (offGrid(n.x, n.z) || offGrid(x, z)) n.path = null;
+      else T.planPath(n, x, z);
       t.tx = x;
       t.tz = z;
       t.replanAt = T.simT + 1.5;
@@ -273,6 +309,9 @@ export function installTownQuests(T, ctx) {
     // (the fisher's dive: where the canoe stops, the spots under water — { x, y, z })
     if (name === 'dive' || name === 'diveA' || name === 'diveB') return T.seaPlace?.(name) ?? null;
     if (name === 'mooring') return T.canoePose?.()?.home ?? pl.fishSpot;
+    // (another island's coast — townPirates.js' island plan: the beach, the water off it, the
+    // moored ship and the shore by it)
+    if (['islandSea', 'islandLanding', 'shipShore', 'ship'].includes(name)) return T.islandPlace?.(name) ?? null;
     return pl[name] ?? null;
   };
   // The cart, out on the ground, and how far it is from a spot
@@ -555,10 +594,15 @@ export function installTownQuests(T, ctx) {
       // (in the water — townDiver.js: at the surface or under it, sent somewhere by the job)
       case 'swim': return T.diverFrame(n, dt) || true;
       // (taken by the pirates: out of the world — hidden, held where they were put)
-      case 'captive': n.moving = false; n.path = null; return true;
+      // (at: held there — the cage on the pirates' deck — facing the player)
+      case 'captive':
+        if (m.at) { n.x = m.at.x; n.z = m.at.z; T.faceToward(n, p.x, p.z, dt); }
+        n.moving = false;
+        n.path = null;
+        return true;
       case 'canoe': {
         // (kneeling in the canoe's bow — carried with it)
-        const sp = T.canoeSeat?.();
+        const sp = n.seat?.() ?? T.canoeSeat?.();
         if (sp) { n.x = sp.pos.x; n.z = sp.pos.z; }
         n.moving = false;
         n.path = null;
@@ -617,6 +661,11 @@ export function installTownQuests(T, ctx) {
       T.questAir = false;
       ctx.dive?.clearQuestFish();
       if (T.canoeHasPassenger?.()) { T.canoePassenger(null); if (!T.inCanoe?.()) T.moorCanoe?.(); }
+      // (left off another island — the fisher's rescue: back at its mooring)
+      const cp = T.canoePose?.();
+      if (cp?.home && !T.inCanoe?.() && dist2(cp.x, cp.z, cp.home.x, cp.home.z) > AWAY_CANOE_DIST) T.moorCanoe?.();
+      // (the pirates' prisoner let out mid-rescue: theirs again — hidden away)
+      for (const id of flags.taken ?? []) { const n = T.npcById(id); if (n?.alive && !n.hidden) capture(n); }
     }
     for (const id of Object.values(q?.cast ?? {})) {
       const n = T.npcById(id);
@@ -636,6 +685,12 @@ export function installTownQuests(T, ctx) {
         const fs = P().fishSpot;
         if (n.qmode.kind === 'canoe' && fs) { n.x = fs.x; n.z = fs.z; n.path = null; }
       }
+      // (off the island — another island, a ship's deck: back by the fishing spot)
+      if (Math.hypot(n.x, n.z) > HOME_RADIUS) {
+        n.seat = null;
+        const fs = P().fishSpot;
+        if (fs) { n.x = fs.x; n.z = fs.z; n.path = null; }
+      }
       // (the wizard: home once the player's away — no walk joins his mountain to town)
       if (n.def.hermit) { control(n, { kind: 'linger', until: T.simT, ax: n.x, az: n.z }); sendHome(n); }
       else release(n);
@@ -647,7 +702,7 @@ export function installTownQuests(T, ctx) {
     T, ctx, P, THREE, roleNpc, roleGone, canTake, control, release, go, stand, fill, calm, isNight, npcMark, placeOf, cartAt,
     actors, spawnActor, actorSay, sayNow, sayLines, foes, liveFoes, clearFoes, seat, unseat, joinAllies, leaveAllies, questWave, stopQuestWave, sendHome, open, talker, tipTalk,
     guideBuys, goalHighlight, cartState, newLead, glbCharacterConfig, BANDIT_NAMES, firstName, pickOf, dist2,
-    mayApproach, make: (what, on) => makers[what]?.(on), capture: (n) => capture(n), hasItem, SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
+    mayApproach, make: (what, on) => makers[what]?.(on), capture: (n) => capture(n), free: (id, o) => free(id, o), takenOf, flags: () => flags, hasItem, SNOOZE_S, ALLY_HP, GUIDE_REACH, SEEK_STOP, SEEK_STUCK_S, BOARD_TIMEOUT_S, ACTOR_TIMEOUT_S, ACTOR_RUN,
     BOMB_THROW_AT_S, BOMB_AFTER_S, FOE_HEARTS, FOE_SPAWN_DIST, FOE_GEAR, FOE_COINS,
   };
   const BEATS = townBeats(W);
@@ -722,6 +777,8 @@ export function installTownQuests(T, ctx) {
     const b = br.runner.beat();
     // (a seek that `needs` something the player hasn't got yet — the fisher's bow: not till they have)
     if (b?.do === 'seek' && b.needs && !hasItem(b.needs)) return false;
+    // (one who only comes at night — the fisher's cousin: not by day)
+    if (b?.do === 'seek' && b.nightOnly && !isNight()) return false;
     return !!n && (!!b?.arrive || T.distToPlayer(n) < SEEK_FAR);
   };
   const updateBranches = () => {
@@ -768,12 +825,14 @@ export function installTownQuests(T, ctx) {
     n.path = null;
     if (!(flags.taken ?? []).includes(n.id)) flags.taken = [...(flags.taken ?? []), n.id];
   };
-  const free = (id) => {
+  // (keep: they stay in the job — where they are, its cast; else back by the fishing spot, to their day)
+  const free = (id, { keep = false } = {}) => {
     flags.taken = (flags.taken ?? []).filter((x) => x !== id);
     const n = T.npcById(id);
     if (!n) return;
     n.captive = false;
     n.hidden = false;
+    if (keep) { if (n.alive) control(n, 'stand'); return; }
     const fs = P().fishSpot;
     if (fs) { n.x = fs.x; n.z = fs.z; }
     release(n);
@@ -815,7 +874,8 @@ export function installTownQuests(T, ctx) {
     const br = focus();
     if (!br) {
       // (a giver waiting on something the player has to get first — the fisher's bow: say what)
-      const need = order.map(branchOf).find((b) => b && live(b) && b.runner.beat()?.do === 'seek' && b.runner.beat().needs && !hasItem(b.runner.beat().needs));
+      const waiting = (sb) => sb?.do === 'seek' && ((sb.needs && !hasItem(sb.needs)) || (sb.nightOnly && !isNight()));
+      const need = order.map(branchOf).find((b) => b && live(b) && waiting(b.runner.beat()));
       if (need) return { title: `${need.runner.quest().tag ?? 'Job'}: ${need.runner.quest().title}`, progress: need.runner.entry(), icon: '❗' };
       // (someone waiting to come up, but the player's out on the water / away)
       const why = busyReason();
@@ -936,6 +996,10 @@ export function installTownQuests(T, ctx) {
       const b = br.runner.beat();
       return (b?.songs ?? br.runner.quest()?.songs) !== false;
     }),
+    // (townsfolk a job's won over to fight beside the player in the night defense — the fisher
+    // rescued: flags.defenders — up, not in a job, jail or a fight)
+    questDefenders: () => (flags.defenders ?? []).map((id) => T.npcById(id))
+      .filter((n) => n?.alive && !n.fighter && !n.questing && !n.captive && n.jailedUntil <= T.simT && !n.def.outlaw),
     cartLoad: () => cartState.load,
     cartInUse: () => started && branches.some((br) => engaged(br) && !!br.runner.q()?.cast && Object.keys(br.runner.q().cast).length > 0),
     // (the sword / wand's camera auto-aim — townMode.js threats)
@@ -950,7 +1014,7 @@ export function installTownQuests(T, ctx) {
       return null;
     },
     // (dev console: town.debug().T.quests.jump('wizardSon') / .jump('canoe', 'do'))
-    quests: { jump, free, branches, order: () => [...order], turn: () => turn?.id ?? null, busyReason },
+    quests: { jump, free, capture: (n) => capture(n), branches, order: () => [...order], turn: () => turn?.id ?? null, busyReason },
     questDebug: () => ({ foes: foes.list, actors, cartLoad: cartState.load, started, turn: turn?.id ?? null, order: [...order], flags: { ...flags }, branches: branches.map((b) => ({ id: b.id, started: b.started, state: stateOf(b), live: live(b), pending: b.started && pending(b), engaged: engaged(b) })) }),
   });
 }
