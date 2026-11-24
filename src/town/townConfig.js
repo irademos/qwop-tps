@@ -145,7 +145,7 @@ export const TREE_STUMP_S = 90;             // s the stump stands before a sapli
 export const TREE_GROW_S = 150;             // …and grows back into the tree
 export const CHOP_REACH = 0.45;             // m from the sword tip to the trunk's bark
 export const CROP_REGROW_S = 70;            // s until a picked crop is back
-export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
+export const PICK_DIST = 1.9;               // m — 🌾 Pick near a ripe crop (the field is solid: its middle row from beside it)
 // The wizard's stall (townStalls.js 'wizard', the wizard townsperson behind it): out in the woods
 export const WIZARD_STALL_DIST = [30, 75];  // m from the middle of town
 export const CABIN_RE = /(^|\/)cabin\.glb$/i;    // the wizard's cabin up the mountain (townLayout.js)

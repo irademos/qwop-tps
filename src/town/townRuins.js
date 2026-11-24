@@ -138,7 +138,7 @@ export function installTownRuins(T, ctx) {
   // enemies): the market stalls + the wizard's, the ruins' heaps, the parked cart (townCart.js) and the plots' planter boxes (townFarming.js)
   const refreshObstacles = () => {
     if (!T.layout) return;
-    ctx.setPropObstacles?.([...T.stalls.obstacleBoxes(), ...ruinObstacles(), ...(T.cartObstacles?.() ?? []), ...(T.planterObstacles?.() ?? [])]);
+    ctx.setPropObstacles?.([...T.stalls.obstacleBoxes(), ...ruinObstacles(), ...(T.cartObstacles?.() ?? []), ...(T.planterObstacles?.() ?? []), ...(T.cageObstacles?.() ?? [])]);
   };
 
   Object.assign(T, { ruinBuilding, rebuildBuilding, isRuined, updateRuins, ruinsSnapshot, restoreRuins, handleRuinNet, resetRuins, ruinObstacles, refreshObstacles });

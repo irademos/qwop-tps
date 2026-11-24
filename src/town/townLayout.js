@@ -14,6 +14,8 @@ import { createPlanterBox, planterSoilY } from '../items/planterBox.js';
 
 const VEG_CROP_LENGTH = 0.24; // m, the longest side of a field crop's vegetable
 const FIELD_PLANTER_HEIGHT = 0.36; // m, the fields' planter boxes
+const FIELD_BOX_LEN = 3.6;         // m, a field's planter box: long along x…
+const FIELD_BOX_W = 0.62;          // m …and wide (three rows, 1.1 m apart along z)
 import {
   BUILDING_RE, CABIN_RE, CAMP_CHASE_DIST, CAMP_DIST, DRIVE_BOUNDS, DOOR_ENTER_DIST, EXTRA_HOUSES, HOUSE_DOORS, HOUSE_DOOR_MAX_OUT, HOUSE_DOOR_OUT, HOUSE_DOOR_STEP, NAV_BOUNDS, NAV_CELL, NAV_START, PLOT_COUNT, STUMP_RE, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, WIZARD_CABIN_STALL, WIZARD_HUT_DIST, WIZARD_STALL_DIST, dist2,
@@ -509,11 +511,15 @@ export function installTownLayout(T, ctx) {
     const soilY = planterSoilY(FIELD_PLANTER_HEIGHT);
     for (const [fieldNo, f] of places.fields.entries()) {
       f.crops = []; // { mesh, x, z, ripe, growAt } — picked by the player (townMode pick)
+      // (the three boxes as one solid block — the gaps between them are too narrow to walk:
+      // townFarming.js planterObstacles)
+      f.solid = { hx: FIELD_BOX_LEN / 2, hz: 1.1 + FIELD_BOX_W / 2, top: -Infinity, h: FIELD_PLANTER_HEIGHT };
       for (let r = -1; r <= 1; r++) {
         const rz = f.z + r * 1.1;
         const gy = groundAt(f.x, rz);
-        const box = createPlanterBox({ length: 3.6, width: 0.62, height: FIELD_PLANTER_HEIGHT });
+        const box = createPlanterBox({ length: FIELD_BOX_LEN, width: FIELD_BOX_W, height: FIELD_PLANTER_HEIGHT });
         box.position.set(f.x, gy, rz);
+        f.solid.top = Math.max(f.solid.top, gy + FIELD_PLANTER_HEIGHT);
         group.add(box);
         for (let c = -2; c <= 2; c++) {
           const cx = f.x + c * 0.7;
