@@ -435,6 +435,8 @@ export function installTownFishing(T, ctx) {
     const reeled = ctx.takeReel() + screenReel + (keyReel ? FISH_KEY_REEL * TURN * dt : 0);
     screenReel = 0;
     const turns = reeled / TURN;
+    // (another line on the reel — an arrow on a string in a fish under water, townDive.js)
+    if (T.extReel && !T.fishing && turns > 0) T.extReel.onTurns(turns);
 
     const gyro = ctx.hasGyro() && ctx.isRodEquipped();
     const gesture = gyro && !reelPhase() ? takeGesture(!!T.fishing) : null;
@@ -562,7 +564,7 @@ export function installTownFishing(T, ctx) {
   // { line: the line's out, cue, text (shown), hint (only once they've been getting it wrong) } or null
   const status = () => {
     const f = T.fishing;
-    if (!f) return null;
+    if (!f) return T.extReel ? { line: true, cue: 'reel', text: T.extReel.text?.() || 'Reel in!', hint: '' } : null;
     let cue = f.phase;
     let text = '';
     let hint = '';
@@ -647,10 +649,30 @@ export function installTownFishing(T, ctx) {
     meter.classList.add('hidden');
     reelEl.classList.add('hidden');
     document.body.classList.remove('town-reeling');
+    T.extReel = null;
     reelPointer = null;
     keyReel = false;
     dropBubbles();
   };
 
-  Object.assign(T, { fishActKey, fishingActs, fishingHud, hideFishingHud, loseFish, stopFishingRig, updateFishing });
+  // ── Another line on the reel: Town's dive (townDive.js) — an arrow on a string, stuck in a
+  // fish under water. setExtReel({ onTurns(turns), text() }) shows the reel (the on-screen one /
+  // R / the phone's) as for a worn-out fish and hands it the turns; null takes it away.
+  T.extReel = null;
+  const setExtReel = (reel) => { T.extReel = reel || null; refreshHud(); };
+  // A fish speared under water brought in (len: its length in m — koi 0.5 … 0.9)
+  const landDiveFish = (len) => {
+    const size = FISH_SIZES[len < 0.62 ? 0 : len < 0.78 ? 1 : 2];
+    const n = size.n;
+    ctx.playSfx?.('splash');
+    const got = T.gain('fish', n);
+    const kind = size.kinds[Math.floor(Math.random() * size.kinds.length)];
+    const cm = Math.round(len * 100 * rand(0.95, 1.05));
+    say(`Speared ${size.label}! ${got > 1 ? `+${got} fish` : got ? '+1 fish' : 'No room in your bag'}${got ? ` (${T.goods.fish})` : ''}`);
+    if (got > 0) T.popup?.({ icon: '🐟', title: kind, sub: `${cm} cm · +${got} fish` });
+    T.questNote('fish');
+    return got;
+  };
+
+  Object.assign(T, { setExtReel, landDiveFish, fishActKey, fishingActs, fishingHud, hideFishingHud, loseFish, stopFishingRig, updateFishing });
 }

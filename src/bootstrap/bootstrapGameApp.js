@@ -875,6 +875,7 @@ async function initCore(runtimeContext) {
   // Town's flying broom being ridden (src/items/broom.js; created with the town)
   let _broomRide = null;
   let _townDive = null;   // Town: diving under water (src/town/townDive.js)
+  let _diveBowShown = false; // (body.dive-bow — the Bow button under water)
   // Asks for a gyro recalibration when a gyro item comes out (set further down, once the
   // calibration popup is in — _equipByPlayer / the broom)
   let _gyroItemCalibPrompt = null;
@@ -5539,7 +5540,8 @@ async function initCore(runtimeContext) {
     return { group, dots, land, ringMat };
   })();
   const _canAimBomb = () => _canThrowBomb() && !!playerControls?.enabled && !_gamePaused && !_classicMode
-    && !playerRoll && !_bowDraw.active && !isPlayerFrozen() && !bossTalk.isOpen() && !_isSwordCalibPromptOpen();
+    && !playerRoll && !_bowDraw.active && !isPlayerFrozen() && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
+    && !_townDive?.isUnder();
   // Where it lands for the aim now (eased) → _bombAim.target; draws the arc
   const _updateBombAim = (dt) => {
     const view = _bombAimView;
@@ -7181,7 +7183,9 @@ async function initCore(runtimeContext) {
   const _updateWeaponGyroAim = (dt) => {
     const g = window.phoneSwordGyro;
     // (also a bomb being aimed: its turn aims it, its tilt — read by _updateBombAim — is how far)
-    const holding = !!playerControls && (pistol?.holder === playerControls || shield?.holder === playerControls || _bombAim.active);
+    // (not under water: Town's dive aims the bow itself — townDive.js)
+    const holding = !!playerControls && (pistol?.holder === playerControls || shield?.holder === playerControls || _bombAim.active)
+      && !_townDive?.isUnder();
     if (!holding || playerDead || !g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) {
       if (_weaponAim.active) _stopWeaponGyroAim();
       return;
@@ -7639,7 +7643,9 @@ async function initCore(runtimeContext) {
   const _canDrawBow = () => !!playerControls?.enabled && !playerDead && !_gamePaused && !_classicMode && !story?.isActive()
     && !_mpSwordOnly() && !(town?.inCanoe?.() && !town?.canoeArmed?.()) && _ownsBow() && !playerRoll && !playerBombThrow && !_bombAim.active
     && !isPlayerFrozen() && !_wandShieldHold && !_bubbleHandOut() && !bossTalk.isOpen() && !_isSwordCalibPromptOpen()
-    && !(_matchLoadout && !matchMode?.isFighting());
+    && !(_matchLoadout && !matchMode?.isFighting())
+    // (under water: one arrow on its string at a time — townDive.js)
+    && !_townDive?.lineOut();
   // Back to what was in hand before the draw (nothing: empty hands — Town)
   const _bowPutAway = () => {
     _bowDraw.restoreAt = 0;
@@ -7732,7 +7738,9 @@ async function initCore(runtimeContext) {
       const aim = playerControls.getBowAimPoint?.(_bowAimPoint);
       const tip = held ? bowArrowTipWorld(held, pistol.draw, _bowTip) : null;
       const dir = aim && tip ? _bowDir.subVectors(aim, tip) : null;
-      if (dir && dir.lengthSq() > 1e-4 && playerControls.fireArrow(power, tip, dir.normalize())) {
+      // (under water — Town's dive: an arrow on a string, for spearing fish; none used up)
+      const diving = !!_townDive?.isUnder();
+      if (dir && dir.lengthSq() > 1e-4 && (diving ? _townDive.shoot(tip, dir.normalize(), power) : playerControls.fireArrow(power, tip, dir.normalize()))) {
         pistol.nocked = false;
         audioManager?.playSynth?.('bowRelease', 0.6 + 0.4 * power);
         audioManager?.playSound('twang', { volume: 0.6 + 0.4 * power });
@@ -11658,6 +11666,27 @@ async function initCore(runtimeContext) {
     allowed: () => !!town?.isActive() && !playerDead && !town.isIndoors() && !_broomRide?.isRiding(),
     putAway: () => { if (_heldWeaponId()) _putWeaponsAway(); },
     getNight: () => town?.nightLevel?.() ?? 0,
+    // The bow under water: drawn (or just loosed) — the dive treads and aims it; the arrow on a
+    // string (from the bow while it's held, else the hand); the catch on the fishing reel
+    bowOut: () => !!(_bowDraw.active || _bowDraw.restoreAt),
+    lineStart: (out) => {
+      const held = pistol?.holder === playerControls ? pistol.heldMesh : null;
+      if (held) { bowArrowTipWorld(held, 0, out); return true; }
+      const glb = playerModel?.userData?.qwopRig?.glbCharacter;
+      if (glb?.getPalmWorldPosition) { glb.getPalmWorldPosition('right', out); return true; }
+      return false;
+    },
+    createArrow: () => createArrowMesh(),
+    setReel: (reel) => town?.setDiveReel?.(reel),
+    onSpear: (at) => {
+      audioManager.playSound?.('splash', { volume: 0.35, at });
+      _phoneBuzz('hit');
+    },
+    onCatch: (len) => {
+      town?.landDiveFish?.(len);
+      _phoneBuzz('kill');
+    },
+    onFree: () => town?.feed?.('It shook free of the arrow.'),
     onChange: () => { playerControls?.refreshActionButtons?.(); _phoneSwordStatusNow?.(); },
     onDive: (c) => {
       const level = _activeMap?.water?.(c.x, c.z);
@@ -12188,6 +12217,11 @@ async function initCore(runtimeContext) {
     // (the camera moved along with where the body ended up this frame — no lag at speed)
     playerControls.followPlayerModel?.();
     _townDive?.afterControls(frameDelta, camera);
+    // (under water with a bow: its button stays — the arrow on a string spears fish; styles.css)
+    {
+      const diveBow = !!_townDive?.isUnder() && _ownsBow();
+      if (diveBow !== _diveBowShown) { _diveBowShown = diveBow; document.body.classList.toggle('dive-bow', diveBow); playerControls.layoutMobileActionButtons?.(); }
+    }
     updateBloodEffects(frameDelta);
     updateBulletImpacts(frameDelta);
     updateExplosionEffects(frameDelta);

@@ -154,8 +154,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const swimClip = glbCharacterConfig.swimClip;
     const treadClip = glbCharacterConfig.treadClip;
     const swimPose = glb._action?.pose === swimClip || glb._action?.pose === treadClip;
-    const wantSwim = options.swimming === 'swim' ? swimClip : options.swimming === 'tread' ? treadClip : null;
-    if (wantSwim && !glb.isDead && (!glb._action || swimPose)) glb.playPose(wantSwim, { fade: 0.35 });
+    // ('treadAim': treading under water with the bow drawn — Town's dive — the arms on the IK)
+    const wantSwim = options.swimming === 'swim' ? swimClip
+      : options.swimming === 'tread' || options.swimming === 'treadAim' ? treadClip : null;
+    if (wantSwim && !glb.isDead && (!glb._action || swimPose)) glb.playPose(wantSwim, { fade: 0.35, armIK: options.swimming === 'treadAim' });
     else if (!wantSwim && swimPose) glb.endPose();
   }
 

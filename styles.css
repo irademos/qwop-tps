@@ -5666,9 +5666,11 @@ body.story-cut .story-hud > :not(.story-fade):not(.story-flash):not(.town-talk) 
   border-color: #fff !important;
   transform: scale(1.12);
 }
-/* Under water: nothing to hold, throw or jump — Dive and the camera only */
+/* Under water: nothing to hold, throw or jump — Dive and the camera only, and the bow (its
+   arrow on a string spears fish — townDive.js; `dive-bow` = a bow owned) without its bomb part */
 body.player-diving #ps-weapon-btn-1,
-body.player-diving #ps-bow-btn,
+body.player-diving:not(.dive-bow) #ps-bow-btn,
+body.player-diving #ps-bow-btn .ps-bomb-part,
 body.player-diving #ps-shield-btn,
 body.player-diving #ps-broom-btn,
 body.player-diving #jump-button {
