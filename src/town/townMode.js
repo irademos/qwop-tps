@@ -228,7 +228,8 @@ export function createTownMode(ctx) {
     const b = el('button', 'town-good');
     b.type = 'button';
     b.disabled = !GOODS[g].food;
-    b.title = GOODS[g].food ? `Eat ${GOODS[g].label} (+${GOODS[g].heal} health)` : GOODS[g].label;
+    b.title = GOODS[g].elixir ? `Drink ${GOODS[g].label} (full health, swim & dive fast)`
+      : GOODS[g].food ? `Eat ${GOODS[g].label} (+${GOODS[g].heal} health)` : GOODS[g].label;
     b.addEventListener('click', () => { if (T.active) T.eat(g); });
     goodEls[g] = b;
     goodsEl.append(b);
@@ -881,6 +882,7 @@ export function createTownMode(ctx) {
     T.inRoom = null;
     jailChip.classList.add('hidden');
     campChip.classList.add('hidden');
+    T.endElixir();
     Object.assign(campWatch, { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 });
     law.stars = 0;
     law.peak = 0;
@@ -959,6 +961,7 @@ export function createTownMode(ctx) {
     T.updateOctopus(dt);
     T.updateDrive(dt);
     T.updateCooking(dt);
+    T.updateElixir(dt);
     T.updateFarm(dt);
     T.updateTrees(dt);
     T.updateChickens(dt);
@@ -1111,7 +1114,7 @@ export function createTownMode(ctx) {
     const bag = {
       max: BAG_MAX,
       goods: GOOD_IDS.filter((g) => !shownWhenHeld(g) || goods[g] > 0).map((g) => ({
-        id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, n: goods[g] || 0, food: !!GOODS[g].food, heal: GOODS[g].heal ?? 0,
+        id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, n: goods[g] || 0, food: !!GOODS[g].food, elixir: !!GOODS[g].elixir, heal: GOODS[g].heal ?? 0,
         good: true, cooked: !!GOODS[g].cooked, price: GOODS[g].price,
       })),
       // (not goods — they don't count toward BAG_MAX — but carried all the same; shown once there are some)
@@ -1140,6 +1143,8 @@ export function createTownMode(ctx) {
     landDiveFish: (len, info) => (T.active && T.ready ? T.landDiveFish(len, info) : 0),
     // (a job's potion — the fisher's dive: air under water for nothing, the swim bar held — beats/dive.js)
     questAir: () => !!(T.active && T.ready && T.questAir),
+    // (the golden elixir drunk — townTrade.js: fast swimming / diving, no tiring, the gold glow)
+    elixirActive: () => !!(T.active && T.ready && T.elixirLeft > 0),
     feed: (text) => { if (T.active) T.feedLine(text); },
     getWeaponTargets: T.getWeaponTargets,
     // (a wave's swordsman going for an ally beside the player instead — townAllies.js)

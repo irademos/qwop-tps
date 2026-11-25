@@ -25,12 +25,17 @@ export const GOODS = {
   // (the fisher's golden fish — given to the player after his rescue, quests/jobs.js; one of a
   // kind: shown once held, never food, worth a fortune)
   goldenFish: { label: 'Golden Fish', emoji: '🐠', price: 150, target: 1, wild: true },
+  // (the golden fish cooked at the campfire — townCooking.js: drunk, it fills the player's health
+  // and for ELIXIR_S they glow gold and swim / dive fast without tiring — T.elixirLeft, townTrade.js
+  // + the swim / dive in bootstrapGameApp.js. elixir: drunk even at full health, never sold to townsfolk)
+  goldenElixir: { label: 'Golden Elixir', emoji: '🌟', price: 250, target: 1, food: true, heal: 99, cooked: true, elixir: true },
 };
+export const ELIXIR_S = 300;           // s the golden elixir lasts (its speed: ELIXIR_SWIM_SCALE in bootstrapGameApp.js)
 export const GOOD_IDS = Object.keys(GOODS);
 export const RAW_IDS = GOOD_IDS.filter((g) => !GOODS[g].cooked && !GOODS[g].wild);
 // (cooked / wild goods: shown in the goods pill, the bag, the chest, the cart only once there are some)
 export const shownWhenHeld = (g) => !!(GOODS[g].cooked || GOODS[g].wild);
-export const FOOD_IDS = GOOD_IDS.filter((g) => GOODS[g].food);
+export const FOOD_IDS = GOOD_IDS.filter((g) => GOODS[g].food && !GOODS[g].elixir);
 // Who sells what: their own good (made at work — townConfig.js PRODUCE) and the gear of their
 // trade (SHOP_GEAR ids — always in stock: they make their own)
 export const SELLER_GOOD = { fisher: 'fish', farmer: 'crops', woodcutter: 'wood' };

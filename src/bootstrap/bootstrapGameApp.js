@@ -11412,9 +11412,59 @@ async function initCore(runtimeContext) {
     clearTimeout(_swimLieTimer);
     _swimLieTimer = setTimeout(_swimGetUp, SWIM_ASHORE_LIE_MS);
   };
+  // ── Town's golden elixir (the golden fish cooked, then drunk — townTrade.js; town.elixirActive()):
+  // while it lasts the player swims and dives ELIXIR_SWIM_SCALE × as fast, the swim bar never
+  // drains, and they glow gold — a light that goes with them and a soft halo (made on the first
+  // drink and kept: the light's only dimmed, so the scene's light count never changes again) ──
+  const ELIXIR_SWIM_SCALE = 2.6;   // × swimming / diving speed while it lasts (its length: ELIXIR_S, townEconomy.js)
+  const _elixirOn = () => !!town?.elixirActive?.();
+  let _elixirGlow = null;   // { light, halo, k } once made
+  let _elixirWas = false;   // (body.player-elixir: the swim bar gold — styles.css)
+  const _elixirHaloTexture = () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,224,120,0.85)');
+    grad.addColorStop(0.45, 'rgba(255,190,40,0.35)');
+    grad.addColorStop(1, 'rgba(255,170,0,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+  };
+  const _updateElixir = (dt, p) => {
+    const on = _elixirOn() && !playerDead;
+    playerControls.swimSpeedBoost = on ? ELIXIR_SWIM_SCALE : 1;
+    if (on !== _elixirWas) { _elixirWas = on; document.body.classList.toggle('player-elixir', on); }
+    if (!on && !_elixirGlow) return;
+    if (!_elixirGlow) {
+      const light = new THREE.PointLight(0xffc640, 0, 7, 1.4);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: _elixirHaloTexture(), color: 0xffd56a, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, opacity: 0,
+      }));
+      halo.renderOrder = 9;
+      scene.add(light, halo);
+      _elixirGlow = { light, halo, k: 0 };
+    }
+    const g = _elixirGlow;
+    g.k += ((on ? 1 : 0) - g.k) * Math.min(1, (dt || 0) * 3);
+    const pulse = 0.85 + Math.sin(performance.now() * 0.004) * 0.15;
+    const under = !!_townDive?.isUnder();
+    if (under) _townDive.headPos(_elixirHead);
+    else _elixirHead.set(p.x, p.y + 1.0 * (glbCharacterConfig.heightScaleByUrl[playerModel?.userData?.qwopRig?.characterUrl] ?? 1), p.z);
+    g.light.position.copy(_elixirHead);
+    g.light.intensity = g.k * 5 * pulse;
+    g.halo.position.copy(_elixirHead);
+    g.halo.scale.setScalar(2.4 * pulse);
+    g.halo.material.opacity = g.k * 0.55;
+    g.halo.visible = g.k > 0.01;
+  };
+  const _elixirHead = new THREE.Vector3();
   const _updateSwim = (dt) => {
     const p = playerModel?.position;
     if (!p || !playerControls) return;
+    _updateElixir(dt, p);
     // (the clips are fetched the first time the player wades in)
     if (!_swimClipsLoaded && _waterDepthAt(p.x, p.z) > 0.15) {
       _swimClipsLoaded = true;
@@ -11446,7 +11496,8 @@ async function initCore(runtimeContext) {
     if (swimming && !diving) _swimSplashes(dt, !_swimWas);
     _swimSplash.update(dt);
     _swimWas = swimming;
-    if (swimming && !_swimDrown && !(diving && _diveAirOn()) && !_questAir()) {
+    if (swimming && _elixirOn()) _swimEnergy = 1;   // (the golden elixir: never tires)
+    else if (swimming && !_swimDrown && !(diving && _diveAirOn()) && !_questAir()) {
       _swimEnergy -= (dt / SWIM_ENERGY_S) * (diving ? SWIM_DIVE_DRAIN : playerControls.swimMoving ? 1 : SWIM_TREAD_DRAIN);
       if (_swimEnergy <= 0) _swimOutOfBreath();
     }
@@ -11995,6 +12046,8 @@ async function initCore(runtimeContext) {
     allowed: () => !!town?.isActive() && !playerDead && !town.isIndoors() && !_broomRide?.isRiding(),
     putAway: () => { if (_heldWeaponId()) _putWeaponsAway(); },
     getNight: () => town?.nightLevel?.() ?? 0,
+    // (the golden elixir: diving ELIXIR_SWIM_SCALE × as fast)
+    speedScale: () => (_elixirOn() ? ELIXIR_SWIM_SCALE : 1),
     // The bow under water: drawn (or just loosed) — the dive treads and aims it; the arrow on a
     // string (from the bow while it's held, else the hand); the catch on the fishing reel
     bowOut: () => !!(_bowDraw.active || _bowDraw.restoreAt),

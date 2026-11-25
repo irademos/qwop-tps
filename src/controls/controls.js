@@ -205,6 +205,8 @@ export class PlayerControls {
     this.swimSinkExtra = 0;
     this.isSwimming = false;
     this.swimMoving = false;
+    // × swimming speed on top of SWIM_CONFIG.speedScale (Town's golden elixir — bootstrapGameApp.js)
+    this.swimSpeedBoost = 1;
     this._swimYaw = null;
     // Climbing something that moves (the giant on Tree Island — src/characters/giant.js): a hook
     // (ctrl, movement, dt) → null (not climbing) or { x, y, z, yaw, moving } — where the player
@@ -1830,7 +1832,7 @@ export class PlayerControls {
         ? this.deltaSeconds
         : 0.016;
       const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05 * (this.moveSpeedScale ?? 1)
-        * (this.isSwimming ? SWIM_CONFIG.speedScale : 1);
+        * (this.isSwimming ? SWIM_CONFIG.speedScale * (this.swimSpeedBoost || 1) : 1);
 
       // Auto-walk counts as full forward input along its direction for wall climbing
       const autoMove = this.holdStill || this.swimLocked ? null : this._autoMove;

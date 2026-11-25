@@ -8,7 +8,7 @@
 // fire (walking off stops it), like fishing.
 
 import * as THREE from 'three';
-import { GOODS } from './townEconomy.js';
+import { ELIXIR_S, GOODS } from './townEconomy.js';
 import { dist2, el } from './townConfig.js';
 
 // from: goods it takes; secs: how long it cooks
@@ -17,6 +17,7 @@ export const RECIPES = [
   { id: 'stew', from: { crops: 2 }, secs: 4 },
   { id: 'roastChicken', from: { chicken: 1 }, secs: 4 },
   { id: 'friedEgg', from: { egg: 1 }, secs: 2 },
+  { id: 'goldenElixir', from: { goldenFish: 1 }, secs: 6 },
 ];
 const COOK_DIST = 2.6;            // m from the fire for the Cook button
 const COOK_CANCEL_DIST = 0.8;     // m walked off: cooking stops
@@ -209,8 +210,13 @@ export function installTownCooking(T, ctx) {
     T.goods[r.id] += 1;
     T.renderGoods();
     const G = GOODS[r.id];
-    T.feedLine(`${G.label}! Heals +${G.heal} health — and sells for more than it's made of.`);
-    T.popup?.({ icon: G.emoji, title: G.label, sub: `+${G.heal} health` });
+    if (G.elixir) {
+      T.feedLine(`${G.label}! Drink it: full health, and you swim and dive fast without tiring for ${Math.round(ELIXIR_S / 60)} minutes.`);
+      T.popup?.({ icon: G.emoji, title: G.label, sub: 'Full health · swim & dive fast' });
+    } else {
+      T.feedLine(`${G.label}! Heals +${G.heal} health — and sells for more than it's made of.`);
+      T.popup?.({ icon: G.emoji, title: G.label, sub: `+${G.heal} health` });
+    }
     T.questNote('cook', { good: r.id });
   };
   // The fire's button: Cook (the list) when the player carries anything that cooks

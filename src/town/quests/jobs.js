@@ -511,7 +511,7 @@ const FISHER_JOBS = [
       {
         do: 'giveGoods', who: 'fisher', good: 'goldenFish', count: 1,
         text: '{fisher} gave you the golden fish.',
-        popup: { icon: '🐠', title: 'The golden fish', sub: 'Golden as the sun' },
+        popup: { icon: '🐠', title: 'The golden fish', sub: 'Cook it at the campfire for a golden elixir' },
       },
       { do: 'defender', who: 'fisher' },
       { do: 'pay', from: 'fisher', coins: 0, memory: 'The rescue from the pirates', say: 'I\'ll be ready when the bandits come.' },

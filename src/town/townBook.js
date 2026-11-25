@@ -495,7 +495,8 @@ export function installTownBook(T, ctx) {
       return;
     }
     const facts = [];
-    if (it.food) facts.push(`+${it.heal} health when eaten`);
+    if (it.elixir) facts.push('full health, then 5 minutes of fast swimming and diving that never tires — and a golden glow');
+    else if (it.food) facts.push(`+${it.heal} health when eaten`);
     if (it.good) facts.push(`worth 🪙 ${it.price}`);
     if (it.plant) facts.push('plant one on open ground in front of you');
     if (it.id === 'lockpick') facts.push('opens one locked door, then breaks');
@@ -509,7 +510,8 @@ export function installTownBook(T, ctx) {
       actions.append(b);
     };
     if (it.food) {
-      act('Eat', () => T.eat(it.id), { primary: true, disabled: full, title: full ? 'You\'re not hungry.' : '' });
+      if (it.elixir) act('Drink', () => T.eat(it.id), { primary: true });
+      else act('Eat', () => T.eat(it.id), { primary: true, disabled: full, title: full ? 'You\'re not hungry.' : '' });
     }
     if (it.plant) {
       act('Plant', () => T.plantSeed?.(), { primary: true, disabled: !canPlant, title: canPlant ? '' : (T.plantHint?.() ?? '') });
