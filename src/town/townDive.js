@@ -82,6 +82,12 @@ const FOG_FAR = 22;
 const DAY_COLOR = new THREE.Color(0x1f6f8b);
 const NIGHT_COLOR = new THREE.Color(0x05172a);
 const FISH_MAX = 2;
+// (swimming faster than SWIM_SPEED — Town's golden elixir: fish turn up ahead of the player, in
+// the way they're going, more of them and sooner — else they're left behind before they're seen)
+const FISH_FAST = 1.2;          // × SWIM_SPEED: this fast counts
+const FISH_FAST_MAX = 5;
+const FISH_AHEAD_SPREAD = 0.7;  // rad either side of the heading
+const FISH_AHEAD_LEAD_S = 0.8;  // s of swimming farther out than FISH_NEAR they turn up (in FISH_GONE_DIST)
 const FISH_EVERY_S = [3, 7];    // s between fish turning up (random in this range)
 const FISH_NEAR = [3.5, 7];       // m from the player they turn up
 const FISH_LIFE_S = [12, 22];
@@ -112,9 +118,17 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 /**
  * The underwater look: fog / background / tint while the camera's under the surface, fish and
- * bubbles while the player's under. update(dt, { camera, under, center, night }).
+ * bubbles while the player's under. update(dt, { camera, under, center, night, swimSpeed, heading }).
  */
-export function createUnderwater({ scene, getWaterLevel, getBottom }) {
+export function createUnderwater({ scene, getWaterLevel, getBottom: groundBottom }) {
+  // (off the map's ground — the open sea — the bottom's MAX_DEPTH down, as the dive takes it:
+  // else no fish turn up out there, and those that do take it for shallows)
+  const getBottom = (x, z) => {
+    const b = groundBottom(x, z);
+    if (Number.isFinite(b)) return b;
+    const level = getWaterLevel(x, z);
+    return Number.isFinite(level) ? level - MAX_DEPTH : b;
+  };
   // (set once, far off, so the materials' shaders compile with fog from the start)
   if (!scene.fog) scene.fog = new THREE.Fog(0x000000, 1e6, 2e6);
   const fog = scene.fog;
@@ -148,10 +162,10 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
   // ── Fish ──
   const fish = [];
   let fishWait = rand(1, 3);
-  const spawnFish = (center) => {
+  const spawnFish = (center, fast = 0, heading = 0) => {
     for (let tries = 0; tries < 8; tries++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = rand(FISH_NEAR[0], FISH_NEAR[1]);
+      const a = fast ? heading + rand(-FISH_AHEAD_SPREAD, FISH_AHEAD_SPREAD) : Math.random() * Math.PI * 2;
+      const r = rand(FISH_NEAR[0], FISH_NEAR[1]) + fast * FISH_AHEAD_LEAD_S;
       const x = center.x + Math.sin(a) * r, z = center.z + Math.cos(a) * r;
       const level = getWaterLevel(x, z);
       const bottom = getBottom(x, z);
@@ -186,11 +200,13 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
     f.holder.removeFromParent();
     f.holder.traverse((o) => { if (o.isMesh) o.geometry?.dispose?.(); });
   };
-  const updateFish = (dt, center, under) => {
+  const updateFish = (dt, center, under, swimSpeed = 0, heading = 0) => {
     if (under && center) {
-      fishWait -= dt;
-      if (fishWait <= 0 && fish.filter((f) => !f.quest).length < FISH_MAX) {
-        spawnFish(center);
+      // (fast: m/s, else 0 — FISH_FAST)
+      const fast = swimSpeed > SWIM_SPEED * FISH_FAST ? swimSpeed : 0;
+      fishWait -= dt * (fast ? fast / SWIM_SPEED : 1);
+      if (fishWait <= 0 && fish.filter((f) => !f.quest).length < (fast ? FISH_FAST_MAX : FISH_MAX)) {
+        spawnFish(center, fast, heading);
         fishWait = rand(FISH_EVERY_S[0], FISH_EVERY_S[1]);
       }
     }
@@ -300,11 +316,11 @@ export function createUnderwater({ scene, getWaterLevel, getBottom }) {
     },
     /** (dev) a fish at x, y, z — townDive.debug().fishAt(…) */
     fishAt: (x, y, z, len = 0.7) => addFish(x, y, z, len, new THREE.Vector3(x, y, z - 1)),
-    update(dt, { camera, under, center, head, moving, night }) {
+    update(dt, { camera, under, center, head, moving, night, swimSpeed = 0, heading = 0 }) {
       const cp = camera?.position;
       const lev = cp ? getWaterLevel(cp.x, cp.z) : null;
       setCamUnder(!!under && Number.isFinite(lev) && cp.y < lev, night);
-      updateFish(dt, center, !!under);
+      updateFish(dt, center, !!under, swimSpeed, heading);
       updateBubbles(dt, !!under, head, moving);
     },
     clear() {
@@ -690,7 +706,7 @@ export function createTownDive(ctx) {
       head.set(center.x + Math.sin(ride.yaw) * Math.cos(aimPitch) * 0.45,
         center.y + Math.sin(aimPitch) * 0.45 + 0.1, center.z + Math.cos(ride.yaw) * Math.cos(aimPitch) * 0.45);
       if (under) updateShot(Math.min(Math.max(dt || 0, 0), 0.1));
-      look.update(dt, { camera, under, center: under ? center : null, head: under ? head : null, moving: speed > 0.35, night: ctx.getNight?.() ?? 0 });
+      look.update(dt, { camera, under, center: under ? center : null, head: under ? head : null, moving: speed > 0.35, night: ctx.getNight?.() ?? 0, swimSpeed: speed, heading: ride.yaw });
     },
     setHeld(on) {
       held = !!on;
