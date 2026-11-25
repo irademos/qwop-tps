@@ -3,11 +3,14 @@
 // talking needed): its crops are the player's to pick from then on (no theft), and the farmer
 // stops working it. Cheaper: a plot of land by the fields (`places.plots`, a signpost on each —
 // Buy this land, PLOT_PRICE), on which the player builds up to PLOT_PLANTERS planter boxes
-// (planter_box.glb — Build a planter box, PLANTER_WOOD wood each from the bag). Seeds come from
-// the farmers (SHOP_GEAR 'seeds', SELLER_GEAR → T.seeds) and are planted only in the player's own
-// planter boxes (Plant a seed — PLANTER_SLOTS spots in each, a little dirt pile on its soil); each
-// grows one veg in a town day (VEG_DRY_S), or in VEG_WET_S while its soil is wet, then Pick your
-// veg. The water: a hose's tap stands by each field / plot, shown only by land the player owns
+// (planter_box.glb — Build a planter box, PLANTER_WOOD wood each from the bag) — the same boxes,
+// rows and spots as a field's. Seeds come from the farmers (SHOP_GEAR 'seeds', SELLER_GEAR →
+// T.seeds) or drop from felled trees (T.dropSeeds — townTrees.js; walk over them) and are planted
+// only in the player's own planter boxes — on their land, or the spots of their own field once its
+// crops are picked (a bought field doesn't grow back by itself — townTrade.js updateRegrowth).
+// Plant a seed: PLANTER_SLOTS spots in each box, a little dirt pile on its soil, with the veg on
+// it growing from tiny to full size in a town day (VEG_DRY_S), or in VEG_WET_S while its soil is
+// wet; then Pick your veg. The water: a hose's tap stands by each field / plot, shown only by land the player owns
 // (a grabbable — townGrab.js: Grab the hose with empty hands / Drop it; the player can't walk
 // further than HOSE_LENGTH from that tap meanwhile), held in the right hand and aimed with the
 // gyro like the sword (no gyro: where the player faces); Water — the Block bar's place on the
@@ -27,7 +30,8 @@ import { firstName } from './townPeople.js';
 import { createVeg, VEG_KINDS } from '../items/vegModels.js';
 import { createPlanterBox, planterSoilY } from '../items/planterBox.js';
 import {
-  FIELD_ACT_DIST, FIELD_PRICE, HOSE_GRAB_DIST, HOSE_LENGTH, HOSE_SPEED, HOSE_SPLASH_R, PLANTER_SLOTS, PLANTER_WOOD,
+  FIELD_ACT_DIST, FIELD_BOX_H, FIELD_BOX_LEN, FIELD_BOX_W, FIELD_PRICE, FIELD_ROW_GAP, FIELD_SLOT_GAP,
+  SEED_PICKUP_DIST, HOSE_GRAB_DIST, HOSE_LENGTH, HOSE_SPEED, HOSE_SPLASH_R, PLANTER_SLOTS, PLANTER_WOOD,
   PLANT_DIST, PLOT_ACT_DIST, PLOT_PLANTERS, PLOT_PRICE, SEEDS_MAX, SOIL_DRY_S,
   VEG_DRY_S, VEG_MAX, VEG_PICK_DIST, VEG_WET_S, WATER_SOAK_S, dist2,
 } from './townConfig.js';
@@ -40,15 +44,16 @@ const DRY_COLOR = new THREE.Color(0x8a6a45);
 const WET_COLOR = new THREE.Color(0x43301d);
 const GYRO_MAX_AGE_MS = 500;        // (as playerModel.js: older, the gyro's not live)
 const HOSE_REEL_UP = 0.55;          // m — the hose leaves the tap this high
-// A plot's planter boxes (plot-local, axis-aligned — long along X): their middles' z, size, and
-// the seed spots along each
-const PLOT_BOX_Z = [-1.5, 0, 1.5];
-const PLOT_BOX_LEN = 2.2;
-const PLOT_BOX_W = 0.62;
-const PLOT_BOX_H = 0.42;
-const PLOT_SLOT_X = [-0.7, 0, 0.7];
-const PLOT_SIGN = { x: -1.9, z: 1.9 };  // the signpost, from the plot's middle
-const PLOT_STAKES = [[-1.5, -2.2], [1.5, -2.2], [-1.5, 2.2], [1.5, 2.2]];
+// A plot's planter boxes (plot-local, axis-aligned — long along X), laid out as a field's
+// (townLayout.js): their middles' z, size, and the seed spots along each
+const PLOT_BOX_Z = [-FIELD_ROW_GAP, 0, FIELD_ROW_GAP];
+const PLOT_BOX_LEN = FIELD_BOX_LEN;
+const PLOT_BOX_W = FIELD_BOX_W;
+const PLOT_BOX_H = FIELD_BOX_H;
+const PLOT_SLOT_X = Array.from({ length: PLANTER_SLOTS }, (_, k) => (k - (PLANTER_SLOTS - 1) / 2) * FIELD_SLOT_GAP);
+const PLOT_SIGN = { x: -2.5, z: 0 };    // the signpost, from the plot's middle (past its boxes' end)
+const PLOT_STAKES = [[-2.1, -1.8], [2.1, -1.8], [-2.1, 1.8], [2.1, 1.8]];
+const SEED_DROPS_MAX = 16;              // seeds lying about at once (the oldest go)
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -61,7 +66,7 @@ const _FWD = new THREE.Vector3(0, 0, 1);
 export function installTownFarming(T, ctx) {
   T.fieldOwners = {};
   T.plotOwners = {};          // plot index → { k, n, b: planter boxes built }
-  T.veg = [];                 // the player's planted seeds: [{ x, z, p, b, s (plot, box, spot), g: 0..1 (1 ripe), w: s of wet soil left }]
+  T.veg = [];                 // the player's planted seeds: [{ x, z, p | f (plot | field), b, s (box / row, spot), g: 0..1 (1 ripe), w: s of wet soil left }]
   T.seeds = 0;
   T.hose = null;              // { tap, watering, dropAt } while the player holds it
   let farm = null;            // the meshes (buildFarm)
@@ -88,6 +93,12 @@ export function installTownFarming(T, ctx) {
     const o = boxSpot(i, b);
     return o && { x: o.x + PLOT_SLOT_X[k], z: o.z, y: o.soil };
   };
+  // A field's spot: where its crop (row b, spot k — townLayout.js f.crops order) lies
+  const fieldSlot = (i, b, k) => {
+    const c = fields()[i]?.crops?.[b * PLANTER_SLOTS + k];
+    return c && { x: c.x, z: c.z, y: c.mesh.position.y, crop: c };
+  };
+  const vegSpot = (v) => (Number.isInteger(v.f) ? fieldSlot(v.f, v.b, v.s) : slotSpot(v.p, v.b, v.s));
   // Every built planter box (anyone's — they're seen by all): { i, b, x, z, gy, soil }
   const builtBoxes = () => {
     const out = [];
@@ -146,8 +157,9 @@ export function installTownFarming(T, ctx) {
     farm = {
       group, fieldSigns: places.fields.map(() => ({ sign: null, text: '' })), live: [], piles: new Map(),
       pileGeo: new THREE.SphereGeometry(0.2, 10, 6).scale(1, 0.4, 1),
-      stemGeo: new THREE.ConeGeometry(0.09, 0.4, 5).translate(0, 0.2, 0),
-      stemMat: mat(0x5f9e3a),
+      seedGeo: new THREE.SphereGeometry(0.05, 8, 6).scale(1, 0.7, 1.5),
+      seedMat: mat(0x7a5230),
+      seedDrops: [],
       taps: [], plots: [], boxSig: '',
     };
     // A tap by every field and plot (shown once it's the player's)
@@ -232,10 +244,19 @@ export function installTownFarming(T, ctx) {
   };
   // (+ the farmers' fields: each one block over its three rows of boxes — townLayout.js f.solid)
   const planterObstacles = () => (farm ? [
-    ...builtBoxes().map((o) => ({
-      box: true, owner: 'planter', x: o.x, z: o.z, hx: PLOT_BOX_LEN / 2, hz: PLOT_BOX_W / 2, yaw: 0,
-      y0: o.gy - 1, y1: o.gy + PLOT_BOX_H,
-    })),
+    // (a plot's built boxes as one block, like a field's — the gaps are too narrow to walk)
+    ...plots().map((p, i) => {
+      const n = builtOn(i);
+      if (!n) return null;
+      const bs = Array.from({ length: n }, (_, b) => boxSpot(i, b));
+      const z0 = bs[0].z;
+      const z1 = bs[n - 1].z;
+      const gy = Math.max(...bs.map((o) => o.gy));
+      return {
+        box: true, owner: 'planter', x: p.x, z: (z0 + z1) / 2, hx: PLOT_BOX_LEN / 2, hz: (z1 - z0) / 2 + PLOT_BOX_W / 2, yaw: 0,
+        y0: Math.min(...bs.map((o) => o.gy)) - 1, y1: gy + PLOT_BOX_H,
+      };
+    }).filter(Boolean),
     ...fields().filter((f) => f.solid && Number.isFinite(f.solid.top)).map((f) => ({
       box: true, owner: 'field', x: f.x, z: f.z, hx: f.solid.hx, hz: f.solid.hz, yaw: 0,
       y0: f.solid.top - f.solid.h - 1, y1: f.solid.top,
@@ -271,7 +292,7 @@ export function installTownFarming(T, ctx) {
       T.say(farmer, 'It\'s yours now — look after it!', { big: true });
       T.remember(farmer, 'customer');
     }
-    T.feedLine(`You bought ${farmer ? `${firstName(farmer.name)}'s` : 'the'} field. Its veg is yours to pick.`);
+    T.feedLine(`You bought ${farmer ? `${firstName(farmer.name)}'s` : 'the'} field. Its veg is yours to pick — then plant seeds where it was to grow more.`);
     renderSigns();
     T.save();
   };
@@ -407,11 +428,23 @@ export function installTownFarming(T, ctx) {
         }
       }
     }
+    // (+ the player's own fields: a spot whose crop's been picked)
+    for (const i of myFields()) {
+      for (let b = 0; b < 3; b++) {
+        for (let k = 0; k < PLANTER_SLOTS; k++) {
+          const at = fieldSlot(i, b, k);
+          if (!at || at.crop.ripe || T.veg.some((v) => v.f === i && v.b === b && v.s === k)) continue;
+          const d = dist2(p.x, p.z, at.x, at.z);
+          if (d < bd) { bd = d; best = { f: i, b, s: k, x: at.x, z: at.z }; }
+        }
+      }
+    }
     return best;
   };
   // (why not: the town book's Plant button)
   const plantHint = () => {
-    if (T.seeds <= 0) return 'No seeds — the farmers sell them.';
+    if (T.seeds <= 0) return 'No seeds — the farmers sell them, and felled trees drop some.';
+    if (myFields().length && !myPlots().some((i) => builtOn(i) > 0)) return 'Pick a veg in your field to free its spot, then plant there.';
     if (!myPlots().length) return `Buy some land by the fields (${PLOT_PRICE} coins at its signpost) and build a planter box on it.`;
     if (!myPlots().some((i) => builtOn(i) > 0)) return `Build a planter box on your land (${PLANTER_WOOD} wood).`;
     return 'Stand by one of your planter boxes with a free spot to plant.';
@@ -420,7 +453,9 @@ export function installTownFarming(T, ctx) {
     const at = plantSpot();
     if (!at) { T.feedLine(plantHint()); return; }
     T.seeds -= 1;
-    T.veg.push({ x: at.x, z: at.z, p: at.p, b: at.b, s: at.s, g: 0, w: 0 });
+    T.veg.push(Number.isInteger(at.f)
+      ? { x: at.x, z: at.z, f: at.f, b: at.b, s: at.s, g: 0, w: 0 }
+      : { x: at.x, z: at.z, p: at.p, b: at.b, s: at.s, g: 0, w: 0 });
     T.feedLine(T.veg.length === 1
       ? 'Planted a seed. It\'ll grow a veg by tomorrow — or water it with the hose and it\'s ready in no time.'
       : `Planted a seed (${T.seeds} left).`);
@@ -592,6 +627,9 @@ export function installTownFarming(T, ctx) {
       for (const o of boxes) {
         if (Math.abs(d.p.x - o.x) < PLOT_BOX_LEN / 2 && Math.abs(d.p.z - o.z) < PLOT_BOX_W / 2) gy = Math.max(gy, o.soil);
       }
+      for (const f of fields()) {
+        if (f.solid && Math.abs(d.p.x - f.x) < f.solid.hx && Math.abs(d.p.z - f.z) < f.solid.hz) gy = Math.max(gy, f.solid.top - f.solid.h + planterSoilY(f.solid.h));
+      }
       if (d.p.y > gy + 0.05) return d.p.y > gy - 20;
       for (const v of T.veg) {
         if (dist2(v.x, v.z, d.p.x, d.p.z) < HOSE_SPLASH_R) v.w = Math.min(SOIL_DRY_S, v.w + perDrop);
@@ -604,19 +642,17 @@ export function installTownFarming(T, ctx) {
   };
   // The planted seeds grow (a town day dry, VEG_WET_S wet); their dirt piles follow
   let ripeNoteAt = -1e9;
+  // (a dirt pile — darker while wet — with the vegetable it grows (vegetables.glb) lying on it,
+  // tiny when planted and full size when ripe)
   const makePile = () => {
     const g = new THREE.Group();
     const pile = new THREE.Mesh(farm.pileGeo, new THREE.MeshStandardMaterial({ color: DRY_COLOR, roughness: 1, metalness: 0 }));
     pile.receiveShadow = true;
     const sprout = new THREE.Group();
-    const stem = new THREE.Mesh(farm.stemGeo, farm.stemMat);
-    // the vegetable it grows (vegetables.glb), lying on the pile by the stem
-    const veg = createVeg(Math.floor(Math.random() * VEG_KINDS.length), 0.22);
-    veg.position.set(0.1, 0, 0.02);
+    const veg = createVeg(Math.floor(Math.random() * VEG_KINDS.length), 0.24);
     veg.rotation.y = Math.random() * Math.PI * 2;
-    stem.castShadow = true;
-    sprout.add(stem, veg);
-    sprout.position.y = 0.06;
+    sprout.add(veg);
+    sprout.position.y = 0.05;
     g.add(pile, sprout);
     farm.group.add(g);
     return { g, pile, sprout, veg, wet: -1 };
@@ -643,22 +679,69 @@ export function installTownFarming(T, ctx) {
       let m = farm.piles.get(v);
       if (!m) {
         m = makePile();
-        const at = slotSpot(v.p, v.b, v.s);
+        const at = vegSpot(v);
         m.g.position.set(v.x, at ? at.y : T.groundAt(v.x, v.z), v.z);
         m.g.rotation.y = (v.x * 7.3 + v.z * 3.1) % (Math.PI * 2);
         farm.piles.set(v, m);
       }
       const wet = v.w > 0 ? 1 : 0;
       if (wet !== m.wet) { m.wet = wet; m.pile.material.color.copy(wet ? WET_COLOR : DRY_COLOR); }
-      m.sprout.scale.setScalar(0.15 + 0.85 * v.g);
-      m.veg.visible = v.g > 0.6;
+      m.sprout.scale.setScalar(0.12 + 0.88 * v.g);
     }
+  };
+
+  // ── Seeds lying about (dropped by a felled tree — townTrees.js): walk over them to pick up ──
+  const dropSeeds = (x, z, n = 1) => {
+    if (!farm) return;
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.3 + Math.random() * 0.6;
+      const sx = x + Math.cos(a) * r;
+      const sz = z + Math.sin(a) * r;
+      const water = ctx.getWaterY?.(sx, sz);
+      const gy = T.groundAt(sx, sz);
+      if (water != null && water > gy + 0.05) continue;
+      const mesh = new THREE.Group();
+      for (let j = 0; j < 3; j++) {
+        const seed = new THREE.Mesh(farm.seedGeo, farm.seedMat);
+        seed.position.set((j - 1) * 0.07, 0, (j % 2) * 0.05);
+        seed.rotation.y = j * 1.9;
+        seed.castShadow = true;
+        mesh.add(seed);
+      }
+      mesh.position.set(sx, gy + 0.05, sz);
+      farm.group.add(mesh);
+      farm.seedDrops.push({ mesh, x: sx, z: sz, gy, at: T.simT + k * 0.1 });
+      if (farm.seedDrops.length > SEED_DROPS_MAX) farm.seedDrops.shift().mesh.removeFromParent();
+    }
+  };
+  let seedFullNoteAt = -1e9;
+  const updateSeedDrops = () => {
+    if (!farm?.seedDrops.length) return;
+    const p = T.playerPos();
+    farm.seedDrops = farm.seedDrops.filter((d) => {
+      const t = T.simT - d.at;
+      // (they pop out, then bob and turn a little so they're seen)
+      d.mesh.position.y = d.gy + 0.05 + Math.max(0, Math.sin(Math.min(1, t * 2.5) * Math.PI) * 0.4) + 0.03 * Math.sin(t * 3);
+      d.mesh.rotation.y = t * 1.2;
+      if (t < 0.4 || T.inRoom || T.jail || ctx.isPlayerDead?.() || dist2(p.x, p.z, d.x, d.z) > SEED_PICKUP_DIST) return true;
+      if (T.seeds >= SEEDS_MAX) {
+        if (T.simT - seedFullNoteAt > 6) { seedFullNoteAt = T.simT; T.feedLine(`You can carry ${SEEDS_MAX} seeds.`); }
+        return true;
+      }
+      T.seeds += 1;
+      d.mesh.removeFromParent();
+      ctx.playSfx?.('pickup');
+      T.feedLine(`+1 Seed (${T.seeds})`);
+      return false;
+    });
   };
   const updateFarm = (dt) => {
     if (!T.ready) return;
     updateHose(dt);
     updateDrops(dt);
     updateVeg(dt);
+    updateSeedDrops();
     renderSigns();
   };
 
@@ -688,17 +771,35 @@ export function installTownFarming(T, ctx) {
       const b = Math.max(0, Math.min(PLOT_PLANTERS, Math.floor(Number(r.b) || 0)));
       T.plotOwners[i] = { k: myKey(), n: ctx.getPlayerName(), b: Math.max(b, T.plotOwners[i]?.b || 0) };
     }
-    // What's planted: only in the player's planter boxes (a seed planted anywhere by an older
-    // save goes back in the bag)
+    // The player's own fields' crops: which were picked (they don't grow back by themselves)
+    for (const i of myFields()) {
+      const flags = typeof own?.fieldCrops?.[i] === 'string' ? own.fieldCrops[i] : null;
+      (fields()[i]?.crops ?? []).forEach((c, k) => {
+        c.ripe = !flags || flags[k] !== '0';
+        c.mesh.visible = c.ripe;
+        c.mesh.scale.setScalar(1);
+      });
+    }
+    // What's planted: only in the player's planter boxes / own fields' spots (a seed planted
+    // anywhere by an older save goes back in the bag)
     const seen = new Set();
     T.veg = [];
     for (const v of (Array.isArray(own?.veg) ? own.veg : []).slice(0, VEG_MAX)) {
-      const key = `${v?.p}.${v?.b}.${v?.s}`;
-      const at = Number.isInteger(v?.p) && ownsPlot(v.p) && v.b < builtOn(v.p) && v.s >= 0 && v.s < PLANTER_SLOTS
-        && !seen.has(key) ? slotSpot(v.p, v.b, v.s) : null;
+      const inField = Number.isInteger(v?.f);
+      const key = `${inField ? `f${v.f}` : v?.p}.${v?.b}.${v?.s}`;
+      const okSpot = Number.isInteger(v?.b) && Number.isInteger(v?.s) && v.s >= 0 && v.s < PLANTER_SLOTS && v.b >= 0 && !seen.has(key);
+      const at = !okSpot ? null
+        : inField ? (ownsField(v.f) && v.b < 3 ? fieldSlot(v.f, v.b, v.s) : null)
+          : (Number.isInteger(v.p) && ownsPlot(v.p) && v.b < builtOn(v.p) ? slotSpot(v.p, v.b, v.s) : null);
       if (!at) { T.seeds = Math.min(SEEDS_MAX, T.seeds + 1); continue; }
       seen.add(key);
-      T.veg.push({ x: at.x, z: at.z, p: v.p, b: v.b, s: v.s, g: Math.max(0, Math.min(1, Number(v.g) || 0)), w: Math.max(0, Math.min(SOIL_DRY_S, Number(v.w) || 0)) });
+      const g = Math.max(0, Math.min(1, Number(v.g) || 0));
+      const w = Math.max(0, Math.min(SOIL_DRY_S, Number(v.w) || 0));
+      if (inField) {
+        at.crop.ripe = false;
+        at.crop.mesh.visible = false;
+        T.veg.push({ x: at.x, z: at.z, f: v.f, b: v.b, s: v.s, g, w });
+      } else T.veg.push({ x: at.x, z: at.z, p: v.p, b: v.b, s: v.s, g, w });
     }
     renderSigns();
   };
@@ -706,18 +807,25 @@ export function installTownFarming(T, ctx) {
     seeds: T.seeds,
     myFields: myFields(),
     myPlots: myPlots().map((i) => ({ i, b: builtOn(i) })),
-    veg: T.veg.map((v) => ({ x: Math.round(v.x * 100) / 100, z: Math.round(v.z * 100) / 100, p: v.p, b: v.b, s: v.s, g: Math.round(v.g * 1000) / 1000, w: Math.round(v.w) })),
+    veg: T.veg.map((v) => ({ x: Math.round(v.x * 100) / 100, z: Math.round(v.z * 100) / 100, ...(Number.isInteger(v.f) ? { f: v.f } : { p: v.p }), b: v.b, s: v.s, g: Math.round(v.g * 1000) / 1000, w: Math.round(v.w) })),
+    // (the own fields' crops: '1' still there, '0' picked)
+    fieldCrops: Object.fromEntries(myFields().map((i) => [i, (fields()[i]?.crops ?? []).map((c) => (c.ripe ? '1' : '0')).join('')])),
   });
   const resetFarm = () => {
     T.dropHeld({ quiet: true });
-    if (farm) { farm.live = []; farm.drops.count = 0; }
+    if (farm) {
+      farm.live = [];
+      farm.drops.count = 0;
+      for (const d of farm.seedDrops) d.mesh.removeFromParent();
+      farm.seedDrops = [];
+    }
   };
 
   Object.assign(T, {
     // (the town book's Bag page: 🌱 Plant)
     plantSeed: plant, canPlant: () => !!plantSpot(), plantHint,
     buildFarm, farmActs, farmSnapshot, fieldOwner, handleFarmNet, resetFarm, restoreFarm,
-    updateFarm, planterObstacles, ownsPlot,
+    updateFarm, planterObstacles, ownsPlot, dropSeeds,
     applyFieldOwners: (f) => { T.fieldOwners = cleanOwners(f); renderSigns(); },
     applyPlotOwners: (p) => { T.plotOwners = cleanPlots(p); renderSigns(); },
   });

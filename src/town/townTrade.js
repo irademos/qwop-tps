@@ -124,13 +124,20 @@ export function installTownTrade(T, ctx) {
     T.feedLine(`+1 Veg (${T.goods.crops})`);
     if (T.fieldOwner(field) !== 'mine') T.questNote('pick');
   };
-  // Trees and crops grow back
+  // Crops grow back — a farmer's field's (from tiny to full size, as a planted seed); a field
+  // someone bought doesn't by itself: its owner plants seeds in it (townFarming.js)
   const updateRegrowth = () => {
-    for (const f of T.layout.places.fields) {
+    T.layout.places.fields.forEach((f, i) => {
+      const owned = !!T.fieldOwners?.[i];
       for (const c of f.crops) {
-        if (!c.ripe && T.simT > c.growAt) { c.ripe = true; c.mesh.visible = true; }
+        if (c.ripe) continue;
+        if (owned) { c.mesh.visible = false; continue; }
+        if (T.simT > c.growAt) { c.ripe = true; c.mesh.visible = true; c.mesh.scale.setScalar(1); continue; }
+        const k = 1 - (c.growAt - T.simT) / CROP_REGROW_S;
+        c.mesh.visible = k > 0.05;
+        c.mesh.scale.setScalar(0.12 + 0.88 * Math.max(0, k));
       }
-    }
+    });
   };
 
   // ── The houses' rooms (townRooms.js — under the map, entered through the houses' doors):
