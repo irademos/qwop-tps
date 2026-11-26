@@ -1,7 +1,8 @@
 // Town: chopping trees with the sword. Each hit shakes the tree, throws wood chips and cuts the
 // notch bigger; TREE_FELL_HITS of them fell it: it tips over away from the player, speeding up
 // as it goes, thuds down and bounces, lies there a moment and sinks away — leaving a stump and
-// TREE_LOGS logs along where it lay. A sword hit splits a log: +1 wood. The stump sprouts a
+// TREE_LOGS logs along where it lay, and TREE_SEEDS seeds by its crown (T.dropSeeds —
+// townFarming.js; Town only). A sword hit splits a log: +1 wood. The stump sprouts a
 // sapling after TREE_STUMP_S, which grows back into the tree over TREE_GROW_S. The stump is the
 // pack's own stump model (STUMP_RE — a copy, sized to the trunk; a plain cylinder without it).
 //
@@ -16,7 +17,7 @@ import { measureTrunk as measureTrunkOf } from '../environment/treeTrunks.js';
 import { WOOD_LOG_GEO, woodLogMaterials } from '../items/woodLog.js';
 import {
   CHOP_REACH, LOG_LENGTH, TREE_FELL_HITS, TREE_GROW_S, TREE_LIE_S, TREE_LOGS, TREE_SINK_S,
-  TREE_STUMP_S, dist2,
+  TREE_SEEDS, TREE_STUMP_S, dist2,
 } from './townConfig.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -363,6 +364,11 @@ export function installTownTrees(T, ctx) {
       case 'lying':
         if (now < t.until) return;
         spawnLogs(t);
+        // (seeds from its crown, to plant — Town's farming; none in Story)
+        if (T.dropSeeds) {
+          const d = t.height * 0.7;
+          T.dropSeeds(t.bx + t.dirX * d, t.bz + t.dirZ * d, TREE_SEEDS);
+        }
         t.state = 'sinking';
         t.from = now;
         return;

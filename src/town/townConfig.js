@@ -152,25 +152,34 @@ export const CABIN_RE = /(^|\/)cabin\.glb$/i;    // the wizard's cabin up the mo
 export const WIZARD_CABIN_STALL = 3.6;      // m out past the cabin's walls (its bounding radius): his stall
 export const WIZARD_HUT_DIST = 4;           // m from the stall: where the wizard sleeps (his tent)
 // Farming (townFarming.js): the farmers' fields can be bought (at the field, no talk needed);
-// seeds from the shop are planted anywhere — a dirt pile that grows one veg in a town day, or
-// in VEG_WET_S once the hose has soaked it
+// seeds (from the farmers, or dropped by felled trees) are planted in the player's own planter
+// boxes — a veg that grows from tiny to full size in a town day, or in VEG_WET_S once soaked
 export const FIELD_PRICE = 100;             // coins (to the field's farmer)
 export const FIELD_ACT_DIST = 4.5;          // m from a field's middle: 🌱 Buy this field
 // Plots of land by the fields (townLayout.js / townFarming.js): bought at their signpost (cheaper
 // than a field), then up to PLOT_PLANTERS planter boxes built on one, PLANTER_WOOD wood each from
 // the bag; seeds are planted only in the player's own planter boxes (PLANTER_SLOTS each)
+// A planter box — the fields' and the ones built on land alike (townLayout.js / townFarming.js):
+// three boxes in rows FIELD_ROW_GAP apart, PLANTER_SLOTS crops along each, FIELD_SLOT_GAP apart
+export const FIELD_BOX_LEN = 3.6;           // m, long along x…
+export const FIELD_BOX_W = 0.62;            // m …and wide
+export const FIELD_BOX_H = 0.36;            // m tall
+export const FIELD_ROW_GAP = 1.1;           // m between a field's (a plot's) rows of boxes
+export const FIELD_SLOT_GAP = 0.7;          // m between the crops along a box
 export const PLOT_COUNT = 4;                // plots for sale round the town's fields
 export const PLOT_PRICE = 40;               // coins
 export const PLOT_ACT_DIST = 3;             // m from a plot's middle / its signpost: Buy this land, Build a planter box
 export const PLOT_PLANTERS = 3;             // planter boxes a plot holds
 export const PLANTER_WOOD = 3;              // wood a planter box takes
-export const PLANTER_SLOTS = 3;             // seeds a planter box holds
-export const PLANT_DIST = 1.6;              // m from a free spot in a planter box: Plant a seed
+export const PLANTER_SLOTS = 5;             // seeds a planter box holds
+export const PLANT_DIST = 1.9;              // m from a free spot in a planter box: Plant a seed (the middle row from beside)
 export const VEG_DRY_S = 480;               // s for a seed to grow unwatered (a town day: 1440 min / MINUTES_PER_SEC)
 export const VEG_WET_S = 40;                // s while its soil is wet
-export const VEG_MAX = 24;                  // seeds planted at once
-export const VEG_PICK_DIST = 1.4;           // m — 🥕 Pick your veg
+export const VEG_MAX = 90;                  // seeds planted at once
+export const VEG_PICK_DIST = 1.9;           // m — 🥕 Pick your veg
 export const SEEDS_MAX = 30;
+export const TREE_SEEDS = 2;                // seeds a felled tree drops by its crown (walk over them: +1 seed each)
+export const SEED_PICKUP_DIST = 1.2;        // m
 export const SOIL_DRY_S = 60;               // s a soaked dirt pile stays wet
 export const WATER_SOAK_S = 1.2;            // s of hose on a pile to soak it
 export const HOSE_LENGTH = 16;              // m the hose reaches from the tap
